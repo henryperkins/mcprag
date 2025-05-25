@@ -1,3 +1,12 @@
+# Python
 .venv/
+venv/
 node_modules/
 .env
+example-repo/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.log

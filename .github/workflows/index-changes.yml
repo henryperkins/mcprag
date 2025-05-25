@@ -1,0 +1,82 @@
+name: "Diff-Index Code to Azure Search"
+
+on:
+  push:
+    paths: 
+      - "**/*.py"
+      - "**/*.js" 
+      - "**/*.ts"
+    branches:
+      - main
+      - develop
+  pull_request:
+    paths:
+      - "**/*.py"
+      - "**/*.js"
+      - "**/*.ts"
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need depth for diff
+
+      - name: Detect changed code files
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - '**/*.py'
+              - '**/*.js'
+              - '**/*.ts'
+
+      - name: Set up Python
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Node.js dependencies
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          npm ci
+
+      - name: Make parse script executable
+        if: steps.changes.outputs.code == 'true'
+        run: chmod +x parse_js.mjs
+
+      - name: Re-index changed files
+        if: steps.changes.outputs.code == 'true'
+        env:
+          ACS_ENDPOINT: ${{ secrets.ACS_ENDPOINT }}
+          ACS_ADMIN_KEY: ${{ secrets.ACS_ADMIN_KEY }}
+        run: |
+          # Get list of changed files
+          CHANGED_FILES=$(echo "${{ steps.changes.outputs.code_files }}" | tr '\n' ' ')
+          echo "Changed files: $CHANGED_FILES"
+          
+          # Run indexer with changed files
+          if [ ! -z "$CHANGED_FILES" ]; then
+            python smart_indexer.py --files $CHANGED_FILES
+          fi
+
+      - name: Report indexing status
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          echo "✅ Successfully re-indexed changed code files"
