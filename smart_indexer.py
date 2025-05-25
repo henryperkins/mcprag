@@ -11,6 +11,14 @@ from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
 
+# Add import for vector embeddings
+try:
+    from vector_embeddings import VectorEmbedder
+    VECTOR_SUPPORT = True
+except ImportError:
+    VECTOR_SUPPORT = False
+    print("Warning: Vector embeddings not available. Install openai package for vector support.")
+
 load_dotenv()
 
 class CodeChunker:
@@ -22,6 +30,16 @@ class CodeChunker:
             index_name="codebase-mcp-sota",
             credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
         )
+
+        # Initialize embedder if available
+        self.embedder = None
+        if VECTOR_SUPPORT and os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY"):
+            try:
+                self.embedder = VectorEmbedder()
+                print("✅ Vector embeddings enabled")
+            except Exception as e:
+                print(f"Warning: Could not initialize vector embedder: {e}")
+                self.embedder = None
 
     def chunk_python_file(self, content: str, file_path: str) -> List[Dict]:
         """Extract semantic chunks from Python code."""
@@ -165,13 +183,24 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
                             f"{repo_name}:{file_path}:{i}".encode()
                         ).hexdigest()
 
-                        documents.append({
+                        doc = {
                             "id": doc_id,
                             "repo_name": repo_name,
                             "file_path": str(file_path),
                             "language": language,
                             **chunk
-                        })
+                        }
+
+                        # Add vector embedding if available
+                        if self.embedder:
+                            embedding = self.embedder.generate_code_embedding(
+                                chunk["code_chunk"],
+                                chunk["semantic_context"]
+                            )
+                            if embedding:
+                                doc["code_vector"] = embedding
+
+                        documents.append(doc)
 
                         if len(documents) >= 50:
                             self.client.merge_or_upload_documents(documents)
@@ -212,13 +241,24 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
                         f"{repo_name}:{file_path}:{i}".encode()
                     ).hexdigest()
 
-                    documents.append({
+                    doc = {
                         "id": doc_id,
                         "repo_name": repo_name,
                         "file_path": str(file_path),
                         "language": language,
                         **chunk
-                    })
+                    }
+
+                    # Add vector embedding if available
+                    if self.embedder:
+                        embedding = self.embedder.generate_code_embedding(
+                            chunk["code_chunk"],
+                            chunk["semantic_context"]
+                        )
+                        if embedding:
+                            doc["code_vector"] = embedding
+
+                    documents.append(doc)
 
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")

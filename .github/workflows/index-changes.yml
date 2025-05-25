@@ -1,4 +1,4 @@
-name: "GitHub API + Azure Search Integration"
+name: "Enhanced GitHub Azure Integration"
 
 on:
   push:
@@ -6,121 +6,62 @@ on:
       - "**/*.py"
       - "**/*.js"
       - "**/*.ts"
-    branches:
-      - main
-      - develop
-  pull_request:
-    paths:
-      - "**/*.py"
-      - "**/*.js"
-      - "**/*.ts"
 
 jobs:
-  index-local:
-    name: "Local File Indexing"
+  index-changes:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Detect changed code files
-        id: changes
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            code:
-              - '**/*.py'
-              - '**/*.js'
-              - '**/*.ts'
-
-      - name: Set up Python
-        if: steps.changes.outputs.code == 'true'
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Set up Node.js
-        if: steps.changes.outputs.code == 'true'
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install dependencies
-        if: steps.changes.outputs.code == 'true'
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
           npm ci
-          chmod +x parse_js.mjs
 
-      - name: Index changed files (Local)
-        if: steps.changes.outputs.code == 'true'
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+            **/*.py
+            **/*.js
+            **/*.ts
+
+      - name: Index changed files locally
+        if: steps.changed-files.outputs.any_changed == 'true'
         env:
           ACS_ENDPOINT: ${{ secrets.ACS_ENDPOINT }}
           ACS_ADMIN_KEY: ${{ secrets.ACS_ADMIN_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         run: |
-          CHANGED_FILES=$(echo "${{ steps.changes.outputs.code_files }}" | tr '\n' ' ')
-          echo "📁 Local indexing - Changed files: $CHANGED_FILES"
+          echo "Changed files: ${{ steps.changed-files.outputs.all_changed_files }}"
+          python smart_indexer.py --files ${{ steps.changed-files.outputs.all_changed_files }}
 
-          if [ ! -z "$CHANGED_FILES" ]; then
-            python smart_indexer.py --files $CHANGED_FILES --repo-name "${{ github.repository }}"
-          fi
-
-  index-remote:
-    name: "GitHub API Remote Indexing"
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install requests
-
-      - name: Index via GitHub API
+      - name: Index via GitHub API (backup)
+        if: failure()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACS_ENDPOINT: ${{ secrets.ACS_ENDPOINT }}
           ACS_ADMIN_KEY: ${{ secrets.ACS_ADMIN_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         run: |
-          echo "🌐 Remote indexing via GitHub API"
-
-          # Extract owner and repo from GITHUB_REPOSITORY
-          OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
-          REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)
-
-          # Get changed files using GitHub API
-          if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            echo "📊 Comparing ${{ github.event.before }} to ${{ github.event.after }}"
-            python -c "
-from github_azure_integration import GitHubAzureIntegrator
-integrator = GitHubAzureIntegrator()
-files = integrator.get_changed_files_from_push('$OWNER', '$REPO', '${{ github.event.before }}', '${{ github.event.after }}')
-if files:
-    integrator.index_changed_files_remote('$OWNER', '$REPO', files)
-    print(f'✅ Indexed {len(files)} files via GitHub API')
-else:
-    print('ℹ️ No code files changed')
-"
-          else
-            echo "🔄 Initial commit - indexing entire repository"
-            python -c "
-from github_azure_integration import GitHubAzureIntegrator
-integrator = GitHubAzureIntegrator()
-integrator.index_remote_repository('$OWNER', '$REPO')
-"
-          fi
-
-      - name: Report status
-        run: |
-          echo "✅ GitHub API + Azure Search integration completed"
+          python github_azure_integration.py \
+            --owner ${{ github.repository_owner }} \
+            --repo ${{ github.event.repository.name }} \
+            --files ${{ steps.changed-files.outputs.all_changed_files }}

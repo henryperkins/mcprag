@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "azure-code-search": {
+            "command": "python",
+            "args": [
+                "/home/hperkins/mcprag/mcp_server_sota.py"
+            ],
+            "env": {
+                "ACS_ENDPOINT": "https://mcprag-search.search.windows.net",
+                "ACS_ADMIN_KEY": "rLimu7VZq1P4j99xsStwqYjYQ4SqU9ydOK3hLVTq7qAzSeCsmXKD"
+            }
+        }
+    }
+}

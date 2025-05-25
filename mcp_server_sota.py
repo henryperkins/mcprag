@@ -4,11 +4,23 @@ import json
 import sys
 from typing import Optional, List, Dict, Any
 from azure.search.documents import SearchClient
+from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
 import os
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from fastapi import FastAPI
+
+# Add import for vector embeddings
+try:
+    from vector_embeddings import VectorEmbedder
+    VECTOR_SUPPORT = True
+except ImportError:
+    VECTOR_SUPPORT = False
 
 load_dotenv()
+
+app = FastAPI()
 
 # MCP Protocol Implementation
 class MCPServer:
@@ -18,6 +30,15 @@ class MCPServer:
             index_name="codebase-mcp-sota",
             credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
         )
+
+        # Initialize embedder if available
+        self.embedder = None
+        if VECTOR_SUPPORT and (os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY")):
+            try:
+                self.embedder = VectorEmbedder()
+                print("✅ Vector search enabled in MCP server")
+            except Exception as e:
+                print(f"Warning: Could not initialize vector embedder: {e}")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle MCP protocol requests."""
@@ -49,7 +70,7 @@ class MCPServer:
                     "tools": [
                         {
                             "name": "search_code",
-                            "description": "Search for code snippets using Azure Cognitive Search with semantic understanding",
+                            "description": "Search for code snippets using Azure Cognitive Search with semantic understanding and vector search",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -133,189 +154,183 @@ class MCPServer:
                 }
             }
 
-search_client = SearchClient(
-    endpoint=os.getenv("ACS_ENDPOINT"),
-    index_name="codebase-mcp-sota",
-    credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
-)
+    async def search_code_enhanced(self, query: str, intent: Optional[str] = None, language: Optional[str] = None) -> List[Dict]:
+        """Enhanced search with vector support."""
+        # Enhance query based on intent
+        enhanced_query = self._enhance_query_by_intent(query, intent)
 
+        # Build search parameters
+        search_params = {
+            "search_text": enhanced_query,
+            "query_type": "semantic",
+            "semantic_configuration_name": "mcp-semantic",
+            "top": 10,
+            "select": [
+                "id", "repo_name", "file_path", "language", "code_chunk",
+                "semantic_context", "function_signature", "imports_used",
+                "calls_functions", "chunk_type", "line_range"
+            ]
+        }
+
+        # Add vector search if embedder is available
+        if self.embedder:
+            query_embedding = self.embedder.generate_embedding(enhanced_query)
+            if query_embedding:
+                vector_query = VectorizedQuery(
+                    vector=query_embedding,
+                    k_nearest_neighbors=50,
+                    fields="code_vector"
+                )
+                search_params["vector_queries"] = [vector_query]
+
+        # Add language filter if specified
+        if language:
+            search_params["filter"] = f"language eq '{language}'"
+
+        # Execute search
+        results = list(self.search_client.search(**search_params))
+
+        return results
+
+    def _enhance_query_by_intent(self, query: str, intent: Optional[str]) -> str:
+        """Enhance query based on search intent."""
+        if not intent:
+            return query
+
+        intent_prefixes = {
+            "implement": f"implementation example code for {query}",
+            "debug": f"error handling exception catching for {query}",
+            "understand": f"explanation documentation of {query}",
+            "refactor": f"refactoring patterns best practices for {query}"
+        }
+
+        return intent_prefixes.get(intent, query)
+
+    def format_search_results(self, results: List[Dict]) -> str:
+        """Format search results for MCP response."""
+        if not results:
+            return "No results found."
+
+        formatted = f"Found {len(results)} code matches:\n\n"
+
+        for i, result in enumerate(results[:5], 1):  # Top 5 results
+            formatted += f"**Result {i}**\n"
+            formatted += f"- File: `{result.get('file_path', 'Unknown')}`\n"
+            formatted += f"- Function: `{result.get('function_signature', 'N/A')}`\n"
+            formatted += f"- Repository: `{result.get('repo_name', 'Unknown')}`\n"
+            formatted += f"- Language: {result.get('language', 'Unknown')}\n"
+            formatted += f"- Context: {result.get('semantic_context', '')[:200]}...\n"
+            formatted += f"- Score: {result.get('@search.score', 0):.2f}\n\n"
+
+            # Include code snippet
+            code = result.get('code_chunk', '')
+            if code:
+                formatted += "```" + result.get('language', '') + "\n"
+                formatted += code[:500] + ("..." if len(code) > 500 else "") + "\n"
+                formatted += "```\n\n"
+
+        return formatted
+
+
+# FastAPI endpoints for testing
 class MCPSearchRequest(BaseModel):
     input: str = Field(..., description="Natural language query or code context")
     context: Optional[Dict] = Field(None, description="Current code context from Claude")
     intent: Optional[str] = Field(None, description="Search intent: implement/debug/understand/refactor")
 
-class ContextualResult(BaseModel):
-    file: str
-    function: str
-    code: str
-    relevance: float
-    context: str
-    related_functions: List[str]
-    imports: List[str]
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "version": "SOTA"}
+    return {"status": "healthy", "version": "SOTA with Vector Support"}
+
 
 @app.post("/mcp-query")
 async def mcp_contextual_search(request: MCPSearchRequest):
     """SOTA contextual code search for Claude Code."""
+    server = MCPServer()
 
     try:
-        # Enhanced query based on intent
-        enhanced_query = _enhance_query_by_intent(request.input, request.intent)
+        results = await server.search_code_enhanced(
+            query=request.input,
+            intent=request.intent
+        )
 
-        # Multi-stage retrieval for better context
-        search_params = {
-            "search_text": enhanced_query,
-            "query_type": "semantic",
-            "semantic_configuration_name": "mcp-semantic",
-            "vector_queries": [
-                {
-                    "kind": "text",
-                    "text": enhanced_query,
-                    "fields": "semantic_context",
-                    "k": 20,  # Get more candidates
-                    "threshold": {"kind": "vectorSimilarity", "value": 0.7}
-                },
-                {
-                    "kind": "text",
-                    "text": f"code implementation: {request.input}",
-                    "fields": "code_chunk",
-                    "k": 10
-                }
-            ],
-            "query_rewrites": "generative|count-3",  # Generate query variations
-            "hybrid_search": {
-                "max_text_recall_size": 2000,
-                "count_and_facet_mode": "countAllResults"
-            },
-            "top": 15,
-            "select": [
-                "file_path", "function_signature", "code_chunk",
-                "semantic_context", "imports_used", "calls_functions",
-                "chunk_type", "line_range"
-            ]
-        }
-
-        # Add context-aware filters
-        if request.context:
-            filters = _build_contextual_filters(request.context)
-            if filters:
-                search_params["filter"] = filters
-
-        results = search_client.search(**search_params)
-
-        # Process results with cross-reference enhancement
+        # Process results for MCP context
         mcp_context = []
         seen_functions = set()
 
         for result in results:
-            if result["function_signature"] not in seen_functions:
-                seen_functions.add(result["function_signature"])
+            if result.get("function_signature") not in seen_functions:
+                seen_functions.add(result.get("function_signature"))
 
-                # Build rich context for Claude
+                # Build rich context
                 context_entry = {
-                    "file": result["file_path"],
-                    "function": result["function_signature"],
-                    "code": result["code_chunk"],
+                    "file": result.get("file_path"),
+                    "function": result.get("function_signature"),
+                    "code": result.get("code_chunk"),
                     "relevance": result.get("@search.score", 0),
-                    "context": result["semantic_context"],
+                    "context": result.get("semantic_context"),
                     "related_functions": result.get("calls_functions", []),
                     "imports": result.get("imports_used", []),
-                    "line_range": result["line_range"],
-                    "type": result["chunk_type"]
+                    "line_range": result.get("line_range"),
+                    "type": result.get("chunk_type")
                 }
 
                 mcp_context.append(context_entry)
 
-                # Stop at 5 highly relevant results for Claude's context window
-                if len(mcp_context) >= 5 and context_entry["relevance"] > 2.0:
+                # Limit results for context window
+                if len(mcp_context) >= 5:
                     break
-
-        # Add cross-file context if needed
-        if request.intent in ["implement", "debug"]:
-            mcp_context = _add_dependency_context(mcp_context, search_client)
 
         return {
             "context": mcp_context,
             "query_info": {
                 "original": request.input,
-                "enhanced": enhanced_query,
                 "intent": request.intent,
-                "total_results": len(mcp_context)
+                "total_results": len(mcp_context),
+                "vector_search_enabled": server.embedder is not None
             }
         }
 
     except Exception as e:
         return {"context": [], "error": str(e)}
 
-def _enhance_query_by_intent(query: str, intent: Optional[str]) -> str:
-    """Enhance query based on search intent."""
-    if not intent:
-        return query
 
-    intent_prefixes = {
-        "implement": f"implementation example code for {query}",
-        "debug": f"error handling exception catching for {query}",
-        "understand": f"explanation documentation of {query}",
-        "refactor": f"refactoring patterns best practices for {query}"
-    }
+# MCP Protocol server main loop
+async def run_mcp_server():
+    """Run the MCP server reading from stdin and writing to stdout."""
+    server = MCPServer()
 
-    return intent_prefixes.get(intent, query)
+    while True:
+        try:
+            # Read line from stdin
+            line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+            if not line:
+                break
 
-def _build_contextual_filters(context: Dict) -> Optional[str]:
-    """Build filters from Claude's current context."""
-    filters = []
+            # Parse JSON request
+            request = json.loads(line.strip())
 
-    if context.get("current_file"):
-        # Prioritize same repository
-        repo = context["current_file"].split("/")[0]
-        filters.append(f"repo_name eq '{repo}'")
+            # Handle request
+            response = await server.handle_request(request)
 
-    if context.get("current_language"):
-        filters.append(f"language eq '{context['current_language']}'")
+            # Write response to stdout
+            print(json.dumps(response))
+            sys.stdout.flush()
 
-    if context.get("imported_modules"):
-        # Find code using similar imports
-        import_filters = [f"imports_used/any(i: i eq '{imp}')"
-                         for imp in context["imported_modules"][:3]]
-        if import_filters:
-            filters.append(f"({' or '.join(import_filters)})")
+        except Exception as e:
+            error_response = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                }
+            }
+            print(json.dumps(error_response))
+            sys.stdout.flush()
 
-    return " and ".join(filters) if filters else None
-
-def _add_dependency_context(results: List[Dict], client) -> List[Dict]:
-    """Add related code that the main results depend on."""
-    # Collect all called functions
-    all_calls = set()
-    for r in results[:3]:  # Top 3 results
-        all_calls.update(r.get("related_functions", []))
-
-    if all_calls:
-        # Find implementations of called functions
-        dep_query = " OR ".join([f'function_signature:"{fn}"' for fn in list(all_calls)[:5]])
-
-        dep_results = client.search(
-            search_text=dep_query,
-            top=3,
-            select=["file_path", "function_signature", "code_chunk"]
-        )
-
-        for dep in dep_results:
-            results.append({
-                "file": dep["file_path"],
-                "function": dep["function_signature"],
-                "code": dep["code_chunk"],
-                "relevance": 0.5,  # Lower relevance for dependencies
-                "context": "Dependency function",
-                "related_functions": [],
-                "imports": [],
-                "type": "dependency"
-            })
-
-    return results
 
 if __name__ == "__main__":
+    # If run directly, start FastAPI server for testing
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)

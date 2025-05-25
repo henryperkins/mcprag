@@ -1,219 +1,327 @@
 #!/usr/bin/env python3
 """
-GitHub Webhook Handler for Real-time Azure Indexing
-Handles push events, pull requests, and other GitHub events to trigger indexing.
+GitHub Webhook Handler for Real-time Code Indexing
+Processes push and pull request events to update Azure Cognitive Search
 """
-
 import os
-import json
 import hmac
 import hashlib
+import json
+from datetime import datetime
+from typing import Dict, Optional
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from pydantic import BaseModel
-from typing import Dict, List, Optional
-import uvicorn
+from fastapi.responses import JSONResponse
+from github_azure_integration import GitHubAzureIntegrator
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
-app = FastAPI(title="GitHub Webhook → Azure Search")
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class WebhookPayload(BaseModel):
-    action: Optional[str] = None
-    repository: Dict
-    commits: Optional[List[Dict]] = None
-    pull_request: Optional[Dict] = None
-    before: Optional[str] = None
-    after: Optional[str] = None
+app = FastAPI(title="GitHub Webhook Handler")
+integrator = GitHubAzureIntegrator()
+executor = ThreadPoolExecutor(max_workers=5)
 
-def verify_github_signature(payload_body: bytes, signature: str) -> bool:
+# Store repository indexing status
+indexing_status = {}
+
+def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
     """Verify GitHub webhook signature."""
-    webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET", "").encode()
-    if not webhook_secret:
-        return True  # Skip verification if no secret set
-    
     expected_signature = hmac.new(
-        webhook_secret, payload_body, hashlib.sha256
+        secret.encode('utf-8'),
+        payload,
+        hashlib.sha256
     ).hexdigest()
-    
-    return hmac.compare_digest(f"sha256={expected_signature}", signature)
 
-async def process_push_event(payload: Dict, background_tasks: BackgroundTasks):
-    """Process GitHub push event."""
-    repository = payload["repository"]
-    owner = repository["owner"]["login"]
-    repo_name = repository["name"]
-    
-    # Get changed files from commits
-    changed_files = set()
-    for commit in payload.get("commits", []):
-        changed_files.update(commit.get("added", []))
-        changed_files.update(commit.get("modified", []))
-    
-    # Filter for code files
-    code_files = [f for f in changed_files if any(f.endswith(ext) for ext in ['.py', '.js', '.ts'])]
-    
-    if code_files:
-        print(f"🔄 Push event: {len(code_files)} code files changed in {owner}/{repo_name}")
-        
-        # Schedule background indexing
-        background_tasks.add_task(
-            index_changed_files_background,
-            owner, repo_name, list(code_files)
-        )
-    
-    return {"status": "processing", "files": len(code_files)}
-
-async def process_pull_request_event(payload: Dict, background_tasks: BackgroundTasks):
-    """Process GitHub pull request event."""
-    action = payload.get("action")
-    if action not in ["opened", "synchronize", "reopened"]:
-        return {"status": "ignored", "action": action}
-    
-    repository = payload["repository"]
-    owner = repository["owner"]["login"]
-    repo_name = repository["name"]
-    pr_number = payload["pull_request"]["number"]
-    
-    print(f"🔄 PR event: {action} for PR #{pr_number} in {owner}/{repo_name}")
-    
-    # Schedule background indexing of PR files
-    background_tasks.add_task(
-        index_pull_request_background,
-        owner, repo_name, pr_number
+    return hmac.compare_digest(
+        f"sha256={expected_signature}",
+        signature
     )
-    
-    return {"status": "processing", "pr": pr_number, "action": action}
 
-async def index_changed_files_background(owner: str, repo: str, files: List[str]):
-    """Background task to index changed files."""
+async def process_push_event(data: Dict):
+    """Process push event and index changed files."""
+    repo_name = data["repository"]["full_name"]
+    owner, repo = repo_name.split("/")
+
+    # Mark as indexing
+    indexing_status[repo_name] = {
+        "status": "indexing",
+        "started_at": datetime.now().isoformat(),
+        "event": "push"
+    }
+
     try:
-        from github_azure_integration import GitHubAzureIntegrator
-        
-        integrator = GitHubAzureIntegrator()
-        integrator.index_changed_files_remote(owner, repo, files)
-        
-        print(f"✅ Successfully indexed {len(files)} files from {owner}/{repo}")
-        
-    except Exception as e:
-        print(f"❌ Error indexing files from {owner}/{repo}: {e}")
+        # Get changed files
+        before = data["before"]
+        after = data["after"]
 
-async def index_pull_request_background(owner: str, repo: str, pr_number: int):
-    """Background task to index pull request files."""
+        if before == "0000000000000000000000000000000000000000":
+            # Initial commit - index entire repository
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                integrator.index_remote_repository,
+                owner, repo
+            )
+        else:
+            # Get changed files
+            changed_files = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                integrator.get_changed_files_from_push,
+                owner, repo, before, after
+            )
+
+            if changed_files:
+                # Index changed files
+                await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    integrator.index_changed_files_remote,
+                    owner, repo, changed_files
+                )
+
+        # Update status
+        indexing_status[repo_name] = {
+            "status": "completed",
+            "completed_at": datetime.now().isoformat(),
+            "event": "push"
+        }
+
+    except Exception as e:
+        indexing_status[repo_name] = {
+            "status": "failed",
+            "error": str(e),
+            "failed_at": datetime.now().isoformat(),
+            "event": "push"
+        }
+        raise
+
+async def process_pull_request_event(data: Dict):
+    """Process pull request event and index changed files."""
+    repo_name = data["repository"]["full_name"]
+    owner, repo = repo_name.split("/")
+    pr_number = data["pull_request"]["number"]
+    action = data["action"]
+
+    # Only process opened, synchronize, and reopened events
+    if action not in ["opened", "synchronize", "reopened"]:
+        return
+
+    # Mark as indexing
+    indexing_status[repo_name] = {
+        "status": "indexing",
+        "started_at": datetime.now().isoformat(),
+        "event": f"pull_request_{action}",
+        "pr_number": pr_number
+    }
+
     try:
-        from github_azure_integration import GitHubAzureIntegrator
-        
-        integrator = GitHubAzureIntegrator()
-        files = integrator.get_pull_request_files(owner, repo, pr_number)
-        integrator.index_changed_files_remote(owner, repo, files)
-        
-        print(f"✅ Successfully indexed PR #{pr_number} files from {owner}/{repo}")
-        
+        # Get PR files
+        pr_files = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            integrator.get_pull_request_files,
+            owner, repo, pr_number
+        )
+
+        if pr_files:
+            # Index PR files
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                integrator.index_changed_files_remote,
+                owner, repo, pr_files
+            )
+
+        # Update status
+        indexing_status[repo_name] = {
+            "status": "completed",
+            "completed_at": datetime.now().isoformat(),
+            "event": f"pull_request_{action}",
+            "pr_number": pr_number
+        }
+
     except Exception as e:
-        print(f"❌ Error indexing PR #{pr_number} from {owner}/{repo}: {e}")
+        indexing_status[repo_name] = {
+            "status": "failed",
+            "error": str(e),
+            "failed_at": datetime.now().isoformat(),
+            "event": f"pull_request_{action}",
+            "pr_number": pr_number
+        }
+        raise
 
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "github-webhook-handler"}
-
-@app.post("/webhook/github")
+@app.post("/webhook")
 async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     """Handle GitHub webhook events."""
-    
-    # Get request body and headers
-    payload_body = await request.body()
-    signature = request.headers.get("X-Hub-Signature-256", "")
-    event_type = request.headers.get("X-GitHub-Event", "")
-    
+    # Get webhook signature
+    signature = request.headers.get("X-Hub-Signature-256")
+    if not signature:
+        raise HTTPException(status_code=401, detail="Missing signature")
+
+    # Get payload
+    payload = await request.body()
+
     # Verify signature
-    if not verify_github_signature(payload_body, signature):
-        raise HTTPException(status_code=403, detail="Invalid signature")
-    
-    # Parse payload
-    try:
-        payload = json.loads(payload_body)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-    
-    print(f"📨 Received GitHub {event_type} event")
-    
-    # Route based on event type
+    webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
+    if webhook_secret and not verify_webhook_signature(payload, signature, webhook_secret):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # Parse event data
+    event_type = request.headers.get("X-GitHub-Event")
+    data = json.loads(payload)
+
+    # Process events in background
     if event_type == "push":
-        return await process_push_event(payload, background_tasks)
+        background_tasks.add_task(process_push_event, data)
+        return {"status": "accepted", "event": "push"}
+
     elif event_type == "pull_request":
-        return await process_pull_request_event(payload, background_tasks)
+        background_tasks.add_task(process_pull_request_event, data)
+        return {"status": "accepted", "event": "pull_request"}
+
     else:
-        return {"status": "ignored", "event_type": event_type}
+        return {"status": "ignored", "event": event_type}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "service": "github-webhook-handler",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/status/repositories")
+async def get_repository_status():
+    """Get indexing status for all repositories."""
+    return {
+        "repositories": indexing_status,
+        "total": len(indexing_status)
+    }
+
+@app.get("/status/repository/{owner}/{repo}")
+async def get_specific_repository_status(owner: str, repo: str):
+    """Get indexing status for a specific repository."""
+    repo_name = f"{owner}/{repo}"
+    if repo_name in indexing_status:
+        return indexing_status[repo_name]
+    else:
+        raise HTTPException(status_code=404, detail="Repository not found")
 
 @app.post("/manual/index-repo")
 async def manual_index_repository(
-    owner: str, 
-    repo: str, 
-    branch: str = "main",
-    background_tasks: BackgroundTasks = None
+    owner: str,
+    repo: str,
+    ref: str = "main",
+    background_tasks: BackgroundTasks
 ):
     """Manually trigger repository indexing."""
-    print(f"🔄 Manual indexing requested for {owner}/{repo}")
-    
-    background_tasks.add_task(
-        index_repository_background,
-        owner, repo, branch
-    )
-    
-    return {"status": "processing", "repository": f"{owner}/{repo}", "branch": branch}
+    repo_name = f"{owner}/{repo}"
 
-async def index_repository_background(owner: str, repo: str, branch: str):
-    """Background task to index entire repository."""
-    try:
-        from github_azure_integration import GitHubAzureIntegrator
-        
-        integrator = GitHubAzureIntegrator()
-        integrator.index_remote_repository(owner, repo, branch)
-        
-        print(f"✅ Successfully indexed entire repository {owner}/{repo}")
-        
-    except Exception as e:
-        print(f"❌ Error indexing repository {owner}/{repo}: {e}")
+    # Check if already indexing
+    if repo_name in indexing_status and indexing_status[repo_name]["status"] == "indexing":
+        return {"status": "already_indexing", "repository": repo_name}
 
-@app.get("/status/repositories")
-async def get_indexed_repositories():
-    """Get list of indexed repositories from Azure Search."""
-    try:
-        from azure.search.documents import SearchClient
-        from azure.core.credentials import AzureKeyCredential
-        
-        client = SearchClient(
-            endpoint=os.getenv("ACS_ENDPOINT"),
-            index_name="codebase-mcp-sota",
-            credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
-        )
-        
-        # Get unique repository names
-        results = client.search(
-            search_text="*",
-            select=["repo_name"],
-            top=1000
-        )
-        
-        repositories = set()
-        for result in results:
-            repositories.add(result["repo_name"])
-        
-        return {"repositories": sorted(list(repositories))}
-        
-    except Exception as e:
-        return {"error": str(e), "repositories": []}
+    # Mark as indexing
+    indexing_status[repo_name] = {
+        "status": "indexing",
+        "started_at": datetime.now().isoformat(),
+        "event": "manual",
+        "ref": ref
+    }
+
+    # Index in background
+    async def index_task():
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                integrator.index_remote_repository,
+                owner, repo, ref
+            )
+            indexing_status[repo_name] = {
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "event": "manual",
+                "ref": ref
+            }
+        except Exception as e:
+            indexing_status[repo_name] = {
+                "status": "failed",
+                "error": str(e),
+                "failed_at": datetime.now().isoformat(),
+                "event": "manual",
+                "ref": ref
+            }
+
+    background_tasks.add_task(index_task)
+
+    return {
+        "status": "accepted",
+        "repository": repo_name,
+        "ref": ref
+    }
+
+@app.post("/manual/index-pr")
+async def manual_index_pull_request(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    background_tasks: BackgroundTasks
+):
+    """Manually trigger pull request indexing."""
+    repo_name = f"{owner}/{repo}"
+
+    # Mark as indexing
+    indexing_status[repo_name] = {
+        "status": "indexing",
+        "started_at": datetime.now().isoformat(),
+        "event": "manual_pr",
+        "pr_number": pr_number
+    }
+
+    # Index in background
+    async def index_task():
+        try:
+            pr_files = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                integrator.get_pull_request_files,
+                owner, repo, pr_number
+            )
+
+            if pr_files:
+                await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    integrator.index_changed_files_remote,
+                    owner, repo, pr_files
+                )
+
+            indexing_status[repo_name] = {
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "event": "manual_pr",
+                "pr_number": pr_number,
+                "files_indexed": len(pr_files)
+            }
+        except Exception as e:
+            indexing_status[repo_name] = {
+                "status": "failed",
+                "error": str(e),
+                "failed_at": datetime.now().isoformat(),
+                "event": "manual_pr",
+                "pr_number": pr_number
+            }
+
+    background_tasks.add_task(index_task)
+
+    return {
+        "status": "accepted",
+        "repository": repo_name,
+        "pr_number": pr_number
+    }
 
 if __name__ == "__main__":
-    print("🚀 Starting GitHub Webhook Handler")
-    print("📋 Supported events: push, pull_request")
-    print("🔗 Webhook URL: http://your-domain/webhook/github")
-    print("🔧 Manual indexing: POST /manual/index-repo")
-    
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=int(os.getenv("WEBHOOK_PORT", 8080)),
-        log_level="info"
-    )
+    import uvicorn
+    port = int(os.getenv("WEBHOOK_PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)

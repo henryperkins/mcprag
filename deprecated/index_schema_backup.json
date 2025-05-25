@@ -64,36 +64,8 @@
       "type": "Edm.String",
       "searchable": false,
       "filterable": true
-    },
-    {
-      "name": "code_vector",
-      "type": "Collection(Edm.Single)",
-      "searchable": true,
-      "retrievable": true,
-      "dimensions": 1536,
-      "vectorSearchProfile": "code-vector-profile"
     }
   ],
-  "vectorSearch": {
-    "algorithms": [
-      {
-        "name": "code-hnsw",
-        "kind": "hnsw",
-        "hnswParameters": {
-          "metric": "cosine",
-          "m": 4,
-          "efConstruction": 400,
-          "efSearch": 500
-        }
-      }
-    ],
-    "profiles": [
-      {
-        "name": "code-vector-profile",
-        "algorithm": "code-hnsw"
-      }
-    ]
-  },
   "semantic": {
     "defaultConfiguration": "mcp-semantic",
     "configurations": [
