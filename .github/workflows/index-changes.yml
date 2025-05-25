@@ -1,10 +1,10 @@
-name: "Diff-Index Code to Azure Search"
+name: "GitHub API + Azure Search Integration"
 
 on:
   push:
-    paths: 
+    paths:
       - "**/*.py"
-      - "**/*.js" 
+      - "**/*.js"
       - "**/*.ts"
     branches:
       - main
@@ -16,13 +16,14 @@ on:
       - "**/*.ts"
 
 jobs:
-  index:
+  index-local:
+    name: "Local File Indexing"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Need depth for diff
+          fetch-depth: 2
 
       - name: Detect changed code files
         id: changes
@@ -46,37 +47,80 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         if: steps.changes.outputs.code == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Node.js dependencies
-        if: steps.changes.outputs.code == 'true'
-        run: |
           npm ci
+          chmod +x parse_js.mjs
 
-      - name: Make parse script executable
-        if: steps.changes.outputs.code == 'true'
-        run: chmod +x parse_js.mjs
-
-      - name: Re-index changed files
+      - name: Index changed files (Local)
         if: steps.changes.outputs.code == 'true'
         env:
           ACS_ENDPOINT: ${{ secrets.ACS_ENDPOINT }}
           ACS_ADMIN_KEY: ${{ secrets.ACS_ADMIN_KEY }}
         run: |
-          # Get list of changed files
           CHANGED_FILES=$(echo "${{ steps.changes.outputs.code_files }}" | tr '\n' ' ')
-          echo "Changed files: $CHANGED_FILES"
-          
-          # Run indexer with changed files
+          echo "📁 Local indexing - Changed files: $CHANGED_FILES"
+
           if [ ! -z "$CHANGED_FILES" ]; then
-            python smart_indexer.py --files $CHANGED_FILES
+            python smart_indexer.py --files $CHANGED_FILES --repo-name "${{ github.repository }}"
           fi
 
-      - name: Report indexing status
-        if: steps.changes.outputs.code == 'true'
+  index-remote:
+    name: "GitHub API Remote Indexing"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
         run: |
-          echo "✅ Successfully re-indexed changed code files"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: Index via GitHub API
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACS_ENDPOINT: ${{ secrets.ACS_ENDPOINT }}
+          ACS_ADMIN_KEY: ${{ secrets.ACS_ADMIN_KEY }}
+        run: |
+          echo "🌐 Remote indexing via GitHub API"
+
+          # Extract owner and repo from GITHUB_REPOSITORY
+          OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+          REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+
+          # Get changed files using GitHub API
+          if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "📊 Comparing ${{ github.event.before }} to ${{ github.event.after }}"
+            python -c "
+from github_azure_integration import GitHubAzureIntegrator
+integrator = GitHubAzureIntegrator()
+files = integrator.get_changed_files_from_push('$OWNER', '$REPO', '${{ github.event.before }}', '${{ github.event.after }}')
+if files:
+    integrator.index_changed_files_remote('$OWNER', '$REPO', files)
+    print(f'✅ Indexed {len(files)} files via GitHub API')
+else:
+    print('ℹ️ No code files changed')
+"
+          else
+            echo "🔄 Initial commit - indexing entire repository"
+            python -c "
+from github_azure_integration import GitHubAzureIntegrator
+integrator = GitHubAzureIntegrator()
+integrator.index_remote_repository('$OWNER', '$REPO')
+"
+          fi
+
+      - name: Report status
+        run: |
+          echo "✅ GitHub API + Azure Search integration completed"
