@@ -77,7 +77,7 @@ def test_mcp_server():
             return False
     except requests.exceptions.ConnectionError:
         print("❌ MCP server not running")
-        print("   Run: python mcp_server.py")
+        print("   Run: python mcp_server_sota.py")
         return False
     except Exception as e:
         print(f"❌ MCP server test error: {e}")
