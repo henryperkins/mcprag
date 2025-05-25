@@ -114,6 +114,24 @@ docker build -t mcp-server .
 docker run -p 8001:8001 --env-file .env mcp-server
 ```
 
+## Uninstall
+
+### Complete Removal (Azure + Local)
+
+```bash
+# Removes ALL Azure resources and local files
+python uninstall.py
+```
+
+⚠️ **WARNING**: This permanently deletes all Azure resources and stops billing.
+
+### Local Cleanup Only
+
+```bash
+# Removes only local files, keeps Azure resources
+python cleanup_local.py
+```
+
 ## Customization
 
 ### Index Different Repositories

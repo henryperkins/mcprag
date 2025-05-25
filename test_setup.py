@@ -166,8 +166,8 @@ def main():
             print("\n💡 Quick fixes:")
             print("   1. Ensure .env file exists with correct Azure credentials")
             print("   2. Run: python create_index.py")
-            print("   3. Run: python indexer.py")
-            print("   4. Run: python mcp_server.py")
+            print("   3. Run: python smart_indexer.py")
+            print("   4. Run: python mcp_server_sota.py")
 
 
 if __name__ == "__main__":

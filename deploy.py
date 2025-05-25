@@ -40,6 +40,8 @@ def check_prerequisites():
         "smart_indexer.py",
         "mcp_server_sota.py",
         "test_setup.py",
+        "uninstall.py",
+        "cleanup_local.py",
         "requirements.txt",
         "index_schema.json",
     ]
@@ -137,7 +139,7 @@ def main():
     print("\n3. Register with Claude Code:")
     print("   claude-code mcp add --name azure-code-search \\")
     print("     --type http --url http://localhost:8001/mcp-query --method POST")
-    print("\n4. Add your own repositories to indexer.py and re-run it")
+    print("\n4. Add your own repositories to smart_indexer.py and re-run it")
 
     print(f"\n💰 Estimated monthly cost: ~$250")
     print("🔗 Azure portal: https://portal.azure.com")
