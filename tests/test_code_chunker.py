@@ -3,14 +3,20 @@
 Unit tests for CodeChunker class
 """
 import pytest
+import os
 from unittest.mock import Mock, patch
 from smart_indexer import CodeChunker
 
 
 class TestCodeChunker:
+    @patch.dict(os.environ, {
+        'ACS_ENDPOINT': 'https://test.search.windows.net',
+        'ACS_ADMIN_KEY': 'test-key'
+    })
     def setup_method(self):
         """Set up test fixtures."""
-        self.chunker = CodeChunker()
+        with patch('smart_indexer.SearchClient'):
+            self.chunker = CodeChunker()
     
     def test_chunk_python_file_simple_function(self):
         """Test chunking a simple Python function."""
