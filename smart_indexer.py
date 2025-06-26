@@ -79,8 +79,9 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
                         "line_range": f"{start_line+1}-{end_line}"
                     })
 
-        except:
+        except (SyntaxError, UnicodeDecodeError, ValueError) as e:
             # Fallback for non-parseable code
+            print(f"Warning: Could not parse {file_path}: {e}")
             chunks.append({
                 "code_chunk": content[:5000],
                 "semantic_context": f"Code from {file_path}",
@@ -103,11 +104,32 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
         return list(set(imports))
 
     def _extract_function_calls(self, node) -> List[str]:
-        calls = []
+        """Extract names of functions or methods invoked within *node*.
+
+        Captures both plain calls like ``foo()`` as well as attribute-based
+        invocations such as ``obj.method()`` or ``module.func()``.
+        """
+        calls: List[str] = []
+
         for child in ast.walk(node):
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
-                calls.append(child.func.id)
-        return list(set(calls))
+            if isinstance(child, ast.Call):
+                func = child.func
+                if isinstance(func, ast.Name):
+                    # Simple function call: foo()
+                    calls.append(func.id)
+                elif isinstance(func, ast.Attribute):
+                    # Attribute call: obj.method()
+                    calls.append(func.attr)
+
+        # Deduplicate while preserving original order
+        seen = set()
+        ordered_calls: List[str] = []
+        for c in calls:
+            if c not in seen:
+                seen.add(c)
+                ordered_calls.append(c)
+
+        return ordered_calls
 
     def _get_signature(self, node) -> str:
         if isinstance(node, ast.FunctionDef):

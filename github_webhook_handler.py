@@ -163,9 +163,12 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     # Get payload
     payload = await request.body()
 
-    # Verify signature
+    # Verify signature - require webhook secret to be set
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
-    if webhook_secret and not verify_webhook_signature(payload, signature, webhook_secret):
+    if not webhook_secret:
+        raise HTTPException(status_code=500, detail="GITHUB_WEBHOOK_SECRET environment variable is required")
+    
+    if not verify_webhook_signature(payload, signature, webhook_secret):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     # Parse event data

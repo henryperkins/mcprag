@@ -331,6 +331,32 @@ async def run_mcp_server():
 
 
 if __name__ == "__main__":
-    # If run directly, start FastAPI server for testing
+    """
+    Stand-alone entry point.
+
+    --mode api (default)  → Launch FastAPI HTTP service on the given port
+    --mode rpc            → Start JSON-RPC stdin/stdout loop for Claude MCP
+    """
+    import argparse
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+
+    parser = argparse.ArgumentParser(description="Azure Code Search MCP Server")
+    parser.add_argument(
+        "--mode",
+        choices=["api", "rpc"],
+        default="api",
+        help="api = FastAPI service (default); rpc = JSON-RPC over stdio",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("MCP_API_PORT", "8001")),
+        help="Port for FastAPI when --mode api is used",
+    )
+    args = parser.parse_args()
+
+    if args.mode == "api":
+        uvicorn.run(app, host="0.0.0.0", port=args.port)
+    else:
+        # Launch the JSON-RPC loop that reads from stdin and writes to stdout
+        asyncio.run(run_mcp_server())

@@ -18,10 +18,11 @@ load_dotenv()
 class GitHubAzureIntegrator:
     def __init__(self):
         self.github_token = os.getenv("GITHUB_TOKEN")
-        self.headers = {
-            "Authorization": f"token {self.github_token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
+        self.headers = {"Accept": "application/vnd.github.v3+json"}
+        
+        # Only add Authorization header if token is present
+        if self.github_token:
+            self.headers["Authorization"] = f"token {self.github_token}"
         self.chunker = CodeChunker()
 
     def get_repository_files(self, owner: str, repo: str, path: str = "", ref: str = "main") -> List[Dict]:
@@ -226,5 +227,4 @@ def main():
         integrator.index_remote_repository(args.owner, args.repo, args.ref)
 
 if __name__ == "__main__":
-    import hashlib  # Add this import at the top
     main()
