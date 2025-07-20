@@ -66,29 +66,48 @@ class MicrosoftDocsMCPClient:
             "Accept": "application/json, text/event-stream"
         }
         
-        async with self.session.post(self.base_url, json=request, headers=headers) as response:
-            if response.status != 200:
-                text = await response.text()
-                raise Exception(f"MCP request failed: {response.status} - {text}")
+        logger.debug(f"Sending request to {self.base_url}: {json.dumps(request, indent=2)}")
+        
+        try:
+            async with self.session.post(self.base_url, json=request, headers=headers) as response:
+                logger.debug(f"Response status: {response.status}")
+                logger.debug(f"Response headers: {dict(response.headers)}")
                 
-            # Handle different content types
-            content_type = response.headers.get('Content-Type', '')
-            
-            if 'text/event-stream' in content_type:
-                # Handle Server-Sent Events format
                 text = await response.text()
-                # Parse SSE format to extract JSON
-                for line in text.split('\n'):
-                    if line.startswith('data: '):
-                        data = line[6:].strip()
-                        if data:
-                            try:
-                                return json.loads(data)
-                            except json.JSONDecodeError:
-                                continue
-                raise Exception(f"No valid JSON found in SSE response")
-            else:
-                return await response.json()
+                logger.debug(f"Response text: {text[:500]}...")
+                
+                if response.status != 200:
+                    raise Exception(f"MCP request failed: {response.status} - {text}")
+                    
+                # Handle different content types
+                content_type = response.headers.get('Content-Type', '')
+                
+                if 'text/event-stream' in content_type:
+                    # Handle Server-Sent Events format
+                    # Parse SSE format to extract JSON
+                    for line in text.split('\n'):
+                        if line.startswith('data: '):
+                            data = line[6:].strip()
+                            if data:
+                                try:
+                                    parsed = json.loads(data)
+                                    logger.debug(f"Parsed SSE response: {json.dumps(parsed, indent=2)}")
+                                    return parsed
+                                except json.JSONDecodeError as e:
+                                    logger.debug(f"Failed to parse JSON from SSE line: {e}")
+                                    continue
+                    raise Exception(f"No valid JSON found in SSE response")
+                else:
+                    parsed = json.loads(text)
+                    logger.debug(f"Parsed JSON response: {json.dumps(parsed, indent=2)}")
+                    return parsed
+                    
+        except aiohttp.ClientError as e:
+            logger.error(f"HTTP client error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Request failed: {e}")
+            raise
             
     async def search_docs(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         """
@@ -103,13 +122,14 @@ class MicrosoftDocsMCPClient:
         """
         try:
             # Call the microsoft_docs_search tool
+            # Note: The Microsoft Docs MCP server expects "question" not "query"
             response = await self._send_request({
                 "jsonrpc": "2.0",
                 "method": "tools/call",
                 "params": {
                     "name": "microsoft_docs_search",
                     "arguments": {
-                        "query": query
+                        "question": query
                     }
                 },
                 "id": 3
@@ -135,8 +155,25 @@ class MicrosoftDocsMCPClient:
         """Parse the text response into structured results"""
         results = []
         
-        # The MCP server returns formatted text, we need to parse it
-        # This is a simple parser - adjust based on actual response format
+        # Check if the response is a JSON array string
+        if text_content.strip().startswith('['):
+            try:
+                # Parse as JSON array
+                parsed_results = json.loads(text_content)
+                if isinstance(parsed_results, list):
+                    for item in parsed_results[:10]:  # Limit to 10 results
+                        if isinstance(item, dict):
+                            results.append({
+                                "title": item.get("title", "No title"),
+                                "content": item.get("content", ""),
+                                "source": "Microsoft Docs",
+                                "url": item.get("contentUrl", "")
+                            })
+                    return results
+            except json.JSONDecodeError:
+                logger.debug("Failed to parse as JSON, falling back to text parsing")
+        
+        # Fallback: parse as plain text
         sections = text_content.split("\n\n")
         
         for section in sections:

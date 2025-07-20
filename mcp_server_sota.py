@@ -357,16 +357,24 @@ class MCPServer:
         for i, result in enumerate(results, 1):
             formatted += f"**Result {i}**\n"
             formatted += f"- Title: {result.get('title', 'Unknown')}\n"
+            
+            # Include URL if available
+            url = result.get('url', '')
+            if url:
+                formatted += f"- URL: {url}\n"
+            
             formatted += f"- Source: {result.get('source', 'Microsoft Learn')}\n"
             
             content = result.get('content', '')
             if content:
+                # Clean up content formatting
+                content = content.replace('\\n', '\n').replace('\\r', '')
                 # Truncate content if too long
-                if len(content) > 500:
-                    content = content[:500] + "..."
-                formatted += f"- Content: {content}\n"
+                if len(content) > 800:
+                    content = content[:800] + "..."
+                formatted += f"\n{content}\n"
             
-            formatted += "\n"
+            formatted += "\n---\n\n"
             
         return formatted
 

@@ -237,7 +237,7 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
         # Patterns
         import_re = re.compile(r"^\s*import\s+(?:type\s+)?(?P<body>.+?)\s+from\s+['\"](?P<mod>[^'\"]+)['\"]")
         bare_import_re = re.compile(r"^\s*import\s+['\"](?P<mod>[^'\"]+)['\"]")
-        require_re = re.compile(r"require\([^'\"]*['\"](?P<mod>[^'\"]+)['\"]\)")
+        require_re = re.compile(r"require\\([^'\"]*['\"](?P<mod>[^'\"]+)['\"]\\)")
 
         for line in src_lines:
             m = import_re.match(line)
@@ -421,6 +421,15 @@ Type: {ast_chunk.get('type', 'unknown')}
 
         for pattern, language, chunker_func in file_patterns:
             for file_path in Path(repo_path).rglob(pattern):
+                # Skip if it's a directory
+                if file_path.is_dir():
+                    continue
+                
+                # Skip node_modules and other common directories
+                if any(part.startswith('.') or part == 'node_modules' or part == '__pycache__' 
+                       for part in file_path.parts):
+                    continue
+                
                 try:
                     content = file_path.read_text(encoding='utf-8', errors='ignore')
                     chunks = chunker_func(content, str(file_path))
