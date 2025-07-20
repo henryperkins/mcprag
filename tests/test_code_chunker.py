@@ -13,7 +13,7 @@ class TestCodeChunker:
         'ACS_ENDPOINT': 'https://test.search.windows.net',
         'ACS_ADMIN_KEY': 'test-key'
     })
-    def setup_method(self):
+    def setup_method(self, _method=None):
         """Set up test fixtures."""
         with patch('smart_indexer.SearchClient'):
             self.chunker = CodeChunker()

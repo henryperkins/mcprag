@@ -9,6 +9,7 @@ import argparse
 import hashlib
 from typing import List, Dict, Optional
 import requests
+import time
 from pathlib import Path
 from smart_indexer import CodeChunker
 from dotenv import load_dotenv
@@ -30,8 +31,7 @@ class GitHubAzureIntegrator:
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         params = {"ref": ref}
 
-        response = requests.get(url, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._get_with_retry(url, params=params)
 
         files = []
         items = response.json()
@@ -51,8 +51,7 @@ class GitHubAzureIntegrator:
     def get_file_content(self, owner: str, repo: str, file_path: str) -> str:
         """Get the content of a specific file from GitHub."""
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
+        response = self._get_with_retry(url)
 
         file_data = response.json()
         # GitHub API returns content as base64
@@ -62,8 +61,7 @@ class GitHubAzureIntegrator:
     def get_changed_files_from_push(self, owner: str, repo: str, before_sha: str, after_sha: str) -> List[str]:
         """Get list of changed files from a push event."""
         url = f"https://api.github.com/repos/{owner}/{repo}/compare/{before_sha}...{after_sha}"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
+        response = self._get_with_retry(url)
 
         compare_data = response.json()
         changed_files = []
@@ -77,8 +75,32 @@ class GitHubAzureIntegrator:
     def get_pull_request_files(self, owner: str, repo: str, pr_number: int) -> List[str]:
         """Get list of files changed in a pull request."""
         url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
+        response = self._get_with_retry(url)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_with_retry(self, url: str, params: Optional[Dict[str, str]] = None, *, max_retries: int = 3, backoff: float = 1.0):
+        """Simple exponential-backoff wrapper around *requests.get* that
+        respects GitHub's primary rate-limit headers.  Retries 3× by default
+        on 429/5xx responses.
+        """
+        for attempt in range(1, max_retries + 1):
+            resp = requests.get(url, headers=self.headers, params=params)
+            if resp.status_code < 400:
+                return resp
+
+            # On 429 or 5xx we back-off and retry
+            if resp.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
+                wait = backoff * (2 ** (attempt - 1))
+                time.sleep(wait)
+                continue
+
+            # Give up – propagate error details
+            resp.raise_for_status()
+
+        return resp  # Unreachable but appeases type-checkers
 
         files = []
         for file in response.json():
