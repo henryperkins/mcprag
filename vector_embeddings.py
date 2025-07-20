@@ -34,12 +34,12 @@ def _build_openai_stub():  # noqa: D401 – helper returns stub module
 
     # Build a stub module with attributes the library expects
     embeddings_ns = SimpleNamespace(create=_fake_create)
-    
+
     # Create a fake client class
     class FakeClient:
         def __init__(self, **kwargs):
             self.embeddings = embeddings_ns
-    
+
     return FakeClient
 
 
@@ -54,9 +54,11 @@ except ModuleNotFoundError:  # pragma: no cover – sandbox or dev env
 # Helper to normalise environment variables
 # ---------------------------------------------------------------------------
 
+
 def _get_env(name: str) -> Optional[str]:
     value = os.getenv(name)
     return value.strip() if value else None
+
 
 class VectorEmbedder:
     """Thin wrapper around the OpenAI embedding endpoint that works in both
@@ -79,7 +81,9 @@ class VectorEmbedder:
         )
 
         if not self.api_key:
-            raise ValueError("API key for OpenAI or Azure OpenAI must be provided via environment variables")
+            raise ValueError(
+                "API key for OpenAI or Azure OpenAI must be provided via environment variables"
+            )
 
         self.api_version = _get_env("AZURE_OPENAI_API_VERSION") or "2024-10-21"
 

@@ -7,36 +7,33 @@ import os
 import shutil
 from pathlib import Path
 
+
 def cleanup_local_files():
     """Clean up local files and directories."""
     print("🧹 Cleaning up local files...")
-    
+
     # Files to remove
-    files_to_remove = [
-        '.env',
-        'app.db',
-        '*.log',
-        '*.tmp'
-    ]
-    
+    files_to_remove = [".env", "app.db", "*.log", "*.tmp"]
+
     # Directories to remove
     directories_to_remove = [
-        '__pycache__',
-        '.pytest_cache',
-        'logs',
-        'temp',
-        '.mypy_cache',
-        'htmlcov',
-        '.coverage'
+        "__pycache__",
+        ".pytest_cache",
+        "logs",
+        "temp",
+        ".mypy_cache",
+        "htmlcov",
+        ".coverage",
     ]
-    
+
     removed_count = 0
-    
+
     # Remove specific files
     for file_pattern in files_to_remove:
-        if '*' in file_pattern:
+        if "*" in file_pattern:
             # Handle wildcards
             import glob
+
             for file_path in glob.glob(file_pattern):
                 try:
                     os.remove(file_path)
@@ -53,7 +50,7 @@ def cleanup_local_files():
                     removed_count += 1
                 except Exception as e:
                     print(f"   ⚠️  Could not remove {file_pattern}: {e}")
-    
+
     # Remove directories
     for dir_name in directories_to_remove:
         path = Path(dir_name)
@@ -64,11 +61,11 @@ def cleanup_local_files():
                 removed_count += 1
             except Exception as e:
                 print(f"   ⚠️  Could not remove {dir_name}: {e}")
-    
+
     # Clean up Python cache recursively
-    for root, dirs, files in os.walk('.'):
+    for root, dirs, files in os.walk("."):
         for dir_name in dirs[:]:  # Use slice to modify list during iteration
-            if dir_name == '__pycache__':
+            if dir_name == "__pycache__":
                 cache_path = Path(root) / dir_name
                 try:
                     shutil.rmtree(cache_path)
@@ -77,28 +74,27 @@ def cleanup_local_files():
                     dirs.remove(dir_name)  # Don't recurse into removed directory
                 except Exception as e:
                     print(f"   ⚠️  Could not remove {cache_path}: {e}")
-    
+
     if removed_count == 0:
         print("   ℹ️  No files found to clean up")
     else:
         print(f"   ✅ Cleaned up {removed_count} items")
 
+
 def reset_example_repo():
     """Reset the example repository to clean state."""
     print("🔄 Resetting example repository...")
-    
-    example_repo = Path('example-repo')
+
+    example_repo = Path("example-repo")
     if example_repo.exists():
         # Keep the example files but remove any generated content
-        generated_files = [
-            'example-repo/*.pyc',
-            'example-repo/__pycache__'
-        ]
-        
+        generated_files = ["example-repo/*.pyc", "example-repo/__pycache__"]
+
         removed = 0
         for pattern in generated_files:
-            if '*' in pattern:
+            if "*" in pattern:
                 import glob
+
                 for file_path in glob.glob(pattern):
                     try:
                         if os.path.isfile(file_path):
@@ -109,7 +105,7 @@ def reset_example_repo():
                         removed += 1
                     except Exception as e:
                         print(f"   ⚠️  Could not clean {file_path}: {e}")
-        
+
         if removed == 0:
             print("   ℹ️  Example repository already clean")
         else:
@@ -117,11 +113,12 @@ def reset_example_repo():
     else:
         print("   ℹ️  No example repository found")
 
+
 def backup_env_file():
     """Create a backup of .env file before deletion."""
-    env_file = Path('.env')
+    env_file = Path(".env")
     if env_file.exists():
-        backup_file = Path('.env.backup')
+        backup_file = Path(".env.backup")
         try:
             shutil.copy2(env_file, backup_file)
             print(f"   💾 Created backup: .env.backup")
@@ -130,6 +127,7 @@ def backup_env_file():
             print(f"   ⚠️  Could not create backup: {e}")
             return False
     return False
+
 
 def main():
     """Main cleanup function."""
@@ -141,25 +139,25 @@ def main():
     print("• Python cache directories")
     print("• Log files")
     print("\n✅ Azure resources will NOT be affected")
-    
+
     # Confirmation
     confirm = input("\nProceed with local cleanup? (y/N): ").lower().strip()
-    if confirm not in ['y', 'yes']:
+    if confirm not in ["y", "yes"]:
         print("❌ Cleanup cancelled.")
         return
-    
+
     # Backup .env file
     print("\n💾 Creating backup of configuration...")
     backup_created = backup_env_file()
-    
+
     # Clean up files
     print("\n🧹 Cleaning up local files...")
     cleanup_local_files()
-    
+
     # Reset example repo
     print("\n🔄 Cleaning example repository...")
     reset_example_repo()
-    
+
     print("\n🎉 Local cleanup completed!")
     print("\n📋 Summary:")
     print("✅ Temporary files removed")
@@ -171,6 +169,7 @@ def main():
     print("   cp .env.backup .env")
     print("\n🔗 Azure resources remain active:")
     print("   https://portal.azure.com")
+
 
 if __name__ == "__main__":
     main()

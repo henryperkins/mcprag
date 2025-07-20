@@ -35,6 +35,7 @@ def prompt_input(prompt: str, default: str | None = None) -> str:
     value = input(f"{prompt}{suffix}: ").strip()
     return value or (default or "")
 
+
 def run(step: str, script: str, extra_args=None):
     """Run a helper script and abort on failure."""
     print(f"\n🚀 {step}")
@@ -47,14 +48,18 @@ def run(step: str, script: str, extra_args=None):
         print(f"❌ {step} failed (exit {exc.returncode}). Aborting.")
         sys.exit(exc.returncode)
 
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="One-shot bootstrap for MCP RAG stack")
-    ap.add_argument("--no-azure", action="store_true",
-                    help="Assume Azure resources (.env + index) already exist")
-    ap.add_argument("--no-index", action="store_true",
-                    help="Skip smart_indexer step")
-    ap.add_argument("--server-only", action="store_true",
-                    help="Only start the MCP server")
+    ap.add_argument(
+        "--no-azure",
+        action="store_true",
+        help="Assume Azure resources (.env + index) already exist",
+    )
+    ap.add_argument("--no-index", action="store_true", help="Skip smart_indexer step")
+    ap.add_argument(
+        "--server-only", action="store_true", help="Only start the MCP server"
+    )
     args = ap.parse_args()
 
     # 1. Azure resources + .env
@@ -76,6 +81,7 @@ def main() -> None:
     # 4. Launch MCP server (blocks)
     print("\n🏁 Launching MCP server on http://localhost:8001 ...")
     os.execv(sys.executable, [sys.executable, "mcp_server_sota.py"])
+
 
 if __name__ == "__main__":
     main()

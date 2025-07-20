@@ -16,17 +16,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class GitHubAzureIntegrator:
     def __init__(self):
         self.github_token = os.getenv("GITHUB_TOKEN")
         self.headers = {"Accept": "application/vnd.github.v3+json"}
-        
+
         # Only add Authorization header if token is present
         if self.github_token:
             self.headers["Authorization"] = f"token {self.github_token}"
         self.chunker = CodeChunker()
 
-    def get_repository_files(self, owner: str, repo: str, path: str = "", ref: str = "main") -> List[Dict]:
+    def get_repository_files(
+        self, owner: str, repo: str, path: str = "", ref: str = "main"
+    ) -> List[Dict]:
         """Get all code files from a GitHub repository."""
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         params = {"ref": ref}
@@ -58,7 +61,9 @@ class GitHubAzureIntegrator:
         content = base64.b64decode(file_data["content"]).decode("utf-8")
         return content
 
-    def get_changed_files_from_push(self, owner: str, repo: str, before_sha: str, after_sha: str) -> List[str]:
+    def get_changed_files_from_push(
+        self, owner: str, repo: str, before_sha: str, after_sha: str
+    ) -> List[str]:
         """Get list of changed files from a push event."""
         url = f"https://api.github.com/repos/{owner}/{repo}/compare/{before_sha}...{after_sha}"
         response = self._get_with_retry(url)
@@ -67,12 +72,16 @@ class GitHubAzureIntegrator:
         changed_files = []
 
         for file in compare_data.get("files", []):
-            if file["status"] != "removed" and any(file["filename"].endswith(ext) for ext in [".py", ".js", ".ts"]):
+            if file["status"] != "removed" and any(
+                file["filename"].endswith(ext) for ext in [".py", ".js", ".ts"]
+            ):
                 changed_files.append(file["filename"])
 
         return changed_files
 
-    def get_pull_request_files(self, owner: str, repo: str, pr_number: int) -> List[str]:
+    def get_pull_request_files(
+        self, owner: str, repo: str, pr_number: int
+    ) -> List[str]:
         """Get list of files changed in a pull request."""
         url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
         response = self._get_with_retry(url)
@@ -81,7 +90,14 @@ class GitHubAzureIntegrator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_with_retry(self, url: str, params: Optional[Dict[str, str]] = None, *, max_retries: int = 3, backoff: float = 1.0):
+    def _get_with_retry(
+        self,
+        url: str,
+        params: Optional[Dict[str, str]] = None,
+        *,
+        max_retries: int = 3,
+        backoff: float = 1.0,
+    ):
         """Simple exponential-backoff wrapper around *requests.get* that
         respects GitHub's primary rate-limit headers.  Retries 3× by default
         on 429/5xx responses.
@@ -104,7 +120,9 @@ class GitHubAzureIntegrator:
 
         files = []
         for file in response.json():
-            if file["status"] != "removed" and any(file["filename"].endswith(ext) for ext in [".py", ".js", ".ts"]):
+            if file["status"] != "removed" and any(
+                file["filename"].endswith(ext) for ext in [".py", ".js", ".ts"]
+            ):
                 files.append(file["filename"])
 
         return files
@@ -130,13 +148,19 @@ class GitHubAzureIntegrator:
                     language = "python"
                 elif file_info["name"].endswith((".js", ".ts")):
                     chunks = self.chunker.chunk_js_ts_file(content, file_info["path"])
-                    language = "javascript" if file_info["name"].endswith(".js") else "typescript"
+                    language = (
+                        "javascript"
+                        if file_info["name"].endswith(".js")
+                        else "typescript"
+                    )
                 else:
                     continue
 
                 # Create documents for each chunk
                 for i, chunk in enumerate(chunks):
-                    doc_id = hashlib.md5(f"{owner}/{repo}:{file_info['path']}:{i}".encode()).hexdigest()
+                    doc_id = hashlib.md5(
+                        f"{owner}/{repo}:{file_info['path']}:{i}".encode()
+                    ).hexdigest()
 
                     doc = {
                         "id": doc_id,
@@ -144,14 +168,13 @@ class GitHubAzureIntegrator:
                         "file_path": file_info["path"],
                         "language": language,
                         "github_url": file_info["html_url"],
-                        **chunk
+                        **chunk,
                     }
 
                     # Add vector embedding if available
                     if self.chunker.embedder:
                         embedding = self.chunker.embedder.generate_code_embedding(
-                            chunk["code_chunk"],
-                            chunk["semantic_context"]
+                            chunk["code_chunk"], chunk["semantic_context"]
                         )
                         if embedding:
                             doc["code_vector"] = embedding
@@ -190,13 +213,17 @@ class GitHubAzureIntegrator:
                     language = "python"
                 elif file_path.endswith((".js", ".ts")):
                     chunks = self.chunker.chunk_js_ts_file(content, file_path)
-                    language = "javascript" if file_path.endswith(".js") else "typescript"
+                    language = (
+                        "javascript" if file_path.endswith(".js") else "typescript"
+                    )
                 else:
                     continue
 
                 # Create documents
                 for i, chunk in enumerate(chunks):
-                    doc_id = hashlib.md5(f"{owner}/{repo}:{file_path}:{i}".encode()).hexdigest()
+                    doc_id = hashlib.md5(
+                        f"{owner}/{repo}:{file_path}:{i}".encode()
+                    ).hexdigest()
 
                     doc = {
                         "id": doc_id,
@@ -204,14 +231,13 @@ class GitHubAzureIntegrator:
                         "file_path": file_path,
                         "language": language,
                         "github_url": f"https://github.com/{owner}/{repo}/blob/main/{file_path}",
-                        **chunk
+                        **chunk,
                     }
 
                     # Add vector embedding if available
                     if self.chunker.embedder:
                         embedding = self.chunker.embedder.generate_code_embedding(
-                            chunk["code_chunk"],
-                            chunk["semantic_context"]
+                            chunk["code_chunk"], chunk["semantic_context"]
                         )
                         if embedding:
                             doc["code_vector"] = embedding
@@ -225,8 +251,11 @@ class GitHubAzureIntegrator:
             self.chunker.client.merge_or_upload_documents(documents)
             print(f"✅ Indexed {len(documents)} chunks from changed files")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Index GitHub repositories into Azure Cognitive Search")
+    parser = argparse.ArgumentParser(
+        description="Index GitHub repositories into Azure Cognitive Search"
+    )
     parser.add_argument("--owner", required=True, help="Repository owner")
     parser.add_argument("--repo", required=True, help="Repository name")
     parser.add_argument("--ref", default="main", help="Git ref (branch/tag/commit)")
@@ -247,6 +276,7 @@ def main():
     else:
         # Index entire repository
         integrator.index_remote_repository(args.owner, args.repo, args.ref)
+
 
 if __name__ == "__main__":
     main()

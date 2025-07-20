@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from smart_indexer import CodeChunker
 
+
 def test_python_chunking():
     """Test enhanced Python chunking with type annotations."""
     test_code = '''
@@ -43,15 +44,15 @@ class DataProcessor(BaseProcessor):
             return False
         return len(data) > 0
 '''
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(test_code)
         temp_file = f.name
-    
+
     try:
         chunker = CodeChunker()
         chunks = chunker.chunk_python_file(test_code, temp_file)
-        
+
         print("=== Python Chunking Results ===")
         for i, chunk in enumerate(chunks):
             print(f"\nChunk {i+1}:")
@@ -60,13 +61,14 @@ class DataProcessor(BaseProcessor):
             print(f"Line Range: {chunk['line_range']}")
             print(f"Semantic Context:\n{chunk['semantic_context']}")
             print("-" * 50)
-            
+
     finally:
         os.unlink(temp_file)
 
+
 def test_js_chunking():
     """Test enhanced JavaScript/TypeScript chunking."""
-    test_code = '''
+    test_code = """
 import React from 'react';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
@@ -99,16 +101,16 @@ async function fetchUserById(id) {
 }
 
 export default UserManager;
-'''
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
         f.write(test_code)
         temp_file = f.name
-    
+
     try:
         chunker = CodeChunker()
         chunks = chunker.chunk_js_ts_file(test_code, temp_file)
-        
+
         print("\n=== JavaScript Chunking Results ===")
         for i, chunk in enumerate(chunks):
             print(f"\nChunk {i+1}:")
@@ -117,17 +119,18 @@ export default UserManager;
             print(f"Line Range: {chunk['line_range']}")
             print(f"Semantic Context:\n{chunk['semantic_context']}")
             print("-" * 50)
-            
+
     finally:
         os.unlink(temp_file)
 
+
 if __name__ == "__main__":
     print("Testing improved chunking functionality...\n")
-    
+
     # Test Python chunking
     test_python_chunking()
-    
+
     # Test JS chunking
     test_js_chunking()
-    
+
     print("\n✅ Tests completed!")

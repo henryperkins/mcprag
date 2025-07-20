@@ -8,11 +8,10 @@ import hmac
 import hashlib
 import json
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
 from github_azure_integration import GitHubAzureIntegrator
 from dotenv import load_dotenv
 import logging
@@ -30,18 +29,15 @@ executor = ThreadPoolExecutor(max_workers=5)
 # Store repository indexing status
 indexing_status = {}
 
+
 def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
     """Verify GitHub webhook signature."""
     expected_signature = hmac.new(
-        secret.encode('utf-8'),
-        payload,
-        hashlib.sha256
+        secret.encode("utf-8"), payload, hashlib.sha256
     ).hexdigest()
 
-    return hmac.compare_digest(
-        f"sha256={expected_signature}",
-        signature
-    )
+    return hmac.compare_digest(f"sha256={expected_signature}", signature)
+
 
 async def process_push_event(data: Dict):
     """Process push event and index changed files."""
@@ -52,7 +48,7 @@ async def process_push_event(data: Dict):
     indexing_status[repo_name] = {
         "status": "indexing",
         "started_at": datetime.now().isoformat(),
-        "event": "push"
+        "event": "push",
     }
 
     try:
@@ -63,16 +59,17 @@ async def process_push_event(data: Dict):
         if before == "0000000000000000000000000000000000000000":
             # Initial commit - index entire repository
             await asyncio.get_event_loop().run_in_executor(
-                executor,
-                integrator.index_remote_repository,
-                owner, repo
+                executor, integrator.index_remote_repository, owner, repo
             )
         else:
             # Get changed files
             changed_files = await asyncio.get_event_loop().run_in_executor(
                 executor,
                 integrator.get_changed_files_from_push,
-                owner, repo, before, after
+                owner,
+                repo,
+                before,
+                after,
             )
 
             if changed_files:
@@ -80,14 +77,16 @@ async def process_push_event(data: Dict):
                 await asyncio.get_event_loop().run_in_executor(
                     executor,
                     integrator.index_changed_files_remote,
-                    owner, repo, changed_files
+                    owner,
+                    repo,
+                    changed_files,
                 )
 
         # Update status
         indexing_status[repo_name] = {
             "status": "completed",
             "completed_at": datetime.now().isoformat(),
-            "event": "push"
+            "event": "push",
         }
 
     except Exception as e:
@@ -95,9 +94,10 @@ async def process_push_event(data: Dict):
             "status": "failed",
             "error": str(e),
             "failed_at": datetime.now().isoformat(),
-            "event": "push"
+            "event": "push",
         }
         raise
+
 
 async def process_pull_request_event(data: Dict):
     """Process pull request event and index changed files."""
@@ -115,23 +115,19 @@ async def process_pull_request_event(data: Dict):
         "status": "indexing",
         "started_at": datetime.now().isoformat(),
         "event": f"pull_request_{action}",
-        "pr_number": pr_number
+        "pr_number": pr_number,
     }
 
     try:
         # Get PR files
         pr_files = await asyncio.get_event_loop().run_in_executor(
-            executor,
-            integrator.get_pull_request_files,
-            owner, repo, pr_number
+            executor, integrator.get_pull_request_files, owner, repo, pr_number
         )
 
         if pr_files:
             # Index PR files
             await asyncio.get_event_loop().run_in_executor(
-                executor,
-                integrator.index_changed_files_remote,
-                owner, repo, pr_files
+                executor, integrator.index_changed_files_remote, owner, repo, pr_files
             )
 
         # Update status
@@ -139,7 +135,7 @@ async def process_pull_request_event(data: Dict):
             "status": "completed",
             "completed_at": datetime.now().isoformat(),
             "event": f"pull_request_{action}",
-            "pr_number": pr_number
+            "pr_number": pr_number,
         }
 
     except Exception as e:
@@ -148,9 +144,10 @@ async def process_pull_request_event(data: Dict):
             "error": str(e),
             "failed_at": datetime.now().isoformat(),
             "event": f"pull_request_{action}",
-            "pr_number": pr_number
+            "pr_number": pr_number,
         }
         raise
+
 
 @app.post("/webhook")
 async def github_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -166,8 +163,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     # Verify signature - require webhook secret to be set
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
     if not webhook_secret:
-        raise HTTPException(status_code=500, detail="GITHUB_WEBHOOK_SECRET environment variable is required")
-    
+        raise HTTPException(
+            status_code=500,
+            detail="GITHUB_WEBHOOK_SECRET environment variable is required",
+        )
+
     if not verify_webhook_signature(payload, signature, webhook_secret):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
@@ -187,22 +187,22 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     else:
         return {"status": "ignored", "event": event_type}
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
         "service": "github-webhook-handler",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
     }
+
 
 @app.get("/status/repositories")
 async def get_repository_status():
     """Get indexing status for all repositories."""
-    return {
-        "repositories": indexing_status,
-        "total": len(indexing_status)
-    }
+    return {"repositories": indexing_status, "total": len(indexing_status)}
+
 
 @app.get("/status/repository/{owner}/{repo}")
 async def get_specific_repository_status(owner: str, repo: str):
@@ -213,18 +213,19 @@ async def get_specific_repository_status(owner: str, repo: str):
     else:
         raise HTTPException(status_code=404, detail="Repository not found")
 
+
 @app.post("/manual/index-repo")
 async def manual_index_repository(
-    owner: str,
-    repo: str,
-    ref: str = "main",
-    background_tasks: BackgroundTasks
+    owner: str, repo: str, background_tasks: BackgroundTasks, ref: str = "main"
 ):
     """Manually trigger repository indexing."""
     repo_name = f"{owner}/{repo}"
 
     # Check if already indexing
-    if repo_name in indexing_status and indexing_status[repo_name]["status"] == "indexing":
+    if (
+        repo_name in indexing_status
+        and indexing_status[repo_name]["status"] == "indexing"
+    ):
         return {"status": "already_indexing", "repository": repo_name}
 
     # Mark as indexing
@@ -232,22 +233,20 @@ async def manual_index_repository(
         "status": "indexing",
         "started_at": datetime.now().isoformat(),
         "event": "manual",
-        "ref": ref
+        "ref": ref,
     }
 
     # Index in background
     async def index_task():
         try:
             await asyncio.get_event_loop().run_in_executor(
-                executor,
-                integrator.index_remote_repository,
-                owner, repo, ref
+                executor, integrator.index_remote_repository, owner, repo, ref
             )
             indexing_status[repo_name] = {
                 "status": "completed",
                 "completed_at": datetime.now().isoformat(),
                 "event": "manual",
-                "ref": ref
+                "ref": ref,
             }
         except Exception as e:
             indexing_status[repo_name] = {
@@ -255,23 +254,17 @@ async def manual_index_repository(
                 "error": str(e),
                 "failed_at": datetime.now().isoformat(),
                 "event": "manual",
-                "ref": ref
+                "ref": ref,
             }
 
     background_tasks.add_task(index_task)
 
-    return {
-        "status": "accepted",
-        "repository": repo_name,
-        "ref": ref
-    }
+    return {"status": "accepted", "repository": repo_name, "ref": ref}
+
 
 @app.post("/manual/index-pr")
 async def manual_index_pull_request(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    background_tasks: BackgroundTasks
+    owner: str, repo: str, pr_number: int, background_tasks: BackgroundTasks
 ):
     """Manually trigger pull request indexing."""
     repo_name = f"{owner}/{repo}"
@@ -281,23 +274,23 @@ async def manual_index_pull_request(
         "status": "indexing",
         "started_at": datetime.now().isoformat(),
         "event": "manual_pr",
-        "pr_number": pr_number
+        "pr_number": pr_number,
     }
 
     # Index in background
     async def index_task():
         try:
             pr_files = await asyncio.get_event_loop().run_in_executor(
-                executor,
-                integrator.get_pull_request_files,
-                owner, repo, pr_number
+                executor, integrator.get_pull_request_files, owner, repo, pr_number
             )
 
             if pr_files:
                 await asyncio.get_event_loop().run_in_executor(
                     executor,
                     integrator.index_changed_files_remote,
-                    owner, repo, pr_files
+                    owner,
+                    repo,
+                    pr_files,
                 )
 
             indexing_status[repo_name] = {
@@ -305,7 +298,7 @@ async def manual_index_pull_request(
                 "completed_at": datetime.now().isoformat(),
                 "event": "manual_pr",
                 "pr_number": pr_number,
-                "files_indexed": len(pr_files)
+                "files_indexed": len(pr_files),
             }
         except Exception as e:
             indexing_status[repo_name] = {
@@ -313,18 +306,16 @@ async def manual_index_pull_request(
                 "error": str(e),
                 "failed_at": datetime.now().isoformat(),
                 "event": "manual_pr",
-                "pr_number": pr_number
+                "pr_number": pr_number,
             }
 
     background_tasks.add_task(index_task)
 
-    return {
-        "status": "accepted",
-        "repository": repo_name,
-        "pr_number": pr_number
-    }
+    return {"status": "accepted", "repository": repo_name, "pr_number": pr_number}
+
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("WEBHOOK_PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)

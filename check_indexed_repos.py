@@ -8,19 +8,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Get environment variables with error checking
+acs_endpoint = os.getenv("ACS_ENDPOINT")
+acs_admin_key = os.getenv("ACS_ADMIN_KEY")
+
+if not acs_endpoint:
+    raise ValueError("ACS_ENDPOINT environment variable is required")
+if not acs_admin_key:
+    raise ValueError("ACS_ADMIN_KEY environment variable is required")
+
 # Create search client
 client = SearchClient(
-    endpoint=os.getenv("ACS_ENDPOINT"),
+    endpoint=acs_endpoint,
     index_name="codebase-mcp-sota",
-    credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
+    credential=AzureKeyCredential(acs_admin_key),
 )
 
 # Search for all documents and get unique repo names
-results = client.search(
-    search_text="*",
-    select=["repo_name"],
-    top=1000
-)
+results = client.search(search_text="*", select=["repo_name"], top=1000)
 
 repo_names = set()
 count = 0
