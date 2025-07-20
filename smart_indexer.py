@@ -121,8 +121,8 @@ class CodeChunker:
                     # Create semantic context for better retrieval
                     semantic_context = f"""
 {signature} in {file_path}
-Uses: {', '.join(imports[:5])}
-Calls: {', '.join(calls[:5])}
+Uses: {', '.join(imports[:10])}
+Calls: {', '.join(calls[:10])}
 Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
                     """.strip()
 
@@ -306,9 +306,25 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
 
     def _get_signature(self, node) -> str:
         if isinstance(node, ast.FunctionDef):
-            args = [arg.arg for arg in node.args.args]
-            return f"def {node.name}({', '.join(args)})"
+            # Extract arguments with type annotations
+            args_with_types = []
+            for arg in node.args.args:
+                if arg.annotation:
+                    args_with_types.append(f"{arg.arg}: {ast.unparse(arg.annotation)}")
+                else:
+                    args_with_types.append(arg.arg)
+            
+            # Extract return type annotation
+            return_annotation = ""
+            if node.returns:
+                return_annotation = f" -> {ast.unparse(node.returns)}"
+            
+            return f"def {node.name}({', '.join(args_with_types)}){return_annotation}"
         elif isinstance(node, ast.ClassDef):
+            # Extract base classes for inheritance info
+            bases = [ast.unparse(base) for base in node.bases]
+            if bases:
+                return f"class {node.name}({', '.join(bases)})"
             return f"class {node.name}"
         return ""
 
@@ -341,18 +357,54 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
 
         # Get metadata from Babel parser
         meta = self._parse_js_ts(path)
-
-        # Create a single chunk for the file (can be enhanced to split by functions)
-        chunk = {
-            "code_chunk": content[:8000],  # Keep chunks manageable
-            "semantic_context": f"{meta.get('function_signature', '')} in {file_path}",
-            "function_signature": meta.get("function_signature", ""),
-            "imports_used": meta.get("imports_used", []),
-            "calls_functions": meta.get("calls_functions", []),
-            "chunk_type": "file",
-            "line_range": "1-"
-        }
-        chunks.append(chunk)
+        
+        # Split content into lines for chunk extraction
+        lines = content.splitlines()
+        
+        # Extract chunks based on AST
+        ast_chunks = meta.get("chunks", [])
+        imports = meta.get("imports_used", [])
+        calls = meta.get("calls_functions", [])
+        
+        if ast_chunks:
+            # Process each function/class as a separate chunk
+            for ast_chunk in ast_chunks:
+                start_line = ast_chunk.get("start_line", 1) - 1
+                end_line = ast_chunk.get("end_line", len(lines))
+                
+                # Extract the actual code
+                chunk_lines = lines[start_line:end_line]
+                chunk_code = '\n'.join(chunk_lines)
+                
+                # Create semantic context
+                semantic_context = f"""
+{ast_chunk.get('signature', '')} in {file_path}
+Uses: {', '.join(imports[:10])}
+Calls: {', '.join(list(calls)[:10])}
+Type: {ast_chunk.get('type', 'unknown')}
+                """.strip()
+                
+                chunks.append({
+                    "code_chunk": chunk_code,
+                    "semantic_context": semantic_context,
+                    "function_signature": ast_chunk.get('signature', ''),
+                    "imports_used": imports,
+                    "calls_functions": list(calls),
+                    "chunk_type": ast_chunk.get('type', 'function'),
+                    "line_range": f"{start_line+1}-{end_line}"
+                })
+        else:
+            # Fallback to file-level chunk if AST parsing failed
+            chunk = {
+                "code_chunk": content[:8000],  # Keep chunks manageable
+                "semantic_context": f"Code from {file_path}",
+                "function_signature": "",
+                "imports_used": imports,
+                "calls_functions": list(calls),
+                "chunk_type": "file",
+                "line_range": "1-"
+            }
+            chunks.append(chunk)
 
         return chunks
 

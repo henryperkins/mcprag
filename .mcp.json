@@ -15,10 +15,6 @@
                 "AZURE_OPENAI_DEPLOYMENT": "text-embedding-ada-002",
                 "PYTHONPATH": "/home/azureuser/mcprag"
             }
-        },
-        "microsoft-docs": {
-            "type": "http",
-            "url": "https://learn.microsoft.com/api/mcp"
         }
     }
 }

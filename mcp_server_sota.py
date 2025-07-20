@@ -7,6 +7,7 @@ from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from fastapi import FastAPI
@@ -17,6 +18,13 @@ try:
     VECTOR_SUPPORT = True
 except ImportError:
     VECTOR_SUPPORT = False
+
+# Add import for Microsoft Docs MCP Client
+try:
+    from microsoft_docs_mcp_client import MicrosoftDocsMCPClient
+    MICROSOFT_DOCS_SUPPORT = True
+except ImportError:
+    MICROSOFT_DOCS_SUPPORT = False
 
 load_dotenv()
 
@@ -30,6 +38,7 @@ class MCPServer:
             index_name="codebase-mcp-sota",
             credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
         )
+        self.current_directory = os.getcwd()
 
         # Initialize embedder if available
         self.embedder = None
@@ -39,6 +48,25 @@ class MCPServer:
                 print("✅ Vector search enabled in MCP server")
             except Exception as e:
                 print(f"Warning: Could not initialize vector embedder: {e}")
+                
+        # Initialize Microsoft Docs client if available
+        self.microsoft_docs_client = None
+        if MICROSOFT_DOCS_SUPPORT:
+            print("✅ Microsoft Docs search enabled in MCP server")
+    
+    def detect_current_repository(self) -> str:
+        """Detect repository name from current working directory."""
+        current_path = Path(self.current_directory)
+        
+        # Walk up directory tree looking for .git folder
+        for parent in [current_path] + list(current_path.parents):
+            git_dir = parent / ".git"
+            if git_dir.exists() and git_dir.is_dir():
+                # Found git repository root
+                return parent.name
+        
+        # Fallback to current directory name
+        return current_path.name
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle MCP protocol requests."""
@@ -63,35 +91,63 @@ class MCPServer:
             }
 
         elif method == "tools/list":
+            tools = [
+                {
+                    "name": "search_code",
+                    "description": "Search for code snippets using Azure Cognitive Search with semantic understanding and vector search",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Natural language query to search for code"
+                            },
+                            "intent": {
+                                "type": "string",
+                                "enum": ["implement", "debug", "understand", "refactor"],
+                                "description": "Search intent to optimize results"
+                            },
+                            "language": {
+                                "type": "string",
+                                "description": "Programming language filter"
+                            },
+                            "repository": {
+                                "type": "string",
+                                "description": "Repository to search (defaults to current directory's repo name, use '*' for all repos)"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            ]
+            
+            # Add Microsoft Docs search tool if available
+            if MICROSOFT_DOCS_SUPPORT:
+                tools.append({
+                    "name": "search_microsoft_docs",
+                    "description": "Search Microsoft Learn documentation for APIs, guides, and technical reference",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Natural language query to search Microsoft documentation"
+                            },
+                            "max_results": {
+                                "type": "number",
+                                "description": "Maximum number of results to return (default: 10)",
+                                "default": 10
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                })
+                
             return {
                 "jsonrpc": "2.0",
                 "id": request.get("id"),
                 "result": {
-                    "tools": [
-                        {
-                            "name": "search_code",
-                            "description": "Search for code snippets using Azure Cognitive Search with semantic understanding and vector search",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {
-                                        "type": "string",
-                                        "description": "Natural language query to search for code"
-                                    },
-                                    "intent": {
-                                        "type": "string",
-                                        "enum": ["implement", "debug", "understand", "refactor"],
-                                        "description": "Search intent to optimize results"
-                                    },
-                                    "language": {
-                                        "type": "string",
-                                        "description": "Programming language filter"
-                                    }
-                                },
-                                "required": ["query"]
-                            }
-                        }
-                    ]
+                    "tools": tools
                 }
             }
 
@@ -119,7 +175,8 @@ class MCPServer:
                 results = await self.search_code_enhanced(
                     query=arguments.get("query", ""),
                     intent=arguments.get("intent"),
-                    language=arguments.get("language")
+                    language=arguments.get("language"),
+                    repository=arguments.get("repository")
                 )
 
                 return {
@@ -144,6 +201,41 @@ class MCPServer:
                         "message": f"Search error: {str(e)}"
                     }
                 }
+                
+        elif tool_name == "search_microsoft_docs" and MICROSOFT_DOCS_SUPPORT:
+            try:
+                # Create client instance for this request
+                async with MicrosoftDocsMCPClient() as client:
+                    results = await client.search_docs(
+                        query=arguments.get("query", ""),
+                        max_results=arguments.get("max_results", 10)
+                    )
+                    
+                    formatted_results = self.format_microsoft_docs_results(results)
+                    
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": formatted_results
+                                }
+                            ]
+                        }
+                    }
+                    
+            except Exception as e:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": {
+                        "code": -32603,
+                        "message": f"Microsoft Docs search error: {str(e)}"
+                    }
+                }
+                
         else:
             return {
                 "jsonrpc": "2.0",
@@ -154,10 +246,23 @@ class MCPServer:
                 }
             }
 
-    async def search_code_enhanced(self, query: str, intent: Optional[str] = None, language: Optional[str] = None) -> List[Dict]:
-        """Enhanced search with vector support."""
+    async def search_code_enhanced(self, query: str, intent: Optional[str] = None, 
+                                   language: Optional[str] = None, repository: Optional[str] = None) -> List[Dict]:
+        """Enhanced search with vector support and repository filtering."""
         # Enhance query based on intent
         enhanced_query = self._enhance_query_by_intent(query, intent)
+        
+        # Determine repository to search
+        if repository is None:
+            # Default to current repository
+            repository = self.detect_current_repository()
+            print(f"🔍 Searching in repository: {repository} (auto-detected)")
+        elif repository == "*" or repository.lower() == "all":
+            # Search all repositories
+            repository = None
+            print("🔍 Searching across all repositories")
+        else:
+            print(f"🔍 Searching in repository: {repository}")
 
         # Build search parameters
         search_params = {
@@ -183,9 +288,20 @@ class MCPServer:
                 )
                 search_params["vector_queries"] = [vector_query]
 
+        # Build filter conditions
+        filters = []
+        
+        # Add repository filter if specified (not None means we have a specific repo)
+        if repository is not None:
+            filters.append(f"repo_name eq '{repository}'")
+        
         # Add language filter if specified
         if language:
-            search_params["filter"] = f"language eq '{language}'"
+            filters.append(f"language eq '{language}'")
+        
+        # Combine filters with AND
+        if filters:
+            search_params["filter"] = " and ".join(filters)
 
         # Execute search
         results = list(self.search_client.search(**search_params))
@@ -230,6 +346,29 @@ class MCPServer:
                 formatted += "```\n\n"
 
         return formatted
+        
+    def format_microsoft_docs_results(self, results: List[Dict]) -> str:
+        """Format Microsoft Docs search results for MCP response."""
+        if not results:
+            return "No Microsoft documentation found for your query."
+            
+        formatted = f"Found {len(results)} Microsoft Docs matches:\n\n"
+        
+        for i, result in enumerate(results, 1):
+            formatted += f"**Result {i}**\n"
+            formatted += f"- Title: {result.get('title', 'Unknown')}\n"
+            formatted += f"- Source: {result.get('source', 'Microsoft Learn')}\n"
+            
+            content = result.get('content', '')
+            if content:
+                # Truncate content if too long
+                if len(content) > 500:
+                    content = content[:500] + "..."
+                formatted += f"- Content: {content}\n"
+            
+            formatted += "\n"
+            
+        return formatted
 
 
 # FastAPI endpoints for testing
@@ -237,6 +376,7 @@ class MCPSearchRequest(BaseModel):
     input: str = Field(..., description="Natural language query or code context")
     context: Optional[Dict] = Field(None, description="Current code context from Claude")
     intent: Optional[str] = Field(None, description="Search intent: implement/debug/understand/refactor")
+    repository: Optional[str] = Field(None, description="Repository to search (defaults to current, use '*' for all)")
 
 
 @app.get("/health")
@@ -252,7 +392,8 @@ async def mcp_contextual_search(request: MCPSearchRequest):
     try:
         results = await server.search_code_enhanced(
             query=request.input,
-            intent=request.intent
+            intent=request.intent,
+            repository=request.repository
         )
 
         # Process results for MCP context

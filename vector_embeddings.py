@@ -1,18 +1,16 @@
 import os
-from typing import List, Sequence
+import logging
+from typing import List, Sequence, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ---------------------------------------------------------------------------
 # Optional dependency: ``openai``
 # ---------------------------------------------------------------------------
 # Unit-test environments (or fresh checkouts) might not have the official
 # OpenAI SDK installed.  To keep the rest of this module importable we fall
 # back to a minimal stub that exposes only the attributes we access.
-# ---------------------------------------------------------------------------
-
-# --- Optional dependency ----------------------------------------------------
-# ``openai`` is not installed in the execution sandbox.  To keep this module
-# import-safe we synthesize a *very* small shim that imitates just enough of
-# the public surface area used here *and* in our unit-tests (which rely on
-# ``unittest.mock.patch`` to intercept calls).
 # ---------------------------------------------------------------------------
 
 from types import SimpleNamespace
@@ -36,34 +34,20 @@ def _build_openai_stub():  # noqa: D401 – helper returns stub module
 
     # Build a stub module with attributes the library expects
     embeddings_ns = SimpleNamespace(create=_fake_create)
-    Embedding_cls = SimpleNamespace(create=_fake_create)  # legacy path
-
-    stub = SimpleNamespace(
-        embeddings=embeddings_ns,
-        Embedding=Embedding_cls,
-        api_type=None,
-        api_base=None,
-        api_key=None,
-        api_version=None,
-    )
-
-    return stub
+    
+    # Create a fake client class
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.embeddings = embeddings_ns
+    
+    return FakeClient
 
 
 try:
-    import openai  # type: ignore
+    from openai import OpenAI, AzureOpenAI  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover – sandbox or dev env
-    openai = _build_openai_stub()  # type: ignore
-
-# Expose ``OpenAI`` symbol so tests can patch it: they expect a callable client
-# constructor.  We forward to the real/stub ``openai`` module for simplicity.
-OpenAI = openai  # type: ignore – dynamic assignment for test patching
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# Typing imports
-from typing import Optional
+    OpenAI = _build_openai_stub()  # type: ignore
+    AzureOpenAI = _build_openai_stub()  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +81,7 @@ class VectorEmbedder:
         if not self.api_key:
             raise ValueError("API key for OpenAI or Azure OpenAI must be provided via environment variables")
 
-        self.api_version = _get_env("AZURE_OPENAI_API_VERSION") or "2024-02-01"
+        self.api_version = _get_env("AZURE_OPENAI_API_VERSION") or "2024-10-21"
 
         # Detect whether we should use Azure-specific parameters
         self.use_azure: bool = bool(self.endpoint)
@@ -117,15 +101,16 @@ class VectorEmbedder:
         # *tests/test_vector_embedder.py* patches ``vector_embeddings.OpenAI``
         # to intercept this call, therefore we must construct the client via
         # that symbol instead of the canonical import path.
-        client_kwargs = {"api_key": self.api_key}
         if self.use_azure:
-            client_kwargs.update({
-                "azure_endpoint": self.endpoint,
-                "api_version": self.api_version,
-            })
-
-        # MyPy will complain – OpenAI is a dynamically provided symbol
-        self._client = OpenAI(**client_kwargs)  # type: ignore[arg-type]
+            # Use AzureOpenAI client for Azure endpoints
+            self._client = AzureOpenAI(
+                api_key=self.api_key,
+                azure_endpoint=self.endpoint,
+                api_version=self.api_version,
+            )  # type: ignore[arg-type]
+        else:
+            # Use standard OpenAI client
+            self._client = OpenAI(api_key=self.api_key)  # type: ignore[arg-type]
 
     # ----------------------------------------------------------------------
     # Public helpers
