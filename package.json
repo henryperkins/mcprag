@@ -19,5 +19,8 @@
     "indexing"
   ],
   "author": "Henry Perkins",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "upgrade": "^1.1.0"
+  }
 }

@@ -6,8 +6,9 @@ import subprocess
 import json
 import argparse
 import logging
+import re
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Any
 
 # ---------------------------------------------------------------------------
 # Optional Azure SDK imports
@@ -50,19 +51,23 @@ except (
             claims: str | None = None,
             tenant_id: str | None = None,
             enable_cae: bool = False,
-            **kwargs,
-        ) -> "AccessToken":
-            from datetime import datetime  # Local import to avoid top-level dependency
-
-            class AccessToken:
-                def __init__(self):
-                    self.token = "dummy_token"
-                    self.expires_on = int(datetime.now().timestamp()) + 3600
-
-            return AccessToken()
+            **kwargs: Any,
+        ):
+            # Lightweight AccessToken compatible with azure.core.credentials.AccessToken
+            try:
+                from azure.core.credentials import AccessToken as _AzureAccessToken  # type: ignore
+                from datetime import datetime as _dt  # avoid top-level dependency
+                return _AzureAccessToken("dummy_token", int(_dt.now().timestamp()) + 3600)
+            except Exception:
+                class _AccessToken:
+                    def __init__(self):
+                        self.token = "dummy_token"
+                        # not used by runtime paths, only for type compatibility in tests
+                        self.expires_on = 0
+                return _AccessToken()
 
     SearchClient = _DummySearchClient  # type: ignore
-    AzureKeyCredential = _DummyAzureKeyCredential  # type: ignore
+    AzureKeyCredential = _DummyAzureKeyCredential  # type: ignore[assignment]
 
 # Provide alias expected by unit-tests (they patch ``smart_indexer.azure_search_client``)
 azure_search_client = SearchClient
@@ -75,6 +80,7 @@ try:
     VECTOR_SUPPORT = True
 except ImportError:
     VECTOR_SUPPORT = False
+    VectorEmbedder = None  # type: ignore
     print(
         "Warning: Vector embeddings not available. Install openai package for vector support."
     )
@@ -105,16 +111,19 @@ class CodeChunker:
         if not acs_key:
             raise ValueError("ACS_ADMIN_KEY environment variable is required")
 
+        # Pylance note: in stub mode AzureKeyCredential is a local shim; ignore typing
         self.client = SearchClient(
             endpoint=os.getenv("ACS_ENDPOINT") or "",
             index_name="codebase-mcp-sota",
-            credential=AzureKeyCredential(acs_key),
+            credential=AzureKeyCredential(acs_key),  # type: ignore[arg-type]
         )
 
         # Initialize embedder if available
         self.embedder = None
-        if VECTOR_SUPPORT and (
-            os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+        if (
+            VECTOR_SUPPORT
+            and VectorEmbedder is not None
+            and (os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY"))
         ):
             try:
                 self.embedder = VectorEmbedder()
@@ -257,22 +266,22 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
             else:
                 tree = source_or_tree
 
-            collected: List[str] = []
+            py_collected: List[str] = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
-                    collected.extend(alias.name for alias in node.names)
+                    py_collected.extend(alias.name for alias in node.names)
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     for alias in node.names:
-                        collected.append(f"{node.module}.{alias.name}")
+                        py_collected.append(f"{node.module}.{alias.name}")
 
             # De-duplicate while preserving order
-            seen = set()
-            ordered: List[str] = []
-            for name in collected:
-                if name not in seen:
-                    seen.add(name)
-                    ordered.append(name)
-            return ordered
+            py_seen = set()
+            py_ordered: List[str] = []
+            for name in py_collected:
+                if name not in py_seen:
+                    py_seen.add(name)
+                    py_ordered.append(name)
+            return py_ordered
 
         # ---------------------------- JS / TS ----------------------------
         # Very lightweight heuristic based on static import / require lines.
@@ -283,7 +292,7 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
             # Should not happen – JS/TS path always passes a str
             src_lines = []
 
-        collected: List[str] = []
+        js_collected: List[str] = []
         import re
         import itertools
 
@@ -311,28 +320,28 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
                     for exp in exports:
                         # Strip aliasing ("as")
                         exp = exp.split(" as ")[0].strip()
-                        collected.append(f"{module}.{exp}")
+                        js_collected.append(f"{module}.{exp}")
                 else:
-                    collected.append(module)
+                    js_collected.append(module)
                 continue
 
             m = bare_import_re.match(line)
             if m:
-                collected.append(m.group("mod"))
+                js_collected.append(m.group("mod"))
                 continue
 
             m = require_re.search(line)
             if m:
-                collected.append(m.group("mod"))
+                js_collected.append(m.group("mod"))
 
         # De-duplicate preserve order
-        seen = set()
-        ordered: List[str] = []
-        for name in collected:
-            if name not in seen:
-                seen.add(name)
-                ordered.append(name)
-        return ordered
+        js_seen = set()
+        js_ordered: List[str] = []
+        for name in js_collected:
+            if name not in js_seen:
+                js_seen.add(name)
+                js_ordered.append(name)
+        return js_ordered
 
     def _extract_function_calls(self, node) -> List[str]:
         """Extract names of functions or methods invoked within *node*.

@@ -10,7 +10,7 @@ import hashlib
 from typing import List, Dict, Optional
 import requests
 import time
-from pathlib import Path
+# from pathlib import Path  # unused
 from smart_indexer import CodeChunker
 from dotenv import load_dotenv
 
@@ -25,6 +25,8 @@ class GitHubAzureIntegrator:
         # Only add Authorization header if token is present
         if self.github_token:
             self.headers["Authorization"] = f"token {self.github_token}"
+        else:
+            print("⚠️  GITHUB_TOKEN is not set; GitHub API rate limits will be very low.")
         self.chunker = CodeChunker()
 
     def get_repository_files(
@@ -86,6 +88,15 @@ class GitHubAzureIntegrator:
         url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
         response = self._get_with_retry(url)
 
+        files = []
+        for file in response.json():
+            if file["status"] != "removed" and any(
+                file["filename"].endswith(ext) for ext in [".py", ".js", ".ts"]
+            ):
+                files.append(file["filename"])
+
+        return files
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -117,15 +128,6 @@ class GitHubAzureIntegrator:
             resp.raise_for_status()
 
         return resp  # Unreachable but appeases type-checkers
-
-        files = []
-        for file in response.json():
-            if file["status"] != "removed" and any(
-                file["filename"].endswith(ext) for ext in [".py", ".js", ".ts"]
-            ):
-                files.append(file["filename"])
-
-        return files
 
     def index_remote_repository(self, owner: str, repo: str, ref: str = "main"):
         """Index an entire remote repository."""
@@ -173,27 +175,37 @@ class GitHubAzureIntegrator:
 
                     # Add vector embedding if available
                     if self.chunker.embedder:
-                        embedding = self.chunker.embedder.generate_code_embedding(
-                            chunk["code_chunk"], chunk["semantic_context"]
-                        )
-                        if embedding:
-                            doc["code_vector"] = embedding
+                        try:
+                            embedding = self.chunker.embedder.generate_code_embedding(
+                                chunk.get("code_chunk", ""), chunk.get("semantic_context", "")
+                            )
+                            if embedding:
+                                doc["code_vector"] = embedding
+                        except Exception as ee:
+                            print(f"⚠️  Embedding generation failed for {file_info['path']} chunk {i}: {ee}")
 
                     documents.append(doc)
 
-                    # Upload in batches
+                    # Upload in batches (50 is default batch size)
                     if len(documents) >= 50:
-                        self.chunker.client.merge_or_upload_documents(documents)
-                        print(f"✅ Indexed {len(documents)} chunks")
-                        documents = []
+                        try:
+                            self.chunker.client.merge_or_upload_documents(documents)
+                            print(f"✅ Indexed {len(documents)} chunks")
+                        except Exception as up_err:
+                            print(f"❌ Batch upload failed ({len(documents)} docs): {up_err}")
+                        finally:
+                            documents = []
 
             except Exception as e:
                 print(f"❌ Error indexing {file_info['path']}: {e}")
 
         # Upload remaining documents
         if documents:
-            self.chunker.client.merge_or_upload_documents(documents)
-            print(f"✅ Indexed final {len(documents)} chunks")
+            try:
+                self.chunker.client.merge_or_upload_documents(documents)
+                print(f"✅ Indexed final {len(documents)} chunks")
+            except Exception as up_err:
+                print(f"❌ Final batch upload failed ({len(documents)} docs): {up_err}")
 
         print(f"🎉 Successfully indexed {owner}/{repo}")
 
@@ -236,11 +248,14 @@ class GitHubAzureIntegrator:
 
                     # Add vector embedding if available
                     if self.chunker.embedder:
-                        embedding = self.chunker.embedder.generate_code_embedding(
-                            chunk["code_chunk"], chunk["semantic_context"]
-                        )
-                        if embedding:
-                            doc["code_vector"] = embedding
+                        try:
+                            embedding = self.chunker.embedder.generate_code_embedding(
+                                chunk.get("code_chunk", ""), chunk.get("semantic_context", "")
+                            )
+                            if embedding:
+                                doc["code_vector"] = embedding
+                        except Exception as ee:
+                            print(f"⚠️  Embedding generation failed for {file_path} chunk {i}: {ee}")
 
                     documents.append(doc)
 
@@ -248,8 +263,11 @@ class GitHubAzureIntegrator:
                 print(f"❌ Error indexing {file_path}: {e}")
 
         if documents:
-            self.chunker.client.merge_or_upload_documents(documents)
-            print(f"✅ Indexed {len(documents)} chunks from changed files")
+            try:
+                self.chunker.client.merge_or_upload_documents(documents)
+                print(f"✅ Indexed {len(documents)} chunks from changed files")
+            except Exception as up_err:
+                print(f"❌ Upload failed for {len(documents)} changed-file chunks: {up_err}")
 
 
 def main():

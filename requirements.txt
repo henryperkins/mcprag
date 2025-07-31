@@ -10,6 +10,12 @@ aiofiles==23.2.1
 httpx==0.25.2
 openai==1.3.0
 
+# Security and rate limiting
+slowapi==0.1.9
+
+# MCP SDK (optional - install with pip install 'mcp[cli]')
+# mcp[cli]
+
 # Microsoft Docs MCP integration
 aiohttp==3.9.1
 

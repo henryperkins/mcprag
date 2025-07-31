@@ -95,6 +95,357 @@ Required in `.env`:
 - `ACS_ENDPOINT` - Azure Cognitive Search endpoint
 - `ACS_ADMIN_KEY` - Azure admin key
 
-### Testing
+## Testing & Quality Assurance
+
+### Running Tests
+```bash
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov
+
+# Run specific test file
+pytest tests/test_mcp_tools.py
+
+# Test MCP tools registration
+python tests/test_mcp_tools.py
+```
+
+### Code Quality Tools
+```bash
+# Python linting
+flake8
+
+# Type checking
+mypy .
+
+# Security scanning
+bandit -r .
+
+# Check dependency vulnerabilities
+safety check
+```
+
+### CI/CD Integration
 
 The repository includes GitHub webhook integration (`github_webhook_handler.py`) for automatic re-indexing on code changes. Azure deployment scripts are in `setup_azure.py` and `deploy.py`.
+
+## Deployment & Production
+
+### Azure Setup
+```bash
+# Login to Azure
+az login
+
+# Create resources
+python setup/setup_azure.py
+
+# Deploy to Azure
+python setup/deploy.py
+```
+
+### Docker Deployment
+```bash
+# Build image
+docker build -t mcp-server .
+
+# Run container
+docker run -p 8001:8001 --env-file .env mcp-server
+```
+
+### Cleanup
+```bash
+# Remove local files only
+python setup/cleanup_local.py
+
+# Complete uninstall (Azure + local)
+python setup/uninstall.py  # WARNING: Deletes all Azure resources
+```
+
+## Claude Code Integration
+
+### Adding this MCP Server to Claude Code
+
+1. **Start the MCP server**:
+   ```bash
+   python mcp_server_sota.py
+   ```
+
+2. **Register with Claude Code** (in a separate terminal):
+   ```bash
+   # Add the code search MCP server
+   claude-code mcp add \
+     --name azure-code-search \
+     --type http \
+     --url http://localhost:8001/mcp-query \
+     --method POST
+
+   # If using the config file directly, add to mcp-servers.json:
+   # {
+   #   "mcps": {
+   #     "azure-code-search": {
+   #       "command": "python",
+   #       "args": ["/path/to/mcp_server_sota.py"],
+   #       "env": {
+   #         "ACS_ENDPOINT": "your-endpoint",
+   #         "ACS_ADMIN_KEY": "your-key"
+   #       }
+   #     }
+   #   }
+   # }
+   ```
+
+3. **Using in Claude Code**:
+   - The MCP tools `mcp__azure-code-search__search_code` and `mcp__azure-code-search__search_microsoft_docs` will be available
+   - Example: "Search for authentication functions" will use the code search
+   - Example: "Find Microsoft docs about Azure Functions" will use the docs search
+
+### Recommended Hooks
+
+To maintain code quality and keep the search index updated, consider adding these hooks to your Claude Code settings:
+
+```json
+{
+  "hooks": {
+    "post-file-change": [
+      {
+        "command": "python smart_indexer.py --files {files}",
+        "description": "Re-index changed files for search"
+      }
+    ],
+    "pre-commit": [
+      {
+        "command": "flake8 {staged_files}",
+        "description": "Lint Python files before commit"
+      },
+      {
+        "command": "mypy {staged_files}",
+        "description": "Type check Python files"
+      }
+    ]
+  }
+}
+```
+
+This ensures:
+- Changed files are automatically re-indexed for search
+- Code quality checks run before commits
+- Type safety is maintained
+
+### Using with Claude Code SDK
+
+This MCP server can be integrated with the Claude Code SDK for programmatic code search:
+
+```python
+from claude_code_sdk import ClaudeCodeClient
+
+# Initialize client
+client = ClaudeCodeClient()
+
+# Ensure MCP server is running
+# python mcp_server_sota.py
+
+# Use the code search tool
+results = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="search_code",
+    arguments={
+        "query": "authentication middleware",
+        "intent": "implement",
+        "language": "python"
+    }
+)
+
+# Search Microsoft docs
+docs = await client.use_mcp_tool(
+    server_name="azure-code-search", 
+    tool_name="search_microsoft_docs",
+    arguments={
+        "query": "Azure Functions triggers",
+        "max_results": 5
+    }
+)
+```
+
+For building extensions or automated workflows, see the [Claude Code SDK documentation](https://docs.anthropic.com/en/docs/claude-code/sdk).
+
+### Advanced SDK Integration Patterns
+
+The codebase includes `mcp_server_sdk.py` as an example of SDK-based implementation with advanced features:
+
+1. **Type-Safe Tool Definitions**:
+   ```python
+   @server.tool(input_schema=SearchCodeParams, output_schema=List[SearchResult])
+   async def search_code(params: SearchCodeParams) -> List[SearchResult]:
+       # Fully typed implementation with validation
+   ```
+
+2. **Resource Endpoints**:
+   ```python
+   @server.resource(uri="repositories")
+   async def list_repositories() -> Dict[str, Any]:
+       # Expose repository list as a resource
+   ```
+
+3. **Prompt Templates**:
+   ```python
+   @server.prompt(name="implement_feature")
+   async def implement_feature_prompt(feature_description: str) -> str:
+       # Reusable prompt for feature implementation
+   ```
+
+4. **Lifecycle Management**:
+   ```python
+   @server.on_initialize
+   async def initialize():
+       # Setup Azure clients, embedder, etc.
+   ```
+
+5. **Structured Output with Pydantic**:
+   - `SearchResult` model for code search results
+   - `DocsResult` model for documentation results
+   - Automatic validation and serialization
+
+### Client SDK Usage Examples
+
+```python
+# Advanced usage with error handling and retries
+from claude_code_sdk import ClaudeCodeClient, MCPError
+import asyncio
+
+async def smart_code_search(query: str, context: dict = None):
+    client = ClaudeCodeClient()
+    
+    try:
+        # Search with context awareness
+        results = await client.use_mcp_tool(
+            server_name="azure-code-search",
+            tool_name="search_code",
+            arguments={
+                "query": query,
+                "intent": context.get("intent", "understand"),
+                "language": context.get("language"),
+                "repository": context.get("repo", "*")
+            }
+        )
+        
+        # Process results with dependency resolution
+        if results and context.get("include_dependencies"):
+            for result in results[:3]:  # Top 3 results
+                deps = await client.use_mcp_tool(
+                    server_name="azure-code-search",
+                    tool_name="search_code",
+                    arguments={
+                        "query": f"functions called by {result['function_name']}",
+                        "repository": result['repository']
+                    }
+                )
+                result['dependencies'] = deps
+                
+        return results
+        
+    except MCPError as e:
+        # Handle MCP-specific errors
+        print(f"MCP Error: {e}")
+        return []
+
+# Batch operations
+async def index_and_search(file_paths: List[str], search_query: str):
+    # Index files
+    subprocess.run(["python", "smart_indexer.py", "--files"] + file_paths)
+    
+    # Wait for indexing to complete
+    await asyncio.sleep(2)
+    
+    # Search indexed content
+    return await smart_code_search(search_query)
+
+# Using prompt templates
+async def get_implementation_plan(feature: str):
+    client = ClaudeCodeClient()
+    
+    # Get prompt from template
+    prompt = await client.use_mcp_prompt(
+        server_name="azure-code-search",
+        prompt_name="implement_feature",
+        arguments={"feature_description": feature}
+    )
+    
+    # Use Claude with the generated prompt
+    response = await client.chat(prompt)
+    return response
+```
+
+### Building Custom MCP Extensions
+
+For creating your own MCP tools that integrate with this codebase:
+
+```python
+from mcp import Server
+
+# Extend the code search with custom tools
+@server.tool()
+async def analyze_code_quality(file_path: str) -> dict:
+    # Run static analysis
+    result = subprocess.run(["flake8", file_path], capture_output=True)
+    
+    # Search for similar quality issues
+    similar_issues = await search_code(SearchCodeParams(
+        query=f"flake8 {result.stdout.decode()}",
+        intent="debug"
+    ))
+    
+    return {
+        "issues": result.stdout.decode().split('\n'),
+        "similar_fixes": similar_issues
+    }
+```
+
+## Azure Cognitive Search Advanced Features
+
+### Enhanced Search Implementation
+
+The repository includes `azure_search_enhanced.py` demonstrating advanced Azure Search features:
+
+1. **Custom Code Analyzers**:
+   - CamelCase analyzer for Java/C# style code
+   - Snake_case analyzer for Python style
+   - Import path analyzer for package structures
+
+2. **Scoring Profiles**:
+   - `code_freshness` - Boosts recently modified code
+   - `code_quality` - Prioritizes well-tested, documented code
+   - `tag_boost` - Emphasizes code with specific tags
+
+3. **Autocomplete & Suggestions**:
+   ```python
+   # Get function name suggestions
+   suggestions = search_client.suggest("auth", "function_suggester")
+   ```
+
+4. **Faceted Search** - Filter results by language, repository, tags
+5. **Hit Highlighting** - Shows matched terms in context
+6. **Fuzzy Search** - Handles typos automatically
+7. **Synonym Support** - Maps related programming terms
+
+### Using Enhanced Features
+
+```bash
+# Create enhanced index with all features
+python azure_search_enhanced.py
+
+# Update indexer to include metadata
+python smart_indexer.py --include-metrics --include-test-coverage
+```
+
+See `docs/AZURE_SEARCH_ADVANCED_FEATURES.md` for detailed implementation guide.
+
+## Additional Components
+
+### Microsoft Docs Integration
+
+The codebase includes a Microsoft Docs search integration via MCP:
+- **`microsoft_docs_mcp_client.py`** - Client for searching Microsoft documentation
+- **`debug_microsoft_docs.py`** - Debugging tool for Microsoft Docs search
+- Provides access to API documentation, guides, and technical references through the MCP protocol
