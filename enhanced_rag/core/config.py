@@ -4,7 +4,7 @@ Centralizes all configuration with environment variable support
 """
 
 import os
-from typing import Dict, Any, Optional, List
+from typing import Optional, List
 from pydantic import BaseModel, Field
 from pathlib import Path
 import json
@@ -12,8 +12,12 @@ import json
 
 class AzureConfig(BaseModel):
     """Azure AI Search configuration"""
-    endpoint: str = Field(default_factory=lambda: os.getenv("ACS_ENDPOINT", ""))
-    admin_key: str = Field(default_factory=lambda: os.getenv("ACS_ADMIN_KEY", ""))
+    endpoint: str = Field(
+        default_factory=lambda: os.getenv("ACS_ENDPOINT", "")
+    )
+    admin_key: str = Field(
+        default_factory=lambda: os.getenv("ACS_ADMIN_KEY", "")
+    )
     index_name: str = Field(default="enhanced-rag-index")
     semantic_config_name: str = Field(default="enhanced-semantic-config")
     
@@ -32,10 +36,17 @@ class EmbeddingConfig(BaseModel):
     model: str = Field(default="text-embedding-3-large")
     dimensions: int = Field(default=1536)
     batch_size: int = Field(default=16)
-    
+    max_concurrent_requests: int = Field(default=5)
+    circuit_breaker_threshold: int = Field(default=5)
+    circuit_breaker_reset_seconds: int = Field(default=30)
+
     # Azure OpenAI settings
-    azure_endpoint: str = Field(default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT", ""))
-    api_key: str = Field(default_factory=lambda: os.getenv("AZURE_OPENAI_KEY", ""))
+    azure_endpoint: str = Field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT", "")
+    )
+    api_key: str = Field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_KEY", "")
+    )
     api_version: str = Field(default="2024-02-15-preview")
 
 
@@ -143,8 +154,12 @@ class Config(BaseModel):
     performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
     
     # Global settings
-    debug: bool = Field(default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true")
-    log_level: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    debug: bool = Field(
+        default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true"
+    )
+    log_level: str = Field(
+        default_factory=lambda: os.getenv("LOG_LEVEL", "INFO")
+    )
     
     @classmethod
     def from_file(cls, path: str) -> "Config":
@@ -183,3 +198,46 @@ def set_config(config: Config) -> None:
     """Set global configuration instance"""
     global _config
     _config = config
+
+
+def validate_config(cfg: Config) -> None:
+    """
+    Validate required configuration values and raise ValueError on problems.
+    """
+    # Azure Search required
+    if not cfg.azure.endpoint or not cfg.azure.admin_key:
+        raise ValueError(
+            "ACS_ENDPOINT and ACS_ADMIN_KEY must be set and non-empty"
+        )
+
+    # Embedding configuration when using Azure OpenAI
+    if cfg.embedding.provider.lower() == "azure_openai":
+        if not cfg.embedding.azure_endpoint or not cfg.embedding.api_key:
+            raise ValueError(
+                "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY must be set "
+                "for Azure OpenAI provider"
+            )
+        if cfg.embedding.dimensions <= 0:
+            raise ValueError("Embedding dimensions must be positive")
+        if cfg.embedding.max_concurrent_requests <= 0:
+            raise ValueError("max_concurrent_requests must be positive")
+
+
+def validate_config(cfg: Config) -> None:
+    """
+    Validate required configuration values and raise ValueError on problems.
+    """
+    # Azure Search required
+    if not cfg.azure.endpoint or not cfg.azure.admin_key:
+        raise ValueError("ACS_ENDPOINT and ACS_ADMIN_KEY must be set and non-empty")
+
+    # Embedding configuration when using Azure OpenAI
+    if cfg.embedding.provider.lower() == "azure_openai":
+        if not cfg.embedding.azure_endpoint or not cfg.embedding.api_key:
+            raise ValueError(
+                "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY must be set for Azure OpenAI provider"
+            )
+        if cfg.embedding.dimensions <= 0:
+            raise ValueError("Embedding dimensions must be positive")
+        if cfg.embedding.max_concurrent_requests <= 0:
+            raise ValueError("max_concurrent_requests must be positive")

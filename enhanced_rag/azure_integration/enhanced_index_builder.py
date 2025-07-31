@@ -4,9 +4,9 @@ Implements advanced index features based on createindex.md documentation
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Union
-from datetime import datetime
-import json
+from datetime import timedelta
+from typing import Dict, List, Any, Optional
+
 
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import (
@@ -15,9 +15,7 @@ from azure.search.documents.indexes.models import (
     SearchFieldDataType,
     SimpleField,
     SearchableField,
-    ComplexField,
     VectorSearch,
-    VectorSearchAlgorithmConfiguration,
     HnswAlgorithmConfiguration,
     HnswParameters,
     VectorSearchProfile,
@@ -35,25 +33,15 @@ from azure.search.documents.indexes.models import (
     TagScoringParameters,
     ScoringFunctionAggregation,
     SearchSuggester,
-    AnalyzeTextOptions,
-    LexicalAnalyzerName,
-    LexicalTokenizerName,
-    TokenFilterName,
-    CharFilterName,
     CorsOptions,
     CustomAnalyzer,
-    PatternAnalyzer,
-    EdgeNGramTokenFilter,
-    NGramTokenFilter,
-    StopwordsTokenFilter,
-    SynonymTokenFilter,
-    PatternReplaceCharFilter,
-    MappingCharFilter
+    LexicalTokenizerName,
+    TokenFilterName
 )
 from azure.core.credentials import AzureKeyCredential
 
-from ..core.config import get_config
-from ..core.models import SearchIntent
+from enhanced_rag.core.config import get_config
+from enhanced_rag.core.models import SearchIntent
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +79,7 @@ class EnhancedIndexBuilder:
         
         Args:
             index_name: Name of the index
-            description: Human-readable description (important for MCP scenarios)
+            description: Human-readable description
             enable_vectors: Enable vector search capabilities
             enable_semantic: Enable semantic ranking
             custom_analyzers: Optional custom analyzers
@@ -103,10 +91,16 @@ class EnhancedIndexBuilder:
         fields = self._build_enhanced_fields()
         
         # Add vector search configuration
-        vector_search = self._build_vector_search_config() if enable_vectors else None
+        vector_search = (
+            self._build_vector_search_config()
+            if enable_vectors else None
+        )
         
         # Add semantic configuration
-        semantic_search = self._build_semantic_config() if enable_semantic else None
+        semantic_search = (
+            self._build_semantic_config()
+            if enable_semantic else None
+        )
         
         # Build scoring profiles
         scoring_profiles = self._build_scoring_profiles()
@@ -139,14 +133,11 @@ class EnhancedIndexBuilder:
             e_tag=None
         )
         
-        # Set description using preview API features
-        index._additional_properties = {
-            'description': description[:4000]  # 4000 char limit
-        }
+        # SDK lacks a typed 'description' field on SearchIndex; skipping.
         
         try:
             result = self.index_client.create_or_update_index(index)
-            logger.info(f"Created enhanced index '{index_name}' with description")
+            logger.info(f"Created enhanced index '{index_name}'")
             return result
         except Exception as e:
             logger.error(f"Error creating index '{index_name}': {e}")
@@ -168,15 +159,84 @@ class EnhancedIndexBuilder:
         )
         
         # Core content fields
-        fields.append(
+        fields.extend([
             SearchableField(
                 name="content",
                 type=SearchFieldDataType.String,
                 searchable=True,
                 retrievable=True,
+                analyzer_name="en.microsoft"
+            ),
+            SearchableField(
+                name="title",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                retrievable=True,
+                filterable=True,
+                sortable=True,
+                facetable=True,
+                analyzer_name="en.microsoft"
+            ),
+            SearchableField(
+                name="description",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                retrievable=True,
+                analyzer_name="en.microsoft"
+            ),
+            # Code-specific fields
+            SearchableField(
+                name="code_content",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                retrievable=True,
                 analyzer_name="code_content_analyzer"
+            ),
+            SimpleField(
+                name="file_path",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                sortable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="file_extension",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="language",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            # Metadata fields
+            SimpleField(
+                name="last_modified",
+                type=SearchFieldDataType.DateTimeOffset,
+                filterable=True,
+                sortable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="size_bytes",
+                type=SearchFieldDataType.Int64,
+                filterable=True,
+                sortable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="quality_score",
+                type=SearchFieldDataType.Double,
+                filterable=True,
+                sortable=True,
+                retrievable=True
             )
-        )
+        ])
         
         fields.append(
             SimpleField(
@@ -233,7 +293,9 @@ class EnhancedIndexBuilder:
         fields.append(
             SearchField(
                 name="imports",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.String
+                ),
                 searchable=True,
                 retrievable=True
                 # Note: Custom analyzers not supported on Collection fields
@@ -243,7 +305,9 @@ class EnhancedIndexBuilder:
         fields.append(
             SimpleField(
                 name="dependencies",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.String
+                ),
                 retrievable=True
             )
         )
@@ -255,7 +319,7 @@ class EnhancedIndexBuilder:
                 type=SearchFieldDataType.String,
                 searchable=True,
                 retrievable=True,
-                analyzer_name="en.microsoft"  # Language analyzer for natural text
+                analyzer_name="en.microsoft"
             )
         )
         
@@ -384,7 +448,9 @@ class EnhancedIndexBuilder:
         fields.append(
             SimpleField(
                 name="tags",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.String
+                ),
                 filterable=True,
                 facetable=True,
                 retrievable=True
@@ -395,10 +461,14 @@ class EnhancedIndexBuilder:
         fields.append(
             SearchField(
                 name="content_vector",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.Single
+                ),
                 searchable=True,
                 retrievable=True,  # Set based on needs
-                vector_search_dimensions=1536,  # For text-embedding-3-large
+                vector_search_dimensions=self.config.get(
+                    'vector_dimensions', 1536
+                ),
                 vector_search_profile_name="vector-profile-hnsw"
             )
         )
@@ -441,11 +511,31 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
+        fields.append(
+            SimpleField(
+                name="git_commit_count",
+                type=SearchFieldDataType.Int32,
+                filterable=True,
+                sortable=True,
+                retrievable=True
+            )
+        )
+        fields.append(
+            SimpleField(
+                name="git_last_modified",
+                type=SearchFieldDataType.DateTimeOffset,
+                filterable=True,
+                sortable=True,
+                retrievable=True
+            )
+        )
         
         fields.append(
             SimpleField(
                 name="git_authors",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.String
+                ),
                 filterable=True,
                 facetable=True,
                 retrievable=True
@@ -456,7 +546,9 @@ class EnhancedIndexBuilder:
         fields.append(
             SimpleField(
                 name="detected_patterns",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.String
+                ),
                 filterable=True,
                 facetable=True,
                 retrievable=True
@@ -466,7 +558,9 @@ class EnhancedIndexBuilder:
         fields.append(
             SimpleField(
                 name="intent_keywords",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                type=SearchFieldDataType.Collection(
+                    SearchFieldDataType.String
+                ),
                 searchable=True,
                 retrievable=True
             )
@@ -476,7 +570,12 @@ class EnhancedIndexBuilder:
     
     def _build_vector_search_config(self) -> VectorSearch:
         """Build vector search configuration"""
-        return VectorSearch(
+        profile = VectorSearchProfile(
+            name="vector-profile-hnsw",
+            algorithm_configuration_name="hnsw-config"
+        )
+
+        vector_search = VectorSearch(
             algorithms=[
                 HnswAlgorithmConfiguration(
                     name="hnsw-config",
@@ -488,13 +587,14 @@ class EnhancedIndexBuilder:
                     )
                 )
             ],
-            profiles=[
-                VectorSearchProfile(
-                    name="vector-profile-hnsw",
-                    algorithm_configuration_name="hnsw-config"
-                )
-            ]
+            profiles=[profile]
         )
+
+        # Custom Web API vectorizer via additional properties isn't supported.
+        # Consider query-time vectorization or skillset-based enrichment.
+        # embedding enrichment instead.
+
+        return vector_search
     
     def _build_semantic_config(self) -> SemanticSearch:
         """Build semantic search configuration"""
@@ -570,7 +670,7 @@ class EnhancedIndexBuilder:
                         field_name="last_modified",
                         boost=2.5,
                         parameters=FreshnessScoringParameters(
-                            boosting_duration="P30D"  # 30 days
+                            boosting_duration=timedelta(days=30)
                         ),
                         interpolation="linear"
                     )
@@ -670,27 +770,43 @@ class EnhancedIndexBuilder:
         intent_configs = {
             SearchIntent.IMPLEMENT: {
                 'suffix': 'implement',
-                'description': f"{description_template} - Optimized for finding implementation examples",
+                'description': (
+                    f"{description_template} - Optimized for finding "
+                    "implementation examples"
+                ),
                 'boost_profile': 'code_quality_boost',
                 'emphasis_fields': ['function_name', 'content', 'imports']
             },
             SearchIntent.DEBUG: {
                 'suffix': 'debug',
-                'description': f"{description_template} - Optimized for debugging and error resolution",
+                'description': (
+                    f"{description_template} - Optimized for debugging and "
+                    "error resolution"
+                ),
                 'boost_profile': 'freshness_boost',
                 'emphasis_fields': ['comments', 'docstring', 'tags']
             },
             SearchIntent.UNDERSTAND: {
                 'suffix': 'understand',
-                'description': f"{description_template} - Optimized for code comprehension",
+                'description': (
+                    f"{description_template} - Optimized for code "
+                    "comprehension"
+                ),
                 'boost_profile': 'popularity_boost',
                 'emphasis_fields': ['docstring', 'comments', 'class_name']
             },
             SearchIntent.REFACTOR: {
                 'suffix': 'refactor',
-                'description': f"{description_template} - Optimized for refactoring patterns",
+                'description': (
+                    f"{description_template} - Optimized for refactoring "
+                    "patterns"
+                ),
                 'boost_profile': 'code_quality_boost',
-                'emphasis_fields': ['detected_patterns', 'quality_score', 'complexity_score']
+                'emphasis_fields': [
+                    'detected_patterns',
+                    'quality_score',
+                    'complexity_score'
+                ]
             }
         }
         
@@ -698,9 +814,9 @@ class EnhancedIndexBuilder:
             index_name = f"{base_name}-{config['suffix']}"
             
             # Create intent-specific index
-            index = await self.create_enhanced_rag_index(
+            await self.create_enhanced_rag_index(
                 index_name=index_name,
-                description=config['description'],
+                description=str(config['description']),
                 enable_vectors=True,
                 enable_semantic=True
             )
@@ -737,7 +853,9 @@ class EnhancedIndexBuilder:
             return True
             
         except Exception as e:
-            logger.error(f"Error updating analyzers for index '{index_name}': {e}")
+            logger.error(
+                f"Error updating analyzers for index '{index_name}': {e}"
+            )
             return False
     
     async def validate_index_schema(
@@ -764,7 +882,9 @@ class EnhancedIndexBuilder:
                 'total_fields': len(index.fields),
                 'has_vector_search': index.vector_search is not None,
                 'has_semantic_search': index.semantic_search is not None,
-                'scoring_profiles': [p.name for p in (index.scoring_profiles or [])]
+                'scoring_profiles': [
+                    p.name for p in (index.scoring_profiles or [])
+                ]
             }
             
         except Exception as e:

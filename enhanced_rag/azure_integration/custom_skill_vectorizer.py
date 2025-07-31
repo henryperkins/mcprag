@@ -6,24 +6,18 @@ Based on customskill.md documentation for enhanced RAG
 import logging
 import os
 import subprocess
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import aiohttp
 import asyncio
 import base64
 from abc import ABC, abstractmethod
-import json
-import re
+import time
+import time
 
-from azure.search.documents.indexes.models import (
-    WebApiSkill,
-    InputFieldMappingEntry,
-    OutputFieldMappingEntry
-)
 
-from ..core.config import get_config
-from ..core.models import CodeContext
-from ..semantic.query_enhancer import ContextualQueryEnhancer
+from enhanced_rag.core.config import get_config
+from enhanced_rag.semantic.query_enhancer import ContextualQueryEnhancer
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +30,9 @@ class CustomSkillBase(ABC):
         """Process a single record"""
         pass
     
-    async def process_batch(self, values: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    async def process_batch(
+        self, values: List[Dict[str, Any]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """Process a batch of records"""
         results = []
         
@@ -50,7 +46,9 @@ class CustomSkillBase(ABC):
                     'warnings': []
                 })
             except Exception as e:
-                logger.error(f"Error processing record {record.get('recordId')}: {e}")
+                logger.error(
+                    f"Error processing record {record.get('recordId')}: {e}"
+                )
                 results.append({
                     'recordId': record['recordId'],
                     'data': {},
@@ -88,21 +86,7 @@ class CodeAnalyzerSkill(CustomSkillBase):
         """
         code = data.get('code', '')
         language = data.get('language', 'unknown')
-        file_path = data.get('filePath', '')
-        
-        # Create a minimal context for analysis
-        context = CodeContext(
-            current_file=file_path,
-            file_content=code,
-            language=language,
-            imports=[],
-            functions=[],
-            classes=[]
-        )
-        
-        # Use existing analyzers from our system
-        # This is a simplified version - in production, you'd use proper AST parsing
-        
+        # Use existing analyzers (simplified; production should use AST)
         functions = self._extract_functions(code, language)
         classes = self._extract_classes(code, language)
         imports = self._extract_imports(code, language)
@@ -117,18 +101,27 @@ class CodeAnalyzerSkill(CustomSkillBase):
             'patterns': patterns
         }
     
-    def _extract_functions(self, code: str, language: str) -> List[Dict[str, Any]]:
+    def _extract_functions(
+        self,
+        code: str,
+        language: str
+    ) -> List[Dict[str, Any]]:
         """Extract function definitions"""
-        functions = []
-        
+        functions: List[Dict[str, Any]] = []
+
         if language.lower() == 'python':
             import re
-            # Simple regex-based extraction (production would use AST)
             pattern = r'def\s+(\w+)\s*\(([^)]*)\):'
             for match in re.finditer(pattern, code):
+                params_str = match.group(2)
+                params = [
+                    p.strip()
+                    for p in params_str.split(',')
+                    if p.strip()
+                ]
                 functions.append({
                     'name': match.group(1),
-                    'parameters': [p.strip() for p in match.group(2).split(',') if p.strip()],
+                    'parameters': params,
                     'type': 'function'
                 })
         elif language.lower() in ['javascript', 'typescript']:
@@ -140,18 +133,28 @@ class CodeAnalyzerSkill(CustomSkillBase):
             ]
             for pattern in patterns:
                 for match in re.finditer(pattern, code):
+                    params_str = match.group(2)
+                    params = [
+                        p.strip()
+                        for p in params_str.split(',')
+                        if p.strip()
+                    ]
                     functions.append({
                         'name': match.group(1),
-                        'parameters': [p.strip() for p in match.group(2).split(',') if p.strip()],
+                        'parameters': params,
                         'type': 'function'
                     })
-        
+
         return functions
     
-    def _extract_classes(self, code: str, language: str) -> List[Dict[str, Any]]:
+    def _extract_classes(
+        self,
+        code: str,
+        language: str
+    ) -> List[Dict[str, Any]]:
         """Extract class definitions"""
-        classes = []
-        
+        classes: List[Dict[str, Any]] = []
+
         if language.lower() in ['python', 'javascript', 'typescript', 'java']:
             import re
             pattern = r'class\s+(\w+)'
@@ -160,7 +163,7 @@ class CodeAnalyzerSkill(CustomSkillBase):
                     'name': match.group(1),
                     'type': 'class'
                 })
-        
+
         return classes
     
     def _extract_imports(self, code: str, language: str) -> List[str]:
@@ -200,8 +203,16 @@ class CodeAnalyzerSkill(CustomSkillBase):
         base_complexity = min(len(lines) / 100, 1.0)
         
         # Add complexity for control structures
-        control_keywords = ['if', 'else', 'elif', 'for', 'while', 'try', 'catch', 'switch']
-        control_count = sum(1 for line in lines for keyword in control_keywords if keyword in line)
+        control_keywords = [
+            'if', 'else', 'elif', 'for', 'while',
+            'try', 'catch', 'switch'
+        ]
+        control_count = sum(
+            1
+            for line in lines
+            for keyword in control_keywords
+            if keyword in line
+        )
         control_complexity = min(control_count / 20, 1.0)
         
         # Add complexity for nesting
@@ -212,7 +223,9 @@ class CodeAnalyzerSkill(CustomSkillBase):
         indent_complexity = min(max_indent / 40, 1.0)
         
         # Combine scores
-        complexity = (base_complexity + control_complexity + indent_complexity) / 3
+        complexity = (
+            base_complexity + control_complexity + indent_complexity
+        ) / 3
         
         return round(complexity, 2)
     
@@ -232,7 +245,10 @@ class CodeAnalyzerSkill(CustomSkillBase):
         # Design patterns
         if 'singleton' in code_lower or '_instance' in code_lower:
             patterns.append('singleton')
-        if 'factory' in code_lower and any('create' in f['name'].lower() for f in functions):
+        if (
+            'factory' in code_lower
+            and any('create' in f['name'].lower() for f in functions)
+        ):
             patterns.append('factory')
         if 'observer' in code_lower or 'subscribe' in code_lower:
             patterns.append('observer')
@@ -262,6 +278,9 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or get_config().embedding.model_dump()
         self.session = None
+        self._semaphore = asyncio.Semaphore(
+            self.config.get('max_concurrent_requests', 5)
+        )
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -290,12 +309,14 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
             text = f"[{language}] {text}"
         
         # Generate embedding based on provider
-        if self.config['provider'] == 'azure_openai':
-            embedding = await self._generate_azure_openai_embedding(text)
+        if self.config.get('provider') == 'azure_openai':
+            embedding = await self._generate_azure_openai_embedding_with_retry(
+                text
+            )
         else:
             # Fallback to a simple embedding (in production, use proper models)
             embedding = self._generate_simple_embedding(text)
-        
+
         return {
             'embedding': embedding
         }
@@ -304,31 +325,68 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
         """Generate embedding using Azure OpenAI"""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
-        endpoint = f"{self.config['azure_endpoint']}/openai/deployments/{self.config['model']}/embeddings"
+
+        endpoint = self.config.get('azure_endpoint')
+        model = self.config.get('model')
+        api_key = self.config.get('api_key')
+        api_version = self.config.get('api_version')
+
+        if not endpoint or not model or not api_key or not api_version:
+            raise RuntimeError(
+                "Missing required Azure OpenAI embedding configuration"
+            )
+
+        url = f"{endpoint}/openai/deployments/{model}/embeddings"
         headers = {
-            'api-key': self.config['api_key'],
+            'api-key': api_key,
             'Content-Type': 'application/json'
         }
-        
+
         payload = {
             'input': text,
-            'model': self.config['model']
+            'model': model
         }
-        
-        try:
+
+        async with self._semaphore:
             async with self.session.post(
-                endpoint,
+                url,
                 headers=headers,
                 json=payload,
-                params={'api-version': self.config['api_version']}
+                params={'api-version': api_version}
             ) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    raise RuntimeError(
+                        f"Embedding HTTP {response.status}: {body[:200]}"
+                    )
                 result = await response.json()
                 return result['data'][0]['embedding']
-        except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
-            # Return zero vector on error
-            return [0.0] * self.config['dimensions']
+
+    async def _generate_azure_openai_embedding_with_retry(
+        self,
+        text: str,
+        max_retries: int = 3
+    ) -> List[float]:
+        """Generate embedding with retry logic and exponential backoff"""
+        delay = 1.0
+        for attempt in range(max_retries):
+            try:
+                return await self._generate_azure_openai_embedding(text)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Embedding attempt {attempt + 1} failed, "
+                        f"retrying in {delay:.1f}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                else:
+                    logger.error(f"All embedding attempts failed: {e}")
+                    dims = int(self.config.get('dimensions', 1536))
+                    return [0.0] * dims
+        # Fallback in case no return occurred above
+        dims = int(self.config.get('dimensions', 1536))
+        return [0.0] * dims
     
     def _generate_simple_embedding(self, text: str) -> List[float]:
         """Generate a simple embedding for testing"""
@@ -343,7 +401,7 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
         embedding = []
         for i in range(0, len(hash_bytes), 2):
             if i + 1 < len(hash_bytes):
-                value = (hash_bytes[i] + hash_bytes[i + 1]) / 510.0  # Normalize to [0, 1]
+                value = (hash_bytes[i] + hash_bytes[i + 1]) / 510.0  # Normalize [0,1]
                 embedding.append(value)
         
         # Pad or truncate to desired dimensions
@@ -379,6 +437,14 @@ class CustomWebApiVectorizer:
         self.timeout = timeout or timedelta(seconds=30)
         self.auth_resource_id = auth_resource_id
         self.auth_identity = auth_identity
+
+        # Simple concurrency limit shared per instance
+        self._semaphore = asyncio.Semaphore(
+            get_config().embedding.max_concurrent_requests
+        )
+        # Circuit breaker state
+        self._fail_count = 0
+        self._open_until = 0.0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to Azure Search vectorizer definition"""
@@ -424,29 +490,54 @@ class CustomWebApiVectorizer:
                     }
                 ]
             }
-            
+
             headers = self.http_headers.copy()
             headers['Content-Type'] = 'application/json'
-            
+
+            # Circuit breaker parameters
+            cfg = get_config().embedding
+            threshold = getattr(cfg, "circuit_breaker_threshold", 5)
+            reset_seconds = getattr(cfg, "circuit_breaker_reset_seconds", 30)
+
+            # Short-circuit if breaker is open
+            now = time.monotonic()
+            if now < self._open_until:
+                logger.warning("Vectorizer circuit breaker open; skipping request")
+                return []
+
             try:
-                async with session.request(
-                    method=self.http_method,
-                    url=self.uri,
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self.timeout.total_seconds())
-                ) as response:
-                    result = await response.json()
-                    
-                    # Extract embedding from response
-                    if 'values' in result and len(result['values']) > 0:
-                        return result['values'][0]['data'].get('vector', [])
-                    else:
-                        logger.error(f"Invalid response from vectorizer: {result}")
-                        return []
-                        
+                async with self._semaphore:
+                    async with session.request(
+                        method=self.http_method,
+                        url=self.uri,
+                        json=payload,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=self.timeout.total_seconds())
+                    ) as response:
+                        if response.status != 200:
+                            body = await response.text()
+                            raise RuntimeError(f"Vectorizer HTTP {response.status}: {body[:200]}")
+
+                        result = await response.json()
+
+                        # Extract embedding from response
+                        if 'values' in result and len(result['values']) > 0:
+                            # Success: reset breaker
+                            self._fail_count = 0
+                            return result['values'][0]['data'].get('vector', [])
+                        else:
+                            raise RuntimeError(f"Invalid response from vectorizer: {result}")
+
             except Exception as e:
                 logger.error(f"Error calling custom vectorizer: {e}")
+                # Update circuit breaker
+                self._fail_count += 1
+                if self._fail_count >= threshold:
+                    self._open_until = time.monotonic() + reset_seconds
+                    logger.warning(
+                        f"Vectorizer circuit opened for {reset_seconds}s after "
+                        f"{self._fail_count} failures"
+                    )
                 return []
 
 
@@ -457,81 +548,72 @@ class GitMetadataExtractorSkill(CustomSkillBase):
     
     async def process_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extract git metadata for a file
-        
-        Expected input:
-        - filePath: Path to the file
-        
-        Returns:
-        - lastCommit: Last commit hash
-        - authors: List of authors
-        - commitCount: Number of commits
-        - lastModified: Last modification date
+        Extract git metadata for a file with input validation and safe subprocess usage.
         """
         file_path = data.get('filePath', '')
-        
-        # Try to extract git metadata
+
+        # Validate file path to prevent command injection and path traversal
+        if not file_path or '..' in file_path or os.path.isabs(file_path):
+            logger.warning(f"Invalid file path: {file_path}")
+            return self._empty_metadata()
+
         try:
-            # Get last commit hash
-            result = subprocess.run(
-                ['git', 'log', '-1', '--format=%H', '--', file_path],
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(file_path) if file_path else '.',
-                timeout=5
-            )
+            real_path = os.path.realpath(file_path)
+            if not os.path.exists(real_path) or not os.path.isfile(real_path):
+                return self._empty_metadata()
+
+            repo_dir = os.path.dirname(real_path)
+
+            def run_git(args: List[str]) -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    ['git'] + args + ['--', real_path],
+                    capture_output=True,
+                    text=True,
+                    cwd=repo_dir,
+                    timeout=5
+                )
+
+            # Last commit hash
+            result = run_git(['log', '-1', '--format=%H'])
             last_commit = result.stdout.strip() if result.returncode == 0 else 'unknown'
-            
-            # Get authors
-            result = subprocess.run(
-                ['git', 'log', '--format=%an', '--', file_path],
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(file_path) if file_path else '.',
-                timeout=5
-            )
-            authors = list(set(result.stdout.strip().split('\n'))) if result.returncode == 0 else []
-            
-            # Get commit count
-            result = subprocess.run(
-                ['git', 'rev-list', '--count', 'HEAD', '--', file_path],
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(file_path) if file_path else '.',
-                timeout=5
-            )
+
+            # Authors (unique, non-empty)
+            result = run_git(['log', '--format=%an'])
+            authors = [a for a in set(result.stdout.strip().split('\n')) if a] if result.returncode == 0 else []
+
+            # Commit count
+            result = run_git(['rev-list', '--count', 'HEAD'])
             commit_count = int(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip().isdigit() else 0
-            
-            # Get last modified date
-            result = subprocess.run(
-                ['git', 'log', '-1', '--format=%aI', '--', file_path],
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(file_path) if file_path else '.',
-                timeout=5
-            )
-            last_modified = result.stdout.strip() if result.returncode == 0 else datetime.utcnow().isoformat()
-            
+
+            # Last modified (ISO)
+            result = run_git(['log', '-1', '--format=%aI'])
+            last_modified = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else datetime.utcnow().isoformat()
+
         except Exception as e:
             logger.warning(f"Could not extract git metadata for {file_path}: {e}")
-            # Fallback to file system metadata
             try:
                 stat = os.stat(file_path)
                 last_modified = datetime.fromtimestamp(stat.st_mtime).isoformat()
-                last_commit = 'unknown'
-                authors = []
-                commit_count = 0
-            except:
+            except Exception:
                 last_modified = datetime.utcnow().isoformat()
-                last_commit = 'unknown'
-                authors = []
-                commit_count = 0
-        
+            last_commit = 'unknown'
+            authors = []
+            commit_count = 0
+
         return {
             'lastCommit': last_commit,
-            'authors': authors[:10],  # Limit to 10 authors
+            'authors': authors[:10],
             'commitCount': commit_count,
             'lastModified': last_modified
+        }
+
+    def _empty_metadata(self) -> Dict[str, Any]:
+        """Return empty metadata structure"""
+        return {
+            'lastCommit': 'unknown',
+            'authors': [],
+            'commitCount': 0,
+            'lastModified': datetime.utcnow().isoformat()
         }
 
 

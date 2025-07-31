@@ -9,6 +9,21 @@
       "env": {
         "DEFAULT_MINIMUM_TOKENS": ""
       }
+    },
+    "youtube": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anaisbetts/mcp-installer",
+        "@anaisbetts/mcp-youtube"
+      ]
+    },
+    "sequentialthinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
     }
   }
 }
