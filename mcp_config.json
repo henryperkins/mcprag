@@ -1,0 +1,15 @@
+{
+  "mcps": {
+    "azure-code-search": {
+      "command": "python",
+      "args": [
+        "/home/azureuser/mcprag/mcp_server_auto.py"
+      ],
+      "env": {
+        "ACS_ENDPOINT": "${ACS_ENDPOINT}",
+        "ACS_ADMIN_KEY": "${ACS_ADMIN_KEY}",
+        "AUTO_INDEX_WORKSPACE": "true"
+      }
+    }
+  }
+}

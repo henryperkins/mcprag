@@ -9,6 +9,7 @@ import logging
 import re
 from pathlib import Path
 from typing import List, Dict, Any
+from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Optional Azure SDK imports
@@ -175,17 +176,21 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
 
                     chunks.append(
                         {
-                            "code_chunk": chunk_code,
+                            "content": chunk_code,
                             "semantic_context": semantic_context,
-                            "function_signature": signature,
-                            "imports_used": imports,
-                            "calls_functions": calls,
+                            "signature": signature,
+                            "imports": imports,
+                            "dependencies": calls,
                             "chunk_type": (
                                 "function"
                                 if isinstance(node, ast.FunctionDef)
                                 else "class"
                             ),
-                            "line_range": f"{start_line+1}-{end_line}",
+                            "start_line": start_line + 1,
+                            "end_line": end_line,
+                            "function_name": node.name if isinstance(node, ast.FunctionDef) else None,
+                            "class_name": node.name if isinstance(node, ast.ClassDef) else None,
+                            "docstring": self._extract_docstring(node)
                         }
                     )
 
@@ -194,13 +199,17 @@ Purpose: {self._extract_docstring(node) or 'Implementation details in code'}
             print(f"Warning: Could not parse {file_path}: {e}")
             chunks.append(
                 {
-                    "code_chunk": content[:5000],
+                    "content": content[:5000],
                     "semantic_context": f"Code from {file_path}",
-                    "function_signature": "",
-                    "imports_used": [],
-                    "calls_functions": [],
+                    "signature": "",
+                    "imports": [],
+                    "dependencies": [],
                     "chunk_type": "file",
-                    "line_range": "1-",
+                    "start_line": 1,
+                    "end_line": len(content.splitlines()),
+                    "function_name": None,
+                    "class_name": None,
+                    "docstring": ""
                 }
             )
 
@@ -451,25 +460,33 @@ Type: {ast_chunk.get('type', 'unknown')}
 
                 chunks.append(
                     {
-                        "code_chunk": chunk_code,
+                        "content": chunk_code,
                         "semantic_context": semantic_context,
-                        "function_signature": ast_chunk.get("signature", ""),
-                        "imports_used": imports,
-                        "calls_functions": list(calls),
+                        "signature": ast_chunk.get("signature", ""),
+                        "imports": imports,
+                        "dependencies": list(calls),
                         "chunk_type": ast_chunk.get("type", "function"),
-                        "line_range": f"{start_line+1}-{end_line}",
+                        "start_line": start_line + 1,
+                        "end_line": end_line,
+                        "function_name": ast_chunk.get("name") if ast_chunk.get("type") == "function" else None,
+                        "class_name": ast_chunk.get("name") if ast_chunk.get("type") == "class" else None,
+                        "docstring": ""
                     }
                 )
         else:
             # Fallback to file-level chunk if AST parsing failed
             chunk = {
-                "code_chunk": content[:8000],  # Keep chunks manageable
+                "content": content[:8000],  # Keep chunks manageable
                 "semantic_context": f"Code from {file_path}",
-                "function_signature": "",
-                "imports_used": imports,
-                "calls_functions": list(calls),
+                "signature": "",
+                "imports": imports,
+                "dependencies": list(calls),
                 "chunk_type": "file",
-                "line_range": "1-",
+                "start_line": 1,
+                "end_line": len(content.splitlines()),
+                "function_name": None,
+                "class_name": None,
+                "docstring": ""
             }
             chunks.append(chunk)
 
@@ -497,6 +514,9 @@ Type: {ast_chunk.get('type', 'unknown')}
                     part.startswith(".")
                     or part == "node_modules"
                     or part == "__pycache__"
+                    or part == "venv"
+                    or part == "env"
+                    or part == ".venv"
                     for part in file_path.parts
                 ):
                     continue
@@ -512,9 +532,11 @@ Type: {ast_chunk.get('type', 'unknown')}
 
                         doc = {
                             "id": doc_id,
-                            "repo_name": repo_name,
+                            "repository": repo_name,
                             "file_path": str(file_path),
+                            "file_name": file_path.name,
                             "language": language,
+                            "last_modified": datetime.utcnow().isoformat() + "+00:00",
                             **chunk,
                         }
 
@@ -583,9 +605,11 @@ Type: {ast_chunk.get('type', 'unknown')}
 
                     doc = {
                         "id": doc_id,
-                        "repo_name": repo_name,
+                        "repository": repo_name,
                         "file_path": str(file_path),
+                        "file_name": file_path.name,
                         "language": language,
+                        "last_modified": datetime.utcnow().isoformat() + "+00:00",
                         **chunk,
                     }
 

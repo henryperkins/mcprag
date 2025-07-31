@@ -98,6 +98,14 @@ class EnhancedMCPServer:
         self._initialize_clients()
         self._repo_cache: Dict[str, str] = {}
         self._query_cache: Dict[str, List[SearchResult]] = {}
+    
+    def _format_line_range(self, start_line: Optional[int], end_line: Optional[int]) -> Optional[str]:
+        """Format line range from start and end line numbers"""
+        if start_line is None:
+            return None
+        if end_line is None or end_line == start_line:
+            return str(start_line)
+        return f"{start_line}-{end_line}"
 
     def _initialize_clients(self):
         """Initialize all service clients"""
@@ -229,12 +237,13 @@ class EnhancedMCPServer:
         params: Dict[str, Any] = {
             "search_text": query,
             "query_type": "semantic",
-            "semantic_configuration_name": "mcp-semantic",
+            "semantic_configuration_name": "semantic-config",
             "top": 50,  # Get more for better filtering
             "select": [
-                "id", "repo_name", "file_path", "language", "code_chunk",
-                "semantic_context", "function_signature", "imports_used",
-                "calls_functions", "chunk_type", "line_range"
+                "id", "repository", "file_path", "language", "content",
+                "semantic_context", "signature", "imports",
+                "dependencies", "chunk_type", "start_line", "end_line",
+                "function_name", "class_name", "docstring"
             ]
         }
 
@@ -257,7 +266,7 @@ class EnhancedMCPServer:
         # Build filters
         filters = []
         if repo:
-            filters.append(f"repo_name eq '{repo}'")
+            filters.append(f"repository eq '{repo}'")
         if language:
             filters.append(f"language eq '{language}'")
 
@@ -295,7 +304,7 @@ class EnhancedMCPServer:
             score = result.get('@search.score', 0)
 
             # Boost for repository match
-            if repo and result.get('repo_name') == repo:
+            if repo and result.get('repository') == repo:
                 score *= 2.0
 
             # Boost for function name match
@@ -312,7 +321,7 @@ class EnhancedMCPServer:
                 score *= (1 + context_matches * 0.1)
 
             # Penalize very long chunks
-            code_length = len(result.get('code_chunk', ''))
+            code_length = len(result.get('content', ''))
             if code_length > 2000:
                 score *= 0.8
 
@@ -337,7 +346,7 @@ class EnhancedMCPServer:
                     func_name = match.group(1)
 
             # Smart content truncation
-            content = result.get('code_chunk', '')
+            content = result.get('content', '')
             if len(content) > 800:
                 # Try to find natural break points
                 for break_point in ['\n\n', '\ndef ', '\nclass ', '\n    return']:
@@ -350,16 +359,16 @@ class EnhancedMCPServer:
 
             search_results.append(SearchResult(
                 file_path=result.get('file_path', ''),
-                repository=result.get('repo_name', ''),
+                repository=result.get('repository', ''),
                 language=result.get('language', ''),
                 function_name=func_name,
                 signature=signature,
-                line_range=result.get('line_range'),
+                line_range=self._format_line_range(result.get('start_line'), result.get('end_line')),
                 score=result.get('_enhanced_score', 0),
                 content=content,
                 context=result.get('semantic_context', '')[:200],
-                imports=result.get('imports_used', []),
-                dependencies=result.get('calls_functions', [])
+                imports=result.get('imports', []),
+                dependencies=result.get('dependencies', [])
             ))
 
         return search_results
@@ -506,18 +515,18 @@ async def search_microsoft_docs(query: str, max_results: int = 10) -> str:
 # Resources
 # ============================================================================
 
-@mcp.resource()
+@mcp.resource("resource://repositories")
 async def list_repositories() -> str:
     """List all indexed repositories with statistics"""
     try:
         results = server.search_client.search(
             search_text="*",
-            facets=["repo_name"],
+            facets=["repository"],
             top=0
         )
 
         facets = results.get_facets()
-        repos = (facets or {}).get("repo_name", [])
+        repos = (facets or {}).get("repository", [])
 
         if not repos:
             return json.dumps({"repositories": [], "count": 0})
@@ -535,7 +544,7 @@ async def list_repositories() -> str:
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-@mcp.resource()
+@mcp.resource("resource://statistics")
 async def get_statistics() -> str:
     """Get comprehensive search statistics"""
     try:
