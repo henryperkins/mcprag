@@ -129,6 +129,17 @@ class ContextualRanker(Ranker):
         # Quality score (from metadata)
         factors.quality_score = getattr(result, 'quality_score', 0.5)
         
+        # Pattern matching score
+        if not hasattr(self, 'pattern_scorer'):
+            from .pattern_matcher_integration import PatternMatchScorer
+            self.pattern_scorer = PatternMatchScorer(self.config)
+        
+        # Extract query from context or use default
+        query = getattr(context, 'query', '')
+        factors.pattern_match = await self.pattern_scorer.calculate_pattern_score(
+            result, query, context
+        )
+        
         return factors
     
     def _calculate_context_overlap(

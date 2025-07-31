@@ -9,6 +9,7 @@ import sys
 import json
 import asyncio
 import re
+import logging
 from typing import Optional, List, Dict, Any, Sequence
 from pathlib import Path
 from datetime import datetime
@@ -52,7 +53,35 @@ except ImportError:
     MicrosoftDocsMCPClient = None
     DOCS_SUPPORT = False
 
+# Enhanced RAG Pipeline support
+try:
+    from enhanced_rag.mcp_integration.enhanced_search_tool import EnhancedSearchTool
+    from enhanced_rag.mcp_integration.code_gen_tool import CodeGenerationTool
+    from enhanced_rag.mcp_integration.context_aware_tool import ContextAwareTool
+    ENHANCED_RAG_SUPPORT = True
+except ImportError:
+    EnhancedSearchTool = None
+    CodeGenerationTool = None
+    ContextAwareTool = None
+    ENHANCED_RAG_SUPPORT = False
+
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Log available features
+if ENHANCED_RAG_SUPPORT:
+    logger.info("Enhanced RAG Pipeline is available - advanced search and code generation enabled")
+else:
+    logger.info("Enhanced RAG Pipeline not available - using direct Azure Search only")
+
+if VECTOR_SUPPORT:
+    logger.info("Vector search support is available")
+    
+if DOCS_SUPPORT:
+    logger.info("Microsoft Docs search support is available")
 
 # ============================================================================
 # Pydantic Models for Type Safety
@@ -598,6 +627,138 @@ Please use search_code with:
 3. Look for similar issues in test files
 
 Help me understand and fix this error."""
+
+# ============================================================================
+# Enhanced RAG Pipeline Tools (if available)
+# ============================================================================
+
+if ENHANCED_RAG_SUPPORT:
+    # Initialize enhanced tools with configuration
+    rag_config = {
+        "azure_endpoint": os.getenv("ACS_ENDPOINT"),
+        "azure_key": os.getenv("ACS_ADMIN_KEY"),
+        "index_name": os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),
+        "enable_caching": True,
+        "cache_ttl": 3600
+    }
+    
+    enhanced_search_tool = EnhancedSearchTool(rag_config)
+    code_gen_tool = CodeGenerationTool(rag_config)
+    context_aware_tool = ContextAwareTool(rag_config)
+    
+    @mcp.tool()
+    async def search_code_enhanced(
+        query: str,
+        current_file: Optional[str] = None,
+        workspace_root: Optional[str] = None,
+        intent: Optional[str] = None,
+        language: Optional[str] = None,
+        repository: Optional[str] = None,
+        max_results: int = 10,
+        include_dependencies: bool = False,
+        generate_response: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Enhanced code search using RAG pipeline with context awareness
+        
+        Args:
+            query: Search query
+            current_file: Current file for context
+            workspace_root: Workspace root path
+            intent: Search intent (implement/debug/understand/refactor)
+            language: Filter by language
+            repository: Filter by repository
+            max_results: Maximum results
+            include_dependencies: Include dependency resolution
+            generate_response: Generate contextual response
+        """
+        result = await enhanced_search_tool.search(
+            query=query,
+            current_file=current_file,
+            workspace_root=workspace_root,
+            intent=intent,
+            language=language,
+            repository=repository,
+            max_results=max_results,
+            include_dependencies=include_dependencies,
+            generate_response=generate_response
+        )
+        return result
+    
+    @mcp.tool()
+    async def generate_code(
+        description: str,
+        language: str = "python",
+        context_file: Optional[str] = None,
+        style_guide: Optional[str] = None,
+        include_tests: bool = False,
+        workspace_root: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate code using enhanced RAG pipeline
+        
+        Args:
+            description: What code to generate
+            language: Target programming language
+            context_file: Current file for context
+            style_guide: Specific style guide to follow
+            include_tests: Whether to generate tests
+            workspace_root: Workspace root path
+        """
+        return await code_gen_tool.generate_code(
+            description=description,
+            language=language,
+            context_file=context_file,
+            style_guide=style_guide,
+            include_tests=include_tests,
+            workspace_root=workspace_root
+        )
+    
+    @mcp.tool()
+    async def analyze_context(
+        file_path: str,
+        include_dependencies: bool = True,
+        depth: int = 2,
+        include_imports: bool = True,
+        include_git_history: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Analyze hierarchical context for a file
+        
+        Args:
+            file_path: Path to analyze
+            include_dependencies: Include dependency analysis
+            depth: Depth of context analysis (1-3)
+            include_imports: Include import analysis
+            include_git_history: Include recent git changes
+        """
+        return await context_aware_tool.analyze_context(
+            file_path=file_path,
+            include_dependencies=include_dependencies,
+            depth=depth,
+            include_imports=include_imports,
+            include_git_history=include_git_history
+        )
+    
+    @mcp.tool()
+    async def suggest_improvements(
+        file_path: str,
+        focus: Optional[str] = None,
+        include_examples: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Suggest improvements for a file based on context analysis
+        
+        Args:
+            file_path: File to analyze
+            focus: Specific area to focus on (performance/readability/testing)
+            include_examples: Include code examples
+        """
+        return await context_aware_tool.suggest_improvements(
+            file_path=file_path,
+            focus=focus,
+            include_examples=include_examples
+        )
 
 # ============================================================================
 # Main Entry Point with Multiple Modes
