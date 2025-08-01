@@ -1,179 +1,257 @@
 #!/usr/bin/env python3
 """
-Test script to verify MultiStageRetriever integration in RAGPipeline
+Test the complete enhanced RAG pipeline with vector debugging queries
 """
 
 import asyncio
 import logging
-from enhanced_rag.pipeline import RAGPipeline, QueryContext
-from enhanced_rag.core.models import SearchIntent
+from typing import Dict, Any
+
+from enhanced_rag.pipeline import RAGPipeline
+from enhanced_rag.core.models import QueryContext
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
-async def test_retriever_integration():
-    """Test just the MultiStageRetriever integration"""
-
-    try:
-        # Test MultiStageRetriever directly
-        logger.info("Testing MultiStageRetriever directly...")
-
-        from enhanced_rag.retrieval.multi_stage_pipeline import MultiStageRetriever
-        from enhanced_rag.core.models import SearchQuery, SearchIntent
-
-        # Create retriever with minimal config
-        retriever_config = {
-            'enable_vector_search': True,
-            'enable_pattern_matching': True,
-            'enable_dependency_resolution': True
+class RAGPipelineTester:
+    """Test harness for the enhanced RAG pipeline"""
+    
+    def __init__(self):
+        # Configure pipeline with enhanced features
+        self.config = {
+            'retrieval': {
+                'enable_vector_search': True,
+                'enable_semantic_search': True,
+                'enable_pattern_matching': True,
+                'max_results': 20
+            },
+            'ranking': {
+                'enable_contextual_boost': True,
+                'enable_learning': False  # Disable for testing
+            },
+            'learning': {
+                'enable_adaptive_ranking': False,  # Disable for testing
+                'feedback_storage_path': './test_feedback'
+            },
+            'generation': {
+                'enable_response_generation': True
+            }
         }
-
-        retriever = MultiStageRetriever(retriever_config)
-        logger.info("✅ MultiStageRetriever initialized successfully")
-
-        # Create test search query
-        search_query = SearchQuery(
-            query="how to implement async function",
-            intent=SearchIntent.IMPLEMENT,
-            current_file="test_file.py",
-            language="python",
-            user_id="test-user"
-        )
-
-        logger.info(f"Testing retrieval with query: '{search_query.query}'")
-
-        # Test retrieval (this will test the integration)
-        results = await retriever.retrieve(search_query)
-
-        # Check results
-        logger.info(f"✅ Retrieval completed successfully")
-        logger.info(f"Results count: {len(results)}")
-
-        for i, result in enumerate(results[:3]):  # Show first 3 results
-            logger.info(f"Result {i+1}: {result.file_path} (score: {result.score:.3f})")
-
-        logger.info("🎉 MultiStageRetriever integration test PASSED")
-
-        return True
-
-    except Exception as e:
-        logger.error(f"❌ MultiStageRetriever integration test FAILED: {e}")
-        return False
-
-
-async def test_pipeline_integration():
-    """Test the RAGPipeline process_query method specifically"""
-
-    try:
-        # First test the retriever directly
-        retriever_success = await test_retriever_integration()
-
-        if not retriever_success:
-            logger.error("Retriever test failed, skipping pipeline test")
-            return
-
-        logger.info("\n" + "="*50)
-        logger.info("Testing pipeline process_query integration...")
-
-        # Test just the process_query method with mocked components
-        from enhanced_rag.pipeline import RAGPipeline, QueryContext
-        from enhanced_rag.core.models import SearchQuery, SearchIntent, CodeContext
-
-        # Create a minimal pipeline instance
-        pipeline = RAGPipeline.__new__(RAGPipeline)  # Create without calling __init__
-
-        # Mock the components we need
-        class MockRetriever:
-            async def retrieve(self, query):
-                from enhanced_rag.core.models import SearchResult
-                return [
-                    SearchResult(
-                        id="test-1",
-                        score=0.9,
-                        file_path="test_file.py",
-                        code_snippet="async def example(): pass",
-                        language="python"
-                    )
-                ]
-
-        class MockRanker:
-            async def rank_results(self, results, context, intent):
-                return results  # Return as-is
-
-        class MockExplainer:
-            async def explain_ranking(self, result, query, context):
-                return {"explanation": "Test explanation"}
-
-        # Set up minimal pipeline
-        pipeline.retriever = MockRetriever()
-        pipeline.ranker = MockRanker()
-        pipeline.result_explainer = MockExplainer()
-        pipeline.feedback_collector = None
-
-        # Create test context
-        context = QueryContext(
-            current_file="test_file.py",
-            workspace_root="/test/workspace",
-            session_id="test-session"
-        )
-
-        # Mock the context extraction
-        async def mock_extract_context(ctx):
-            return CodeContext(
-                current_file=ctx.current_file,
-                language="python",
-                imports=[],
-                functions=[],
-                classes=[],
-                recent_changes=[],
-                project_root=ctx.workspace_root,
-                open_files=[],
-                session_id=ctx.session_id
+        
+        self.pipeline = RAGPipeline(self.config)
+        
+    async def run_test_queries(self):
+        """Run a series of test queries focused on vector debugging"""
+        
+        # Test queries for vector debugging scenarios
+        test_cases = [
+            {
+                'name': 'Vector dimension mismatch',
+                'query': 'vector dimension mismatch error ValueError',
+                'context': QueryContext(
+                    current_file='embeddings/vector_search.py',
+                    workspace_root='/project',
+                    user_preferences={'language': 'python'}
+                )
+            },
+            {
+                'name': 'Embedding NaN issues',
+                'query': 'embedding NaN values None check validation',
+                'context': QueryContext(
+                    current_file='models/embedder.py',
+                    workspace_root='/project',
+                    user_preferences={'language': 'python'}
+                )
+            },
+            {
+                'name': 'Vector search problems',
+                'query': 'vector search issues empty results similarity threshold',
+                'context': QueryContext(
+                    current_file='search/similarity_search.py',
+                    workspace_root='/project',
+                    user_preferences={'language': 'python'}
+                )
+            },
+            {
+                'name': 'Index corruption',
+                'query': 'vector index corrupt rebuild HNSW',
+                'context': QueryContext(
+                    current_file='indexing/vector_index.py',
+                    workspace_root='/project'
+                )
+            },
+            {
+                'name': 'Cosine similarity implementation',
+                'query': 'implement cosine similarity vector search',
+                'context': QueryContext(
+                    current_file='metrics/similarity.py',
+                    workspace_root='/project'
+                )
+            }
+        ]
+        
+        for test_case in test_cases:
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Running test: {test_case['name']}")
+            logger.info(f"Query: {test_case['query']}")
+            logger.info(f"{'='*60}")
+            
+            try:
+                result = await self.pipeline.process_query(
+                    query=test_case['query'],
+                    context=test_case['context'],
+                    generate_response=True,
+                    max_results=10
+                )
+                
+                if result.success:
+                    self._display_results(result)
+                else:
+                    logger.error(f"Query failed: {result.error}")
+                    
+            except Exception as e:
+                logger.error(f"Test failed with exception: {e}", exc_info=True)
+                
+            # Small delay between tests
+            await asyncio.sleep(1)
+    
+    def _display_results(self, result: Dict[str, Any]):
+        """Display test results in a readable format"""
+        
+        # Show response if generated
+        if result.response:
+            logger.info(f"\n📝 Generated Response:")
+            logger.info(f"{result.response.text[:500]}...")
+        
+        # Show result count and summary
+        logger.info(f"\n📊 Results Summary:")
+        logger.info(f"Total results: {len(result.results)}")
+        
+        if 'summary' in result.metadata:
+            summary = result.metadata['summary']
+            logger.info(f"By type: {summary.get('by_type', {})}")
+            logger.info(f"Suggested terms: {summary.get('suggested_terms', [])}")
+        
+        # Show top 5 results in compact format
+        logger.info(f"\n🔍 Top Results (Compact):")
+        for i, res in enumerate(result.results[:5]):
+            logger.info(f"{i+1}. {res.file_path}:{res.start_line if res.start_line else '?'}")
+            logger.info(f"   Context: {res.relevance_explanation}")
+            logger.info(f"   Score: {res.score:.3f}")
+            
+            # Show a snippet of the code
+            if res.code_snippet:
+                snippet_lines = res.code_snippet.strip().split('\n')
+                preview = snippet_lines[0][:80] + '...' if len(snippet_lines[0]) > 80 else snippet_lines[0]
+                logger.info(f"   Code: {preview}")
+        
+        # Show grouped results if available
+        if hasattr(result, 'grouped_results') and result.grouped_results:
+            logger.info(f"\n📁 Grouped Results:")
+            for group_name, group_results in result.grouped_results.items():
+                if group_results:
+                    logger.info(f"  {group_name}: {len(group_results)} results")
+                    for res in group_results[:2]:
+                        logger.info(f"    - {res['file']}: {res['summary']}")
+        
+        # Show search stages used
+        if 'stages_executed' in result.metadata:
+            logger.info(f"\n🔧 Search Stages Executed:")
+            for stage in result.metadata['stages_executed']:
+                logger.info(f"  - {stage}")
+    
+    async def test_query_enhancement(self):
+        """Test the query enhancement capabilities"""
+        logger.info(f"\n{'='*60}")
+        logger.info("Testing Query Enhancement")
+        logger.info(f"{'='*60}")
+        
+        from enhanced_rag.semantic.query_enhancer import ContextualQueryEnhancer
+        from enhanced_rag.core.models import CodeContext
+        
+        enhancer = ContextualQueryEnhancer()
+        
+        test_queries = [
+            "vector issues",
+            "embedding problems",
+            "dimension mismatch",
+            "NaN values in vector"
+        ]
+        
+        for query in test_queries:
+            logger.info(f"\nOriginal query: '{query}'")
+            
+            # Create a mock context
+            context = CodeContext(
+                current_file='test.py',
+                language='python',
+                imports=['numpy', 'sklearn.metrics.pairwise'],
+                functions=['create_embedding', 'vector_search'],
+                classes=['VectorIndex']
             )
+            
+            # Get enhancements
+            enhancement_result = await enhancer.enhance_query(query, context)
+            
+            logger.info(f"Enhanced queries ({len(enhancement_result['queries'])}):")
+            for i, enhanced in enumerate(enhancement_result['queries'][:5]):
+                logger.info(f"  {i+1}. {enhanced}")
+            
+            if enhancement_result['exclude_terms']:
+                logger.info(f"Exclude terms: {enhancement_result['exclude_terms']}")
+    
+    async def test_pattern_matching(self):
+        """Test the pattern matching capabilities"""
+        logger.info(f"\n{'='*60}")
+        logger.info("Testing Pattern Matching")
+        logger.info(f"{'='*60}")
+        
+        from enhanced_rag.retrieval.pattern_matcher import PatternMatcher
+        
+        matcher = PatternMatcher()
+        
+        test_queries = [
+            "vector dimension mismatch error handling",
+            "check if embedding is None",
+            "cosine similarity implementation",
+            "rebuild vector index"
+        ]
+        
+        for query in test_queries:
+            logger.info(f"\nQuery: '{query}'")
+            
+            patterns = await matcher.find_patterns(query)
+            
+            if patterns:
+                logger.info(f"Found {len(patterns)} patterns:")
+                for pattern in patterns[:3]:
+                    logger.info(f"  - {pattern.pattern_type.value}: {pattern.pattern_name}")
+                    logger.info(f"    Confidence: {pattern.confidence:.2f}")
+                    logger.info(f"    Matched keywords: {pattern.context.get('matched_keywords', [])}")
+            else:
+                logger.info("  No patterns found")
 
-        pipeline._extract_context = mock_extract_context
 
-        # Mock other components
-        class MockIntentClassifier:
-            async def classify_intent(self, query):
-                return SearchIntent.IMPLEMENT
-
-        class MockQueryEnhancer:
-            async def enhance_query(self, query, context, intent):
-                return [query]
-
-        pipeline.intent_classifier = MockIntentClassifier()
-        pipeline.query_enhancer = MockQueryEnhancer()
-
-        # Test the process_query method
-        test_query = "how to implement async function"
-        logger.info(f"Testing process_query with: '{test_query}'")
-
-        result = await pipeline.process_query(
-            query=test_query,
-            context=context,
-            generate_response=False,  # Skip response generation
-            max_results=5
-        )
-
-        # Check results
-        logger.info(f"✅ process_query completed successfully")
-        logger.info(f"Success: {result.success}")
-        logger.info(f"Results count: {len(result.results)}")
-        logger.info(f"Metadata: {result.metadata}")
-
-        if result.success and len(result.results) > 0:
-            logger.info("🎉 Pipeline process_query integration test PASSED")
-        else:
-            logger.warning(f"⚠️ Process query test had issues: {result.error}")
-
-    except Exception as e:
-        logger.error(f"❌ Pipeline integration test FAILED: {e}")
-        import traceback
-        traceback.print_exc()
+async def main():
+    """Run all tests"""
+    tester = RAGPipelineTester()
+    
+    # Test query enhancement first
+    await tester.test_query_enhancement()
+    
+    # Test pattern matching
+    await tester.test_pattern_matching()
+    
+    # Run full pipeline tests
+    await tester.run_test_queries()
+    
+    logger.info("\n✅ All tests completed!")
 
 
 if __name__ == "__main__":
-    asyncio.run(test_pipeline_integration())
+    asyncio.run(main())

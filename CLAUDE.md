@@ -15,6 +15,73 @@ When you need to search the codebase:
    - Cross-file dependency resolution
    - Better ranking based on code context
 
+### Effective MCP Search Strategies
+
+#### Query Construction Guidelines
+- **USE NATURAL LANGUAGE**: Describe what the code DOES, not what text it contains
+  - ✅ Good: "index schema vector field definition"
+  - ✅ Good: "where are embeddings generated"
+  - ✅ Good: "vector dimension configuration"
+  - ❌ Bad: "vector issue problem error" (too generic)
+  - ❌ Bad: "SearchField vector_field dimensions 1536" (too literal)
+
+#### Intent Selection
+- `understand`: Best for learning how features work and finding definitions
+- `implement`: Finding code patterns to implement similar functionality
+- `debug`: Locating error handling, validation, and troubleshooting code
+- `refactor`: Finding code that needs improvement
+
+#### Interpreting Results
+- **Relevance Scores**: 0.02-0.04 are typical for semantic matches (not exact matches)
+- **Low scores across all results**: Query is likely too broad or misaligned
+- **File Context**: Shows imports, functions called, and purpose
+- **Consider refining queries** when all results have scores < 0.05
+
+### Common Search Patterns
+
+```python
+# Finding schema/configuration definitions
+"create index schema fields"              # Find where index is created
+"embedding dimension configuration"       # Find dimension settings
+"{feature} configuration settings"        # Find config for specific feature
+
+# Understanding implementation
+"how does {feature} process {data}"      # Data flow understanding
+"{class_name} implementation"            # Find class implementation
+"where is {function} called"             # Find usage patterns
+
+# Debugging issues
+"{feature} validation"                   # Find validation logic
+"error handling for {operation}"         # Find error handlers
+"{component} initialization"             # Find setup/init code
+
+# Architecture discovery
+"builder pattern for {component}"        # Find builders
+"handler for {event_type}"              # Find event handlers
+"pipeline stages"                        # Find processing pipelines
+```
+
+### Handling Poor Search Results
+
+When MCP returns irrelevant results:
+1. **Avoid generic debugging terms**: "error", "issue", "problem", "fix"
+2. **Use architectural terms**: "schema", "builder", "handler", "config", "pipeline"
+3. **Try different intents**: Start with "understand" for exploration
+4. **Break complex searches into steps**:
+   ```
+   Instead of: "vector dimension mismatch error ValueError"
+   Try:
+   1. "vector field schema definition"     # Find the schema
+   2. "embedding dimension configuration"  # Find the config
+   3. "vector search validation"          # Find validation
+   ```
+
+### Result Optimization Tips
+- **Increase max_results** to 20-30 when exploring unfamiliar code
+- **Use language parameter** when working in multi-language codebases
+- **Include repository filter** when you know the target location
+- **Combine with Grep** for verification after finding the right area
+
 ## Development Commands
 
 ### Python Environment

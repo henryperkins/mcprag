@@ -37,7 +37,8 @@ from azure.search.documents.indexes.models import (
     CorsOptions,
     CustomAnalyzer,
     LexicalTokenizerName,
-    TokenFilterName
+    TokenFilterName,
+    SearchSynonymMap,
 )
 from azure.core.credentials import AzureKeyCredential
 
@@ -121,6 +122,35 @@ class EnhancedIndexBuilder:
             max_age_in_seconds=300
         )
         
+        # Create or update synonym map resource
+        code_synonyms = SearchSynonymMap(
+            name="code_synonyms",
+            synonyms="\n".join(
+                [
+                    "func, function, method, procedure",
+                    "err, error, exception",
+                    "init, initialize, constructor, ctor",
+                    "auth, authenticate, authorization, authorize",
+                    "db, database, storage",
+                ]
+            ),
+        )
+
+        # Attach synonym map names to relevant fields if present
+        for f in fields:
+            if isinstance(f, SearchableField) and f.name in (
+                "function_name",
+                "class_name",
+                "tags",
+                "content",
+                "docstring",
+            ):
+                # ensure synonym map list exists and include code_synonyms
+                current = getattr(f, "synonym_map_names", None) or []
+                if "code_synonyms" not in current:
+                    current.append("code_synonyms")
+                f.synonym_map_names = current
+
         # Create the index
         index = SearchIndex(
             name=index_name,
@@ -134,10 +164,23 @@ class EnhancedIndexBuilder:
             cors_options=cors_options,
             e_tag=None
         )
+        # Wire the synonym map at index level (name reference)
+        try:
+            # Some SDK versions expose index.synonym_maps; if not, index service will associate by field reference
+            if hasattr(index, "synonym_maps"):
+                index.synonym_maps = [code_synonyms.name]
+        except Exception:
+            pass
         
         # SDK lacks a typed 'description' field on SearchIndex; skipping.
         
         try:
+            # Ensure synonym map exists/updated before index (idempotent)
+            try:
+                self.index_client.create_or_update_synonym_map(code_synonyms)
+                logger.info("Upserted synonym map 'code_synonyms'")
+            except Exception as syn_err:
+                logger.warning(f"Synonym map upsert warning: {syn_err}")
             result = self.index_client.create_or_update_index(index)
             logger.info(f"Created enhanced index '{index_name}'")
             return result
@@ -593,20 +636,20 @@ class EnhancedIndexBuilder:
             )
 
         vector_search = VectorSearch(
-            algorithms=[
-                HnswAlgorithmConfiguration(
-                    name="hnsw-config",
-                    parameters=HnswParameters(
-                        m=4,
-                        ef_construction=400,
-                        ef_search=500,
-                        metric="cosine"
-                    )
+                    algorithms=[
+                        HnswAlgorithmConfiguration(
+                            name="hnsw-config",
+                            parameters=HnswParameters(
+                                m=12,                 # tuned for better recall
+                                ef_construction=300,  # balance build time/quality
+                                ef_search=120,        # balance latency/recall
+                                metric="cosine"
+                            )
+                        )
+                    ],
+                    profiles=[profile],
+                    vectorizers=vectorizers if vectorizers else None
                 )
-            ],
-            profiles=[profile],
-            vectorizers=vectorizers if vectorizers else None
-        )
 
         return vector_search
     

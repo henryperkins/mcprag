@@ -8,8 +8,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
 from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery, QueryType
+from azure.search.documents.models import QueryType
 from azure.core.credentials import AzureKeyCredential
+from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.interfaces import Retriever
 from ..core.models import SearchQuery, SearchResult, SearchIntent, CodeContext
@@ -95,7 +96,9 @@ class MultiStageRetriever(Retriever):
         Execute multi-stage retrieval pipeline
         """
         if stages is None:
-            stages = self._select_stages_by_intent(query.intent)
+            stages = self._select_stages_by_intent(
+                query.intent or SearchIntent.IMPLEMENT
+            )
 
         # Execute stages in parallel
         stage_tasks = []
@@ -168,12 +171,21 @@ class MultiStageRetriever(Retriever):
         if 'main' not in self.search_clients:
             return []
 
-        results = self.search_clients['main'].search(
+        # Enrich semantic search with facets, captions/answers, highlights, total count, search_fields and retries
+        results = with_retry(
+            self.search_clients["main"].search,
             search_text=query.query,
             query_type=QueryType.SEMANTIC,
             semantic_configuration_name="semantic-config",
+            scoring_profile="code_quality_boost",
+            filter=self._build_filter(query),
+            facets=["language,count:20", "repository,count:20", "tags,count:20"],
+            query_caption="extractive",
+            query_answer="extractive",
+            highlight_fields="content,docstring",
+            include_total_count=True,
             top=50,
-            filter=self._build_filter(query)
+            search_fields=["content", "function_name", "class_name", "docstring"],
         )
 
         return [(r['id'], r['@search.score']) for r in results]
@@ -244,6 +256,24 @@ class MultiStageRetriever(Retriever):
                 result.score = fused_score
                 final_results.append(result)
 
+        # Assemble bounded context with dedup and citations
+        try:
+            context_text, citations = self._assemble_context(
+                final_results,
+                max_context_tokens=getattr(query, "max_context_tokens", 3000),
+                safety_margin=getattr(query, "context_safety_margin", 200),
+                tokenizer=getattr(query, "tokenizer", None),
+            )
+            # Attach assembled context and citations to results metadata if model supports it
+            for r in final_results:
+                if not hasattr(r, "citations"):
+                    setattr(r, "citations", [])
+            # Store on retriever for downstream generation stage if needed
+            self._last_context_text = context_text
+            self._last_citations = citations
+        except Exception as assemble_err:
+            logger.warning(f"Context assembly failed: {assemble_err}")
+
         return final_results
 
     async def search(
@@ -271,6 +301,74 @@ class MultiStageRetriever(Retriever):
         )
 
         return await self.retrieve(search_query)
+
+    def _assemble_context(
+        self,
+        results: List[SearchResult],
+        max_context_tokens: int = 3000,
+        safety_margin: int = 200,
+        tokenizer=None,
+    ) -> tuple[str, List[dict]]:
+        """
+        Assemble deduplicated, token-bounded context from ranked results.
+        - Deduplicate by doc id and normalized content hash
+        - Sort by fused score (already applied) and accumulate within budget
+        - Return context text and citations with file_path and line ranges
+        """
+        def norm_text(t: str) -> str:
+            return " ".join((t or "").split()).lower()
+
+        def approx_tokens(t: str) -> int:
+            # fallback heuristic: ~4 chars per token
+            return max(1, len(t) // 4)
+
+        seen_ids = set()
+        seen_hashes = set()
+        unique: List[SearchResult] = []
+
+        for r in results or []:
+            doc_id = getattr(r, "id", None)
+            text = getattr(r, "code_snippet", None) or getattr(r, "content", None) or ""
+            h = hash(norm_text(text))
+            if (doc_id and doc_id in seen_ids) or h in seen_hashes:
+                continue
+            if doc_id:
+                seen_ids.add(doc_id)
+            seen_hashes.add(h)
+            unique.append(r)
+
+        # unique list is already in fused order due to earlier sorting/slicing
+        budget = max(1, max_context_tokens - max(0, safety_margin))
+        used = 0
+        parts: List[str] = []
+        citations: List[dict] = []
+
+        for r in unique:
+            text = getattr(r, "code_snippet", None) or getattr(r, "content", None) or ""
+            if tokenizer:
+                try:
+                    est_tokens = len(tokenizer.encode(text))
+                except Exception:
+                    est_tokens = approx_tokens(text)
+            else:
+                est_tokens = approx_tokens(text)
+            if used + est_tokens > budget:
+                break
+            parts.append(text)
+            used += est_tokens
+            citations.append(
+                {
+                    "id": getattr(r, "id", None),
+                    "file_path": getattr(r, "file_path", None),
+                    "range": (
+                        f"{getattr(r, 'start_line', None)}-"
+                        f"{getattr(r, 'end_line', None)}"
+                    ),
+                    "score": getattr(r, "score", None),
+                }
+            )
+
+        return ("\n\n".join(parts), citations)
 
     async def get_dependencies(
         self,
@@ -311,7 +409,7 @@ class MultiStageRetriever(Retriever):
                 return self._cache[doc_id]
 
             # Fetch from Azure Search
-            doc = self.search_clients['main'].get_document(key=doc_id)
+            doc = with_retry(self.search_clients['main'].get_document, key=doc_id)
 
             # Convert to SearchResult
             result = SearchResult(

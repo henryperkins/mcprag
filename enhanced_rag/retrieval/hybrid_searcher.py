@@ -3,12 +3,17 @@ Hybrid search implementation combining vector and keyword search
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery, VectorizableTextQuery, QueryType
+from azure.search.documents.models import (
+    VectorizedQuery,
+    VectorizableTextQuery,
+    QueryType,
+)
 from azure.core.credentials import AzureKeyCredential
+from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.config import get_config
 
@@ -59,7 +64,9 @@ class HybridSearcher:
             self.embedder = VectorEmbedder()
             logger.info("✅ Vector embedder initialized")
         except ImportError:
-            logger.warning("Vector embeddings not available, falling back to keyword search only")
+            logger.warning(
+                "Vector embeddings not available, falling back to keyword search only"
+            )
             self.embedder = None
         except Exception as e:
             logger.error(f"Failed to initialize embedder: {e}")
@@ -73,7 +80,9 @@ class HybridSearcher:
     ) -> List[HybridSearchResult]:
         """Execute vector similarity search"""
         if not self.search_client:
-            logger.warning("Vector search not available, search client not initialized.")
+            logger.warning(
+                "Vector search not available, search client not initialized."
+            )
             return []
 
         vector_query = self._build_vector_query(query, top_k)
@@ -82,16 +91,15 @@ class HybridSearcher:
             return []
 
         try:
-            # Execute search
-            results = self.search_client.search(
+            # Execute vector search with retries
+            results = with_retry(
+                self.search_client.search,
                 search_text=None,
                 vector_queries=[vector_query],
                 filter=filter_expr,
                 top=top_k
             )
-
             return self._process_results(results)
-
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
             return []
@@ -108,17 +116,35 @@ class HybridSearcher:
             return []
             
         try:
-            # Execute search
-            results = self.search_client.search(
+            # Execute keyword/semantic search with advanced params and retries
+            # Select scoring profile with safe defaults
+            scoring_profile = "code_quality_boost"
+            try:
+                if hasattr(self.config, "azure") and getattr(self.config, "azure"):
+                    scoring_profile = getattr(
+                        self.config.azure,
+                        "default_scoring_profile",
+                        "code_quality_boost",
+                    )
+            except Exception:
+                scoring_profile = "code_quality_boost"
+            enable_semantic = True
+            results = with_retry(
+                self.search_client.search,
                 search_text=query,
+                query_type=QueryType.SEMANTIC if enable_semantic else QueryType.SIMPLE,
+                semantic_configuration_name="semantic-config" if enable_semantic else None,
+                scoring_profile=scoring_profile,
                 filter=filter_expr,
-                top=top_k,
+                facets=["language,count:20", "repository,count:20", "tags,count:20"],
+                query_caption="extractive" if enable_semantic else None,
+                query_answer="extractive" if enable_semantic else None,
+                highlight_fields="content,docstring",
                 include_total_count=True,
+                top=top_k,
                 search_fields=["content", "function_name", "class_name", "docstring"]
             )
-            
             return self._process_results(results)
-            
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")
             return []
