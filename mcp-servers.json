@@ -4,15 +4,9 @@
             "command": "/home/azureuser/mcprag/venv/bin/python",
             "args": [
                 "/home/azureuser/mcprag/mcp_server_sota.py",
-                "--mode",
-                "rpc"
+                "--rpc"
             ],
             "env": {
-                "ACS_ENDPOINT": "https://oairesourcesearch.search.windows.net",
-                "ACS_ADMIN_KEY": "Ne3DXE0h6ZiYANoKTuJlcTP6TJaEiDOsT9iTA399nUAzSeAetXI3",
-                "AZURE_OPENAI_KEY": "nClGElxn2jB3qTRQ0rxwMZi9ehHM3thZ3uVidNs0M8iXNOlnJ8lGJQQJ99BFACHYHv6XJ3w3AAABACOGY9E6",
-                "AZURE_OPENAI_ENDPOINT": "https://oairesourcehp.openai.azure.com/",
-                "AZURE_OPENAI_DEPLOYMENT": "text-embedding-ada-002",
                 "PYTHONPATH": "/home/azureuser/mcprag"
             }
         },

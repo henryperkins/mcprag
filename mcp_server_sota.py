@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 # Azure imports
 from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery
+from azure.search.documents.models import VectorizedQuery, VectorizableTextQuery
 from azure.core.credentials import AzureKeyCredential
 
 # MCP SDK with fallback
@@ -276,21 +276,28 @@ class EnhancedMCPServer:
             ]
         }
 
-        # Add vector search if available
-        if self.embedder:
-            try:
-                embedding = self.embedder.generate_embedding(query)
-                if embedding:
-                    # Use a Sequence[VectorizedQuery] to satisfy typing tools while matching SDK runtime behavior.
-                    vector_query = VectorizedQuery(
-                        vector=embedding,
-                        k_nearest_neighbors=50,
-                        fields="code_vector"
-                    )
-                    # Provide a tuple (Sequence) to satisfy type-checkers and the SDK.
-                    params["vector_queries"] = (vector_query,)
-            except:
-                pass
+        # Add vector search using text-to-vector (index has vectorizers configured)
+        try:
+            vector_query = VectorizableTextQuery(
+                text=query,
+                k_nearest_neighbors=50,
+                fields="content_vector"
+            )
+            params["vector_queries"] = [vector_query]
+        except Exception as e:
+            # Fallback to client-side embedding if available
+            if self.embedder:
+                try:
+                    embedding = self.embedder.generate_embedding(query)
+                    if embedding:
+                        vector_query = VectorizedQuery(
+                            vector=embedding,
+                            k_nearest_neighbors=50,
+                            fields="content_vector"
+                        )
+                        params["vector_queries"] = [vector_query]
+                except:
+                    pass
 
         # Build filters
         filters = []
