@@ -40,6 +40,7 @@ class SearchQuery(BaseModel):
     task_context: Optional[str] = None
     user_id: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    exclude_terms: List[str] = Field(default_factory=list)  # Terms to exclude from search results
 
 
 class CodeContext(BaseModel):

@@ -21,8 +21,16 @@ from pydantic import BaseModel, Field
 
 # Azure imports
 from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery, VectorizableTextQuery
+from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
+
+# Try to import VectorizableTextQuery (only available in newer versions)
+try:
+    from azure.search.documents.models import VectorizableTextQuery
+    VECTORIZABLE_TEXT_QUERY_AVAILABLE = True
+except ImportError:
+    VectorizableTextQuery = None
+    VECTORIZABLE_TEXT_QUERY_AVAILABLE = False
 
 # MCP SDK with fallback
 try:
@@ -79,7 +87,7 @@ else:
 
 if VECTOR_SUPPORT:
     logger.info("Vector search support is available")
-    
+
 if DOCS_SUPPORT:
     logger.info("Microsoft Docs search support is available")
 
@@ -127,7 +135,7 @@ class EnhancedMCPServer:
         self._initialize_clients()
         self._repo_cache: Dict[str, str] = {}
         self._query_cache: Dict[str, List[SearchResult]] = {}
-    
+
     def _format_line_range(self, start_line: Optional[int], end_line: Optional[int]) -> Optional[str]:
         """Format line range from start and end line numbers"""
         if start_line is None:
@@ -277,15 +285,30 @@ class EnhancedMCPServer:
         }
 
         # Add vector search using text-to-vector (index has vectorizers configured)
-        try:
-            vector_query = VectorizableTextQuery(
-                text=query,
-                k_nearest_neighbors=50,
-                fields="content_vector"
-            )
-            params["vector_queries"] = [vector_query]
-        except Exception as e:
-            # Fallback to client-side embedding if available
+        if VECTORIZABLE_TEXT_QUERY_AVAILABLE and VectorizableTextQuery:
+            try:
+                vector_query = VectorizableTextQuery(
+                    text=query,
+                    k_nearest_neighbors=50,
+                    fields="content_vector"
+                )
+                params["vector_queries"] = [vector_query]
+            except Exception as e:
+                # Fallback to client-side embedding if available
+                if self.embedder:
+                    try:
+                        embedding = self.embedder.generate_embedding(query)
+                        if embedding:
+                            vector_query = VectorizedQuery(
+                                vector=embedding,
+                                k_nearest_neighbors=50,
+                                fields="content_vector"
+                            )
+                            params["vector_queries"] = [vector_query]
+                    except:
+                        pass
+        else:
+            # Direct fallback to client-side embedding if VectorizableTextQuery not available
             if self.embedder:
                 try:
                     embedding = self.embedder.generate_embedding(query)
@@ -648,11 +671,11 @@ if ENHANCED_RAG_SUPPORT:
         "enable_caching": True,
         "cache_ttl": 3600
     }
-    
+
     enhanced_search_tool = EnhancedSearchTool(rag_config)
     code_gen_tool = CodeGenerationTool(rag_config)
     context_aware_tool = ContextAwareTool(rag_config)
-    
+
     @mcp.tool()
     async def search_code_enhanced(
         query: str,
@@ -667,7 +690,7 @@ if ENHANCED_RAG_SUPPORT:
     ) -> Dict[str, Any]:
         """
         Enhanced code search using RAG pipeline with context awareness
-        
+
         Args:
             query: Search query
             current_file: Current file for context
@@ -691,7 +714,7 @@ if ENHANCED_RAG_SUPPORT:
             generate_response=generate_response
         )
         return result
-    
+
     @mcp.tool()
     async def generate_code(
         description: str,
@@ -703,7 +726,7 @@ if ENHANCED_RAG_SUPPORT:
     ) -> Dict[str, Any]:
         """
         Generate code using enhanced RAG pipeline
-        
+
         Args:
             description: What code to generate
             language: Target programming language
@@ -720,7 +743,7 @@ if ENHANCED_RAG_SUPPORT:
             include_tests=include_tests,
             workspace_root=workspace_root
         )
-    
+
     @mcp.tool()
     async def analyze_context(
         file_path: str,
@@ -731,7 +754,7 @@ if ENHANCED_RAG_SUPPORT:
     ) -> Dict[str, Any]:
         """
         Analyze hierarchical context for a file
-        
+
         Args:
             file_path: Path to analyze
             include_dependencies: Include dependency analysis
@@ -746,7 +769,7 @@ if ENHANCED_RAG_SUPPORT:
             include_imports=include_imports,
             include_git_history=include_git_history
         )
-    
+
     @mcp.tool()
     async def suggest_improvements(
         file_path: str,
@@ -755,7 +778,7 @@ if ENHANCED_RAG_SUPPORT:
     ) -> Dict[str, Any]:
         """
         Suggest improvements for a file based on context analysis
-        
+
         Args:
             file_path: File to analyze
             focus: Specific area to focus on (performance/readability/testing)

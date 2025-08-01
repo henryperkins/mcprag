@@ -107,6 +107,67 @@ class PatternMatcher:
                 'validation': {
                     'keywords': ['validate', 'check', 'verify', 'assert'],
                     'patterns': [r'validate\w+\s*\(', r'assert\s+', r'if.*is.*None']
+                },
+                'vector_dimension_mismatch': {
+                    'keywords': ['dimension', 'shape', 'size', 'mismatch', 'vector', 'embedding'],
+                    'patterns': [
+                        r'len\s*\(.*vector.*\)\s*!=',
+                        r'\.shape\[0\]\s*!=',
+                        r'dimension.*mismatch',
+                        r'shape.*!=',
+                        r'size.*!=.*embedding',
+                        r'ValueError.*dimension',
+                        r'IndexError.*vector'
+                    ]
+                },
+                'embedding_none_or_nan': {
+                    'keywords': ['embedding', 'vector', 'None', 'NaN', 'null', 'isnan'],
+                    'patterns': [
+                        r'if\s+.*embedding.*is\s+None',
+                        r'if\s+.*vector.*is\s+None',
+                        r'np\.isnan\s*\(.*embedding',
+                        r'math\.isnan\s*\(.*vector',
+                        r'pd\.isna\s*\(.*embedding',
+                        r'embedding\s*==\s*None',
+                        r'not\s+.*embedding',
+                        r'embedding\s+is\s+not\s+None'
+                    ]
+                },
+                'index_corruption': {
+                    'keywords': ['index', 'corrupt', 'rebuild', 'recreate', 'invalid', 'search'],
+                    'patterns': [
+                        r'index.*corrupt',
+                        r'rebuild.*index',
+                        r'recreate.*index',
+                        r'index.*invalid',
+                        r'reindex',
+                        r'clear.*index.*rebuild'
+                    ]
+                },
+                'similarity_metrics': {
+                    'keywords': ['cosine', 'euclidean', 'similarity', 'distance', 'knn', 'hnsw'],
+                    'patterns': [
+                        r'cosine_similarity',
+                        r'euclidean_distance',
+                        r'l2_distance',
+                        r'dot_product',
+                        r'similarity_score',
+                        r'k_nearest_neighbors',
+                        r'knn_search',
+                        r'hnsw.*index'
+                    ]
+                },
+                'vector_search_errors': {
+                    'keywords': ['vector_search', 'similarity_search', 'empty', 'no results', 'threshold'],
+                    'patterns': [
+                        r'vector_search.*failed',
+                        r'similarity_search.*error',
+                        r'empty.*results',
+                        r'no.*results.*found',
+                        r'threshold.*too.*high',
+                        r'min_score.*not.*met',
+                        r'search.*timeout'
+                    ]
                 }
             },
             PatternType.TESTING: {
@@ -300,6 +361,40 @@ class PatternMatcher:
         elif animal_type == "cat":
             return Cat()''',
                 'use_cases': ['Object creation with complex logic', 'Plugin systems']
+            },
+            (PatternType.ERROR_HANDLING, 'vector_dimension_mismatch'): {
+                'description': 'Handles vector/embedding dimension mismatches',
+                'example': '''if len(query_vector) != len(doc_vector):
+    raise ValueError(f"Dimension mismatch: query {len(query_vector)} != doc {len(doc_vector)}")
+    
+# Or with numpy
+if embedding.shape[0] != expected_dim:
+    raise IndexError(f"Expected embedding dimension {expected_dim}, got {embedding.shape[0]}")''',
+                'use_cases': ['Vector search validation', 'Embedding compatibility checks']
+            },
+            (PatternType.ERROR_HANDLING, 'embedding_none_or_nan'): {
+                'description': 'Handles missing or invalid embeddings',
+                'example': '''if embedding is None:
+    logger.warning("Embedding is None, skipping document")
+    return None
+    
+# Check for NaN values
+if np.isnan(embedding).any():
+    raise ValueError("Embedding contains NaN values")''',
+                'use_cases': ['Embedding validation', 'Vector search preprocessing']
+            },
+            (PatternType.ERROR_HANDLING, 'similarity_metrics'): {
+                'description': 'Different similarity/distance calculations',
+                'example': '''# Cosine similarity
+from sklearn.metrics.pairwise import cosine_similarity
+similarity = cosine_similarity([query_vector], [doc_vector])[0][0]
+
+# Euclidean distance
+distance = np.linalg.norm(query_vector - doc_vector)
+
+# Dot product similarity
+similarity = np.dot(query_vector, doc_vector)''',
+                'use_cases': ['Vector search ranking', 'Similarity calculations']
             }
         }
         

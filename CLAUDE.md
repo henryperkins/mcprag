@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## IMPORTANT: Search Tool Priority
+
+**ALWAYS use the MCP-provided `mcp__azure-code-search__search_code` tool for code searches instead of built-in Grep/Glob tools.**
+
+When you need to search the codebase:
+1. First choice: Use `mcp__azure-code-search__search_code` - it provides semantic search with better context understanding
+2. Only use Grep/Glob if specifically looking for exact string matches or file patterns
+3. The MCP search tool offers:
+   - Intent-aware search (implement/debug/understand/refactor)
+   - Semantic understanding of code
+   - Cross-file dependency resolution
+   - Better ranking based on code context
+
 ## Development Commands
 
 ### Python Environment

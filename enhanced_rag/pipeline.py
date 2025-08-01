@@ -7,7 +7,9 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from .core.models import SearchQuery, SearchResult, CodeContext
+from .core.models import (
+    SearchQuery, SearchResult, CodeContext, EnhancedContext
+)
 from .core.config import get_config
 from .context.hierarchical_context import HierarchicalContextAnalyzer
 from .semantic.query_enhancer import ContextualQueryEnhancer
@@ -74,7 +76,7 @@ class RAGPipeline:
 
         # Initialize components
         self._initialize_components()
-        
+
         # Initialize vector search if enabled
         if self.config.get('retrieval', {}).get('enable_vector_search', True):
             try:
@@ -92,21 +94,63 @@ class RAGPipeline:
         """Initialize all RAG pipeline components"""
         try:
             # Core components
-            self.context_analyzer = HierarchicalContextAnalyzer(self.config.get('context', {}))
-            self.query_enhancer = ContextualQueryEnhancer(self.config.get('semantic', {}))
-            self.intent_classifier = IntentClassifier(self.config.get('semantic', {}))
-            self.retriever = MultiStageRetriever(self.config.get('retrieval', {}))
-            self.ranker = ContextualRanker(self.config.get('ranking', {}))
-            self.result_explainer = ResultExplainer(self.config.get('ranking', {}))
-            self.response_generator = ResponseGenerator(self.config.get('generation', {}))
+            context_config = self.config.get('context', {})
+            retrieval_config = self.config.get('retrieval', {})
+            ranking_config = self.config.get('ranking', {})
+
+            self.context_analyzer = HierarchicalContextAnalyzer(context_config)
+            self.query_enhancer = ContextualQueryEnhancer(retrieval_config)
+            self.intent_classifier = IntentClassifier(retrieval_config)
+            self.retriever = MultiStageRetriever(retrieval_config)
             
-            # Initialize feedback collector if learning module is available
-            try:
-                from .learning.feedback_collector import FeedbackCollector
-                self.feedback_collector = FeedbackCollector(self.config.get('learning', {}))
-            except ImportError:
-                logger.warning("Learning module not available - feedback collection disabled")
-                self.feedback_collector = None
+            # Initialize ranking with optional adaptive ranker
+            base_ranker = ContextualRanker(ranking_config)
+            learning_config = self.config.get('learning', {})
+            
+            if learning_config.get('enable_adaptive_ranking', False):
+                try:
+                    from .ranking.adaptive_ranker import AdaptiveRanker
+                    from .learning.feedback_collector import FeedbackCollector
+                    from .learning.model_updater import ModelUpdater
+                    
+                    # Initialize feedback collector first
+                    self.feedback_collector = FeedbackCollector(
+                        storage_path=learning_config.get('feedback_storage_path')
+                    )
+                    
+                    # Initialize model updater
+                    model_updater = ModelUpdater(
+                        update_frequency=learning_config.get('update_frequency', 'daily')
+                    )
+                    
+                    # Wrap base ranker with adaptive ranker
+                    self.ranker = AdaptiveRanker(
+                        base_ranker=base_ranker,
+                        model_updater=model_updater,
+                        feedback_collector=self.feedback_collector,
+                        config=learning_config
+                    )
+                    logger.info("✅ Adaptive ranking enabled")
+                except ImportError as e:
+                    logger.warning(f"Adaptive ranking not available: {e}")
+                    self.ranker = base_ranker
+                    self.feedback_collector = None
+            else:
+                self.ranker = base_ranker
+                # Still initialize feedback collector for tracking
+                try:
+                    from .learning.feedback_collector import FeedbackCollector
+                    self.feedback_collector = FeedbackCollector(
+                        storage_path=learning_config.get('feedback_storage_path')
+                    )
+                except ImportError:
+                    logger.warning("Learning module not available - feedback collection disabled")
+                    self.feedback_collector = None
+            
+            self.result_explainer = ResultExplainer(ranking_config)
+            self.response_generator = ResponseGenerator(
+                self.config.get('generation', {})
+            )
 
             logger.info("✅ RAG Pipeline components initialized successfully")
 
@@ -144,11 +188,14 @@ class RAGPipeline:
 
             # Handle case where context is None
             if code_context:
-                enhanced_queries = await self.query_enhancer.enhance_query(
+                enhancement_result = await self.query_enhancer.enhance_query(
                     query, code_context, intent.value
                 )
+                enhanced_queries = enhancement_result['queries']
+                exclude_terms = enhancement_result['exclude_terms']
             else:
                 enhanced_queries = [query]  # Fallback to original query
+                exclude_terms = []
 
             # 3. Build search query object
             search_query = SearchQuery(
@@ -157,16 +204,76 @@ class RAGPipeline:
                 current_file=context.current_file,
                 language=code_context.language if code_context else None,
                 framework=code_context.framework if code_context else None,
-                user_id=context.session_id
+                user_id=context.session_id,
+                exclude_terms=exclude_terms
             )
 
-            # 4. Execute multi-stage retrieval (simplified for now)
-            # TODO: Implement proper multi-stage retrieval
-            raw_results = []  # Placeholder
+            # 4. Execute multi-stage retrieval
+            try:
+                raw_results = await self.retriever.retrieve(search_query)
+                logger.debug(f"Retrieved {len(raw_results)} results from multi-stage retrieval")
+            except Exception as e:
+                logger.error(f"Multi-stage retrieval failed: {e}")
+                # Fallback to HybridSearcher if available
+                if hasattr(self, 'hybrid_searcher') and self.hybrid_searcher:
+                    try:
+                        logger.info("Falling back to HybridSearcher")
+                        hybrid_results = await self.hybrid_searcher.hybrid_search(
+                            query=query,
+                            top_k=max_results * 2  # Get more results for ranking
+                        )
+                        # Convert HybridSearchResult to SearchResult
+                        raw_results = []
+                        for hr in hybrid_results:
+                            search_result = SearchResult(
+                                id=hr.id,
+                                score=hr.score,
+                                file_path=hr.metadata.get('file_path', ''),
+                                repository=hr.metadata.get('repository', ''),
+                                function_name=hr.metadata.get('function_name'),
+                                class_name=hr.metadata.get('class_name'),
+                                code_snippet=hr.content,
+                                language=hr.metadata.get('language', ''),
+                                highlights=hr.metadata.get('highlights', {})
+                            )
+                            raw_results.append(search_result)
+                        logger.info(f"HybridSearcher fallback returned {len(raw_results)} results")
+                    except Exception as fallback_error:
+                        logger.error(f"HybridSearcher fallback also failed: {fallback_error}")
+                        raw_results = []
+                else:
+                    raw_results = []
 
-            # 5. Rank and filter results (simplified for now)
-            # TODO: Implement proper ranking
-            ranked_results = raw_results
+            # 5. Rank and filter results
+            if raw_results and code_context:
+                try:
+                    # Convert CodeContext to EnhancedContext for ranking
+                    enhanced_context = EnhancedContext(
+                        current_file=code_context.current_file,
+                        file_content=code_context.file_content,
+                        imports=code_context.imports,
+                        functions=code_context.functions,
+                        classes=code_context.classes,
+                        recent_changes=code_context.recent_changes,
+                        git_branch=code_context.git_branch,
+                        language=code_context.language,
+                        framework=code_context.framework,
+                        project_root=code_context.project_root,
+                        open_files=code_context.open_files,
+                        session_id=code_context.session_id
+                    )
+
+                    ranked_results = await self.ranker.rank_results(
+                        raw_results, enhanced_context, intent
+                    )
+                    logger.debug(f"Ranked {len(ranked_results)} results")
+                except Exception as e:
+                    logger.error(f"Ranking failed: {e}")
+                    # Fallback to original results
+                    ranked_results = raw_results
+            else:
+                # No context available or no results, skip ranking
+                ranked_results = raw_results
 
             # 6. Limit results and add explanations
             final_results = ranked_results[:max_results]
@@ -254,11 +361,18 @@ class RAGPipeline:
         """Record interaction for learning purposes"""
         if not self.feedback_collector:
             return
-            
+
         try:
-            await self.feedback_collector.record_interaction(
-                query, results, context, "search_completed"
+            # Record the search interaction
+            interaction_id = await self.feedback_collector.record_search_interaction(
+                query, results, context
             )
+            
+            # Store interaction ID for potential later feedback
+            if hasattr(query, 'user_id') and query.user_id:
+                self._session_contexts.setdefault(query.user_id, {})
+                self._session_contexts[query.user_id]['last_interaction_id'] = interaction_id
+            
         except Exception as e:
             logger.warning(f"⚠️ Failed to record interaction: {e}")
 

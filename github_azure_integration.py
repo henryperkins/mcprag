@@ -12,6 +12,9 @@ import requests
 import time
 # from pathlib import Path  # unused
 from smart_indexer import CodeChunker
+
+# Default network timeout (seconds) for outbound HTTP requests
+DEFAULT_HTTP_TIMEOUT = 10
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -114,7 +117,29 @@ class GitHubAzureIntegrator:
         on 429/5xx responses.
         """
         for attempt in range(1, max_retries + 1):
-            resp = requests.get(url, headers=self.headers, params=params)
+            try:
+                resp = requests.get(
+                    url,
+                    headers=self.headers,
+                    params=params,
+                    timeout=DEFAULT_HTTP_TIMEOUT,
+                )
+            except requests.exceptions.Timeout:
+                # Treat timeout similar to a retryable condition
+                if attempt < max_retries:
+                    wait = backoff * (2 ** (attempt - 1))
+                    time.sleep(wait)
+                    continue
+                # Re-raise on final attempt to surface the error
+                raise
+            except requests.exceptions.RequestException:
+                # Connection errors and other request issues: retry with backoff when possible
+                if attempt < max_retries:
+                    wait = backoff * (2 ** (attempt - 1))
+                    time.sleep(wait)
+                    continue
+                raise
+
             if resp.status_code < 400:
                 return resp
 
