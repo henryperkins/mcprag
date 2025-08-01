@@ -282,6 +282,15 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
             self.config.get('max_concurrent_requests', 5)
         )
         
+        # Initialize embedding provider based on config
+        self.provider = None
+        if self.config.get('provider') == 'client':
+            from .embedding_provider import AzureOpenAIEmbeddingProvider
+            self.provider = AzureOpenAIEmbeddingProvider()
+        elif self.config.get('provider') == 'none':
+            self.provider = None
+        # else: provider remains None, will use azure_openai_http method
+        
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
         return self
@@ -309,17 +318,24 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
             text = f"[{language}] {text}"
         
         # Generate embedding based on provider
-        if self.config.get('provider') == 'azure_openai':
-            embedding = await self._generate_azure_openai_embedding_with_retry(
-                text
-            )
+        if self.provider is not None:
+            # Use client-side embedding provider
+            embedding = self.provider.generate_embedding(text)
+            if embedding and len(embedding) != self.config.get('dimensions', 1536):
+                # Truncate or pad to match configured dimensions
+                dimensions = self.config.get('dimensions', 1536)
+                if len(embedding) > dimensions:
+                    embedding = embedding[:dimensions]
+                else:
+                    embedding = embedding + [0.0] * (dimensions - len(embedding))
+            return {'embedding': embedding or []}
+        elif self.config.get('provider') == 'azure_openai_http':
+            # Use existing Azure HTTP method
+            embedding = await self._generate_azure_openai_embedding_with_retry(text)
+            return {'embedding': embedding}
         else:
-            # Fallback to a simple embedding (in production, use proper models)
-            embedding = self._generate_simple_embedding(text)
-
-        return {
-            'embedding': embedding
-        }
+            # Provider is 'none' or unknown - return empty embedding
+            return {'embedding': []}
     
     async def _generate_azure_openai_embedding(self, text: str) -> List[float]:
         """Generate embedding using Azure OpenAI"""

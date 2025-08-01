@@ -18,7 +18,7 @@ from typing import Optional, Dict, Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp_server_sota import EnhancedMCPServer, SearchCodeParams, SearchResult
-from smart_indexer import SmartIndexer
+from enhanced_rag.azure_integration import LocalRepositoryIndexer
 
 class AutoIndexingMCPServer(EnhancedMCPServer):
     """MCP Server that automatically indexes the current workspace"""
@@ -146,10 +146,11 @@ class AutoIndexingMCPServer(EnhancedMCPServer):
         print("📝 Indexing workspace...")
         
         try:
-            # Run the smart indexer
+            # Run the indexer using the new CLI
             cmd = [
-                sys.executable,
-                os.path.join(os.path.dirname(__file__), "smart_indexer.py"),
+                sys.executable, "-m",
+                "enhanced_rag.azure_integration.cli",
+                "local-repo",
                 "--repo-path", str(self.workspace_path),
                 "--repo-name", self.workspace_name
             ]

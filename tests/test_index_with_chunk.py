@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
-from smart_indexer import CodeChunker
+from enhanced_rag.code_understanding import CodeChunker
 import hashlib
 
 load_dotenv()

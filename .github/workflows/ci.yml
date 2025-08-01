@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.9, 3.10, 3.11]
+        python-version: ["3.9", "3.10", "3.11"]
 
     steps:
     - uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
     
     - name: Type check with mypy
       run: |
-        mypy --install-types --non-interactive --ignore-missing-imports *.py
+        mypy --install-types --non-interactive --ignore-missing-imports *.py enhanced_rag/
       continue-on-error: true
     
     - name: Test with pytest
@@ -100,4 +100,4 @@ jobs:
     
     - name: Test Docker image
       run: |
-        docker run --rm mcprag:test python -c "import smart_indexer; print('Import successful')"
+        docker run --rm mcprag:test python -c "from enhanced_rag.azure_integration import LocalRepositoryIndexer; from enhanced_rag.code_understanding import CodeChunker; print('Import successful')"

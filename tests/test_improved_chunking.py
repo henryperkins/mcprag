@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Test script to verify improved chunking functionality."""
 
+import sys
 import tempfile
 import os
 from pathlib import Path
-from smart_indexer import CodeChunker
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from enhanced_rag.code_understanding import CodeChunker
 
 
 def test_python_chunking():
@@ -57,8 +63,8 @@ class DataProcessor(BaseProcessor):
         for i, chunk in enumerate(chunks):
             print(f"\nChunk {i+1}:")
             print(f"Type: {chunk['chunk_type']}")
-            print(f"Signature: {chunk['function_signature']}")
-            print(f"Line Range: {chunk['line_range']}")
+            print(f"Signature: {chunk['signature']}")
+            print(f"Line Range: {chunk['start_line']}-{chunk['end_line']}")
             print(f"Semantic Context:\n{chunk['semantic_context']}")
             print("-" * 50)
 
@@ -115,8 +121,8 @@ export default UserManager;
         for i, chunk in enumerate(chunks):
             print(f"\nChunk {i+1}:")
             print(f"Type: {chunk['chunk_type']}")
-            print(f"Signature: {chunk['function_signature']}")
-            print(f"Line Range: {chunk['line_range']}")
+            print(f"Signature: {chunk['signature']}")
+            print(f"Line Range: {chunk['start_line']}-{chunk['end_line']}")
             print(f"Semantic Context:\n{chunk['semantic_context']}")
             print("-" * 50)
 

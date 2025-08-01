@@ -50,10 +50,10 @@ except ImportError:
 
 # Optional imports
 try:
-    from vector_embeddings import VectorEmbedder
+    from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider
     VECTOR_SUPPORT = True
 except ImportError:
-    VectorEmbedder = None
+    AzureOpenAIEmbeddingProvider = None
     VECTOR_SUPPORT = False
 
 try:
@@ -160,9 +160,9 @@ class EnhancedMCPServer:
 
         # Initialize vector support
         self.embedder = None
-        if VECTOR_SUPPORT and os.getenv("AZURE_OPENAI_KEY"):
+        if VECTOR_SUPPORT and (os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")):
             try:
-                self.embedder = VectorEmbedder()
+                self.embedder = AzureOpenAIEmbeddingProvider()
                 print("✅ Vector search enabled")
             except Exception as e:
                 print(f"⚠️  Vector search unavailable: {e}")
@@ -795,39 +795,7 @@ if ENHANCED_RAG_SUPPORT:
 # ============================================================================
 
 if __name__ == "__main__":
-    if "--rpc" in sys.argv:
-        # JSON-RPC mode for MCP protocol
-        async def run_rpc():
-            while True:
-                try:
-                    line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
-                    if not line:
-                        break
-                    request = json.loads(line.strip())
-
-                    # Basic RPC handler (simplified)
-                    method = request.get("method")
-                    if method == "initialize":
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "result": {
-                                "protocolVersion": "2024-11-05",
-                                "capabilities": {"tools": {"listChanged": False}},
-                                "serverInfo": {"name": server.name, "version": server.version}
-                            }
-                        }
-                    else:
-                        response = {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": -32601, "message": "Method not found"}}
-
-                    print(json.dumps(response))
-                    sys.stdout.flush()
-                except Exception as e:
-                    print(json.dumps({"jsonrpc": "2.0", "error": {"code": -32603, "message": str(e)}}))
-                    sys.stdout.flush()
-
-        asyncio.run(run_rpc())
-    elif "--api" in sys.argv:
+    if "--api" in sys.argv:
         # FastAPI mode
         from fastapi import FastAPI
         import uvicorn
@@ -856,5 +824,5 @@ if __name__ == "__main__":
 
         uvicorn.run(app, host="0.0.0.0", port=8001)
     else:
-        # Default: MCP SDK mode
-        mcp.run()
+        # Default: MCP stdio mode
+        mcp.run(transport='stdio')

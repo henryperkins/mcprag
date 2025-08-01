@@ -2,9 +2,15 @@
 """Test complete indexing with vector embeddings."""
 
 import os
+import sys
 import tempfile
 from pathlib import Path
-from smart_indexer import CodeChunker
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from enhanced_rag.code_understanding import CodeChunker
 
 
 def create_test_repo():

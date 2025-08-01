@@ -5,7 +5,7 @@ Unit tests for CodeChunker class
 import pytest
 import os
 from unittest.mock import Mock, patch
-from smart_indexer import CodeChunker
+from enhanced_rag.code_understanding import CodeChunker
 
 
 class TestCodeChunker:
@@ -18,8 +18,7 @@ class TestCodeChunker:
     )
     def setup_method(self, _method=None):
         """Set up test fixtures."""
-        with patch("smart_indexer.SearchClient"):
-            self.chunker = CodeChunker()
+        self.chunker = CodeChunker()
 
     def test_chunk_python_file_simple_function(self):
         """Test chunking a simple Python function."""

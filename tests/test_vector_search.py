@@ -2,11 +2,18 @@
 """Test vector search functionality"""
 
 import os
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
-from vector_embeddings import VectorEmbedder
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider
 
 load_dotenv()
 
@@ -18,7 +25,7 @@ def test_vector_search():
         credential=AzureKeyCredential(os.getenv("ACS_ADMIN_KEY"))
     )
     
-    embedder = VectorEmbedder()
+    embedder = AzureOpenAIEmbeddingProvider()
     
     # Test query
     query = "test function"

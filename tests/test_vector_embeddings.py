@@ -11,7 +11,7 @@ load_dotenv()
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from vector_embeddings import VectorEmbedder
+from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
 
 def test_vector_embeddings():

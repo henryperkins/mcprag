@@ -3,7 +3,7 @@ Azure AI Search Integration Module
 Provides comprehensive integration with Azure Search features
 """
 
-from .indexer_integration import IndexerIntegration, DataSourceType
+from .indexer_integration import IndexerIntegration, DataSourceType, LocalRepositoryIndexer
 from .enhanced_index_builder import EnhancedIndexBuilder
 from .custom_skill_vectorizer import (
     CodeAnalyzerSkill,
@@ -13,11 +13,13 @@ from .custom_skill_vectorizer import (
     ContextAwareChunkingSkill,
     create_code_analysis_endpoint
 )
+from .embedding_provider import IEmbeddingProvider, AzureOpenAIEmbeddingProvider
 
 __all__ = [
     # Indexer components
     'IndexerIntegration',
     'DataSourceType',
+    'LocalRepositoryIndexer',
     
     # Index builder
     'EnhancedIndexBuilder',
@@ -28,5 +30,9 @@ __all__ = [
     'CustomWebApiVectorizer',
     'GitMetadataExtractorSkill',
     'ContextAwareChunkingSkill',
-    'create_code_analysis_endpoint'
+    'create_code_analysis_endpoint',
+    
+    # Embedding providers
+    'IEmbeddingProvider',
+    'AzureOpenAIEmbeddingProvider'
 ]

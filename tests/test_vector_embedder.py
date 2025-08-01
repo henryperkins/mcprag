@@ -18,7 +18,7 @@ class TestVectorEmbedder:
     )
     def test_vector_embedder_initialization(self):
         """Test VectorEmbedder initialization with Azure OpenAI."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         embedder = VectorEmbedder()
         assert embedder.endpoint == "https://test.openai.azure.com/"
@@ -35,7 +35,7 @@ class TestVectorEmbedder:
     )
     def test_vector_embedder_openai_fallback(self):
         """Test VectorEmbedder falls back to OpenAI when Azure not configured."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         embedder = VectorEmbedder()
         assert embedder.use_azure is False
@@ -44,12 +44,12 @@ class TestVectorEmbedder:
     @patch.dict(os.environ, {}, clear=True)
     def test_vector_embedder_no_keys_raises_error(self):
         """Test VectorEmbedder raises error when no API keys are provided."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         with pytest.raises(ValueError, match="API key"):
             VectorEmbedder()
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -60,7 +60,7 @@ class TestVectorEmbedder:
     )
     def test_generate_embedding_success(self, mock_openai):
         """Test successful embedding generation."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         # Mock OpenAI client response
         mock_client = Mock()
@@ -77,7 +77,7 @@ class TestVectorEmbedder:
             input="test code snippet", model="text-embedding-ada-002"
         )
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -87,7 +87,7 @@ class TestVectorEmbedder:
     )
     def test_generate_embedding_api_error(self, mock_openai):
         """Test embedding generation with API error."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         # Mock OpenAI client to raise exception
         mock_client = Mock()
@@ -100,7 +100,7 @@ class TestVectorEmbedder:
         # Should return None on error
         assert result is None
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -110,7 +110,7 @@ class TestVectorEmbedder:
     )
     def test_generate_embeddings_batch(self, mock_openai):
         """Test batch embedding generation."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         # Mock OpenAI client response for batch
         mock_client = Mock()
@@ -132,7 +132,7 @@ class TestVectorEmbedder:
         assert results[1] == [0.3, 0.4]
         assert results[2] == [0.5, 0.6]
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -142,7 +142,7 @@ class TestVectorEmbedder:
     )
     def test_generate_embeddings_batch_partial_failure(self, mock_openai):
         """Test batch embedding with partial failures."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         # Mock OpenAI client to fail on second call
         mock_client = Mock()
@@ -164,11 +164,11 @@ class TestVectorEmbedder:
         assert results[1] is None
         assert results[2] == [0.5, 0.6]
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-key"})
     def test_openai_client_configuration(self, mock_openai):
         """Test OpenAI client configuration for non-Azure usage."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         embedder = VectorEmbedder()
 
@@ -176,7 +176,7 @@ class TestVectorEmbedder:
         mock_openai.assert_called_once_with(api_key="sk-test-key")
         assert embedder.use_azure is False
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -186,7 +186,7 @@ class TestVectorEmbedder:
     )
     def test_azure_openai_client_configuration(self, mock_openai):
         """Test Azure OpenAI client configuration."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         embedder = VectorEmbedder()
 
@@ -198,7 +198,7 @@ class TestVectorEmbedder:
         )
         assert embedder.use_azure is True
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -208,7 +208,7 @@ class TestVectorEmbedder:
     )
     def test_embedding_dimension_consistency(self, mock_openai):
         """Test that embeddings have consistent dimensions."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         # Mock consistent embedding dimensions
         mock_client = Mock()
@@ -227,7 +227,7 @@ class TestVectorEmbedder:
 
         assert len(embedding1) == len(embedding2) == 1536
 
-    @patch("vector_embeddings.OpenAI")
+    @patch("enhanced_rag.azure_integration.embedding_provider.OpenAI")
     @patch.dict(
         os.environ,
         {
@@ -237,7 +237,7 @@ class TestVectorEmbedder:
     )
     def test_text_preprocessing(self, mock_openai):
         """Test text preprocessing before embedding."""
-        from vector_embeddings import VectorEmbedder
+        from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider as VectorEmbedder
 
         mock_client = Mock()
         mock_response = Mock()

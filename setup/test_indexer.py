@@ -23,7 +23,7 @@ class MockSearchClient:
 
 
 # Patch the CodeChunker to use mock client
-from smart_indexer import CodeChunker
+from enhanced_rag.code_understanding import CodeChunker
 
 
 class TestCodeChunker(CodeChunker):
@@ -48,9 +48,9 @@ def test_javascript_parsing():
         print(f"   Generated {len(chunks)} chunks")
         if chunks:
             chunk = chunks[0]
-            print(f"   Function signature: {chunk['function_signature']}")
-            print(f"   Imports: {chunk['imports_used']}")
-            print(f"   Calls: {chunk['calls_functions'][:5]}")  # First 5 calls
+            print(f"   Function signature: {chunk['signature']}")
+            print(f"   Imports: {chunk['imports']}")
+            print(f"   Calls: {chunk['dependencies'][:5]}")  # First 5 calls
     else:
         print("❌ example-repo/api.js not found")
 
@@ -71,9 +71,9 @@ def test_python_parsing():
         print(f"   Generated {len(chunks)} chunks")
         if chunks:
             chunk = chunks[0]
-            print(f"   Function signature: {chunk['function_signature']}")
-            print(f"   Imports: {chunk['imports_used']}")
-            print(f"   Calls: {chunk['calls_functions'][:5]}")  # First 5 calls
+            print(f"   Function signature: {chunk['signature']}")
+            print(f"   Imports: {chunk['imports']}")
+            print(f"   Calls: {chunk['dependencies'][:5]}")  # First 5 calls
     else:
         print("❌ example-repo/auth.py not found")
 

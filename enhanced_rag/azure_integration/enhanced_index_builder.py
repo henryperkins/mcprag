@@ -947,3 +947,78 @@ class EnhancedIndexBuilder:
         except Exception as e:
             logger.error(f"Error validating index '{index_name}': {e}")
             return {'error': str(e)}
+    
+    async def validate_vector_dimensions(
+        self,
+        index_name: str,
+        expected: int
+    ) -> Dict[str, Any]:
+        """
+        Validate that the index has the expected vector dimensions.
+        
+        Args:
+            index_name: Name of the index to validate
+            expected: Expected vector dimensions
+            
+        Returns:
+            Validation results with 'ok', 'actual', 'expected', and 'message' fields
+        """
+        try:
+            index = self.index_client.get_index(index_name)
+            
+            # Find the content_vector field
+            vector_field = None
+            for field in index.fields:
+                if field.name == "content_vector" and hasattr(field, 'vector_search_dimensions'):
+                    vector_field = field
+                    break
+            
+            if not vector_field:
+                return {
+                    'ok': False,
+                    'actual': None,
+                    'expected': expected,
+                    'message': f"No 'content_vector' field found in index '{index_name}'"
+                }
+            
+            actual_dims = getattr(vector_field, 'vector_search_dimensions', None)
+            
+            if actual_dims is None:
+                return {
+                    'ok': False,
+                    'actual': None,
+                    'expected': expected,
+                    'message': f"Field 'content_vector' exists but has no vector_search_dimensions"
+                }
+            
+            ok = actual_dims == expected
+            
+            if ok:
+                message = f"Vector dimensions match: {actual_dims}"
+            else:
+                message = (
+                    f"Vector dimension mismatch in index '{index_name}': "
+                    f"expected {expected}, actual {actual_dims}"
+                )
+            
+            # Optionally include configured vectorizers
+            vectorizers = []
+            if index.vector_search and hasattr(index.vector_search, 'vectorizers'):
+                vectorizers = [v.name for v in (index.vector_search.vectorizers or [])]
+            
+            return {
+                'ok': ok,
+                'actual': actual_dims,
+                'expected': expected,
+                'message': message,
+                'vectorizers': vectorizers
+            }
+            
+        except Exception as e:
+            logger.error(f"Error validating vector dimensions for '{index_name}': {e}")
+            return {
+                'ok': False,
+                'actual': None,
+                'expected': expected,
+                'message': f"Error accessing index: {str(e)}"
+            }

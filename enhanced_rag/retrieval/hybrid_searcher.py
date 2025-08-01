@@ -67,8 +67,8 @@ class HybridSearcher:
     def _setup_embedder(self):
         """Setup vector embedder if available"""
         try:
-            from vector_embeddings import VectorEmbedder
-            self.embedder = VectorEmbedder()
+            from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider
+            self.embedder = AzureOpenAIEmbeddingProvider()
             logger.info("✅ Vector embedder initialized")
         except ImportError:
             logger.warning(

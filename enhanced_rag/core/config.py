@@ -32,7 +32,7 @@ class AzureConfig(BaseModel):
 
 class EmbeddingConfig(BaseModel):
     """Embedding generation configuration"""
-    provider: str = Field(default="azure_openai")
+    provider: str = Field(default="azure_openai_http")  # Options: azure_openai_http, client, none
     model: str = Field(default="text-embedding-3-large")
     dimensions: int = Field(default=1536)
     batch_size: int = Field(default=16)
@@ -45,9 +45,13 @@ class EmbeddingConfig(BaseModel):
         default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT", "")
     )
     api_key: str = Field(
-        default_factory=lambda: os.getenv("AZURE_OPENAI_KEY", "")
+        default_factory=lambda: os.getenv("AZURE_OPENAI_KEY", 
+                                         os.getenv("AZURE_OPENAI_API_KEY",
+                                                  os.getenv("OPENAI_API_KEY", "")))
     )
-    api_version: str = Field(default="2024-02-15-preview")
+    api_version: str = Field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
+    )
 
 
 class ContextConfig(BaseModel):
@@ -210,33 +214,21 @@ def validate_config(cfg: Config) -> None:
             "ACS_ENDPOINT and ACS_ADMIN_KEY must be set and non-empty"
         )
 
-    # Embedding configuration when using Azure OpenAI
-    if cfg.embedding.provider.lower() == "azure_openai":
-        if not cfg.embedding.azure_endpoint or not cfg.embedding.api_key:
-            raise ValueError(
-                "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY must be set "
-                "for Azure OpenAI provider"
-            )
-        if cfg.embedding.dimensions <= 0:
-            raise ValueError("Embedding dimensions must be positive")
-        if cfg.embedding.max_concurrent_requests <= 0:
-            raise ValueError("max_concurrent_requests must be positive")
-
-
-def validate_config(cfg: Config) -> None:
-    """
-    Validate required configuration values and raise ValueError on problems.
-    """
-    # Azure Search required
-    if not cfg.azure.endpoint or not cfg.azure.admin_key:
-        raise ValueError("ACS_ENDPOINT and ACS_ADMIN_KEY must be set and non-empty")
-
-    # Embedding configuration when using Azure OpenAI
-    if cfg.embedding.provider.lower() == "azure_openai":
-        if not cfg.embedding.azure_endpoint or not cfg.embedding.api_key:
-            raise ValueError(
-                "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY must be set for Azure OpenAI provider"
-            )
+    # Embedding configuration when using Azure OpenAI or client providers
+    if cfg.embedding.provider.lower() in ["azure_openai", "azure_openai_http", "client"]:
+        if cfg.embedding.provider.lower() == "client":
+            # Client provider needs api_key but may use either Azure or OpenAI endpoint
+            if not cfg.embedding.api_key:
+                raise ValueError(
+                    "API key must be set for client embedding provider"
+                )
+        else:
+            # Azure OpenAI HTTP provider needs endpoint and key
+            if not cfg.embedding.azure_endpoint or not cfg.embedding.api_key:
+                raise ValueError(
+                    "AZURE_OPENAI_ENDPOINT and API key must be set "
+                    "for Azure OpenAI provider"
+                )
         if cfg.embedding.dimensions <= 0:
             raise ValueError("Embedding dimensions must be positive")
         if cfg.embedding.max_concurrent_requests <= 0:

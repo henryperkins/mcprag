@@ -4,10 +4,12 @@ Leverages Azure indexers for automated data ingestion and enrichment
 """
 
 import logging
-from typing import Dict, List, Any, Optional
-from datetime import timedelta
+from typing import Dict, List, Any, Optional, Sequence
+from datetime import timedelta, datetime
 import asyncio
 from enum import Enum
+import hashlib
+from pathlib import Path
 
 from azure.search.documents.indexes import SearchIndexerClient
 from azure.search.documents.indexes.models import (
@@ -34,6 +36,8 @@ from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import ResourceNotFoundError
 
 from enhanced_rag.core.config import get_config
+from .embedding_provider import IEmbeddingProvider, AzureOpenAIEmbeddingProvider
+from enhanced_rag.code_understanding import CodeChunker
 
 logger = logging.getLogger(__name__)
 
@@ -661,3 +665,277 @@ class IndexerIntegration:
         
         logger.info(f"Created incremental indexing pipeline '{name}'")
         return pipeline_config
+
+
+class LocalRepositoryIndexer:
+    """Local repository indexer for direct ingestion without Azure Indexer.
+    
+    Migrated from smart_indexer.py to consolidate indexing functionality.
+    """
+    
+    def __init__(self, config=None):
+        """Initialize the local repository indexer."""
+        if config is None:
+            config = get_config()
+        
+        # Get Azure Search configuration
+        self.endpoint = config.azure.endpoint
+        self.admin_key = config.azure.admin_key
+        self.index_name = config.azure.index_name or "codebase-mcp-sota"
+        
+        # Create search client
+        try:
+            from azure.search.documents import SearchClient
+            from azure.core.credentials import AzureKeyCredential
+        except ImportError:
+            raise ImportError("azure-search-documents package required for indexing")
+            
+        self.search_client = SearchClient(
+            endpoint=self.endpoint,
+            index_name=self.index_name,
+            credential=AzureKeyCredential(self.admin_key)
+        )
+        
+        # Initialize embedding provider based on config
+        self.provider = None
+        if config.embedding.provider == "client":
+            self.provider = AzureOpenAIEmbeddingProvider()
+        elif config.embedding.provider in {"none", "azure_openai_http"}:
+            # No client-side embedding for these modes
+            self.provider = None
+            
+        self.batch_size = 50
+        self.logger = logging.getLogger(__name__)
+        self.chunker = CodeChunker()
+    
+    def chunk_python_file(self, content: str, file_path: str) -> List[Dict]:
+        """Extract semantic chunks from Python code."""
+        return self.chunker.chunk_python_file(content, file_path)
+    
+    
+    def chunk_js_ts_file(self, content: str, file_path: str) -> List[Dict]:
+        """Extract semantic chunks from JavaScript/TypeScript code."""
+        return self.chunker.chunk_js_ts_file(content, file_path)
+    
+    class DocumentIdHelper:
+        """Helper for consistent document ID generation."""
+        
+        @staticmethod
+        def generate_id(repo: str, file_path: str, chunk_type: str, index: int) -> str:
+            """Generate deterministic document ID."""
+            raw = f"{repo}:{file_path}:{chunk_type}:{index}".encode()
+            return hashlib.md5(raw).hexdigest()
+    
+    def index_repository(
+        self,
+        repo_path: str,
+        repo_name: str,
+        patterns: Optional[List[tuple]] = None,
+        embed_vectors: Optional[bool] = None
+    ):
+        """Index a local repository with smart chunking.
+        
+        Args:
+            repo_path: Path to the repository
+            repo_name: Name of the repository for indexing
+            patterns: File patterns to index (default: Python, JS, TS)
+            embed_vectors: Whether to generate embeddings (None = auto-detect)
+        """
+        documents = []
+        
+        # Default patterns
+        if patterns is None:
+            patterns = [
+                ("*.py", "python"),
+                ("*.js", "javascript"),
+                ("*.ts", "typescript"),
+            ]
+            
+        # Auto-detect embedding mode if not specified
+        if embed_vectors is None:
+            embed_vectors = self.provider is not None
+            
+        total_indexed = 0
+        
+        for pattern, language in patterns:
+            for file_path in Path(repo_path).rglob(pattern):
+                # Skip directories
+                if file_path.is_dir():
+                    continue
+                    
+                # Skip common exclusions
+                if any(
+                    part.startswith(".")
+                    or part == "node_modules"
+                    or part == "__pycache__"
+                    or part == "venv"
+                    or part == ".venv"
+                    for part in file_path.parts
+                ):
+                    continue
+                    
+                try:
+                    content = file_path.read_text(encoding="utf-8", errors="ignore")
+                    
+                    # Choose chunker based on language
+                    if language == "python":
+                        chunks = self.chunk_python_file(content, str(file_path))
+                    elif language in ["javascript", "typescript"]:
+                        chunks = self.chunk_js_ts_file(content, str(file_path))
+                    else:
+                        # Generic chunking for other languages
+                        chunks = [{
+                            "content": content[:5000],
+                            "semantic_context": f"Code from {file_path}",
+                            "signature": "",
+                            "imports": [],
+                            "dependencies": [],
+                            "chunk_type": "file",
+                            "start_line": 1,
+                            "end_line": len(content.splitlines()),
+                            "function_name": None,
+                            "class_name": None,
+                            "docstring": ""
+                        }]
+                        
+                    # Process chunks
+                    for i, chunk in enumerate(chunks):
+                        doc_id = self.DocumentIdHelper.generate_id(
+                            repo_name, str(file_path), chunk["chunk_type"], i
+                        )
+                        
+                        # Get file modification time
+                        try:
+                            mtime = file_path.stat().st_mtime
+                            last_modified = datetime.fromtimestamp(mtime).isoformat() + "+00:00"
+                        except:
+                            last_modified = datetime.utcnow().isoformat() + "+00:00"
+                            
+                        doc = {
+                            "id": doc_id,
+                            "repository": repo_name,
+                            "file_path": str(file_path),
+                            "file_name": file_path.name,
+                            "language": language,
+                            "last_modified": last_modified,
+                            **chunk,
+                        }
+                        
+                        # Add vector embedding if enabled
+                        if embed_vectors and self.provider:
+                            embedding = self.provider.generate_code_embedding(
+                                chunk["content"], chunk["semantic_context"]
+                            )
+                            if embedding:
+                                doc["content_vector"] = embedding
+                            else:
+                                self.logger.warning(
+                                    f"Failed to generate embedding for {file_path}"
+                                )
+                                
+                        documents.append(doc)
+                        
+                        # Upload in batches
+                        if len(documents) >= self.batch_size:
+                            self._upload_documents(documents)
+                            total_indexed += len(documents)
+                            documents = []
+                            
+                except Exception as e:
+                    self.logger.error(f"Error processing {file_path}: {e}")
+                    
+        # Upload remaining documents
+        if documents:
+            self._upload_documents(documents)
+            total_indexed += len(documents)
+            
+        self.logger.info(f"✅ Indexed {repo_name} with {total_indexed} chunks")
+        
+    def index_changed_files(
+        self,
+        file_paths: List[str],
+        repo_name: str = "current-repo"
+    ):
+        """Index only specified changed files.
+        
+        Args:
+            file_paths: List of file paths to index
+            repo_name: Repository name for indexing
+        """
+        documents = []
+        
+        for file_path_str in file_paths:
+            file_path = Path(file_path_str)
+            if not file_path.exists():
+                self.logger.warning(f"File not found: {file_path}")
+                continue
+                
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                
+                # Determine language and chunker
+                if file_path.suffix == ".py":
+                    chunks = self.chunk_python_file(content, str(file_path))
+                    language = "python"
+                elif file_path.suffix in {".js", ".ts"}:
+                    chunks = self.chunk_js_ts_file(content, str(file_path))
+                    language = "javascript" if file_path.suffix == ".js" else "typescript"
+                else:
+                    # Skip unsupported files
+                    self.logger.info(f"Skipping unsupported file: {file_path}")
+                    continue
+                    
+                # Process chunks
+                for i, chunk in enumerate(chunks):
+                    doc_id = self.DocumentIdHelper.generate_id(
+                        repo_name, str(file_path), chunk["chunk_type"], i
+                    )
+                    
+                    # Get file modification time
+                    try:
+                        mtime = file_path.stat().st_mtime
+                        last_modified = datetime.fromtimestamp(mtime).isoformat() + "+00:00"
+                    except:
+                        last_modified = datetime.utcnow().isoformat() + "+00:00"
+                        
+                    doc = {
+                        "id": doc_id,
+                        "repository": repo_name,
+                        "file_path": str(file_path),
+                        "file_name": file_path.name,
+                        "language": language,
+                        "last_modified": last_modified,
+                        **chunk,
+                    }
+                    
+                    # Add vector embedding if available
+                    if self.provider:
+                        embedding = self.provider.generate_code_embedding(
+                            chunk["content"], chunk["semantic_context"]
+                        )
+                        if embedding:
+                            doc["content_vector"] = embedding
+                            
+                    documents.append(doc)
+                    
+            except Exception as e:
+                self.logger.error(f"Error processing {file_path}: {e}")
+                
+        # Upload all documents
+        if documents:
+            self._upload_documents(documents)
+            self.logger.info(f"✅ Indexed {len(documents)} chunks from {len(file_paths)} files")
+            
+    def _upload_documents(self, documents: List[Dict[str, Any]]):
+        """Upload documents to Azure Search."""
+        try:
+            # Use merge_or_upload if available, otherwise upload
+            if hasattr(self.search_client, "merge_or_upload_documents"):
+                result = self.search_client.merge_or_upload_documents(documents)
+            else:
+                result = self.search_client.upload_documents(documents)
+                
+            self.logger.debug(f"Uploaded {len(documents)} documents")
+        except Exception as e:
+            self.logger.error(f"Error uploading documents: {e}")
+            raise
