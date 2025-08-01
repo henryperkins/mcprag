@@ -98,8 +98,15 @@ class RAGPipeline:
             self.retriever = MultiStageRetriever(self.config.get('retrieval', {}))
             self.ranker = ContextualRanker(self.config.get('ranking', {}))
             self.result_explainer = ResultExplainer(self.config.get('ranking', {}))
-            self.feedback_collector = LearningCollector(self.config.get('learning', {}))
             self.response_generator = ResponseGenerator(self.config.get('generation', {}))
+            
+            # Initialize feedback collector if learning module is available
+            try:
+                from .learning.feedback_collector import FeedbackCollector
+                self.feedback_collector = FeedbackCollector(self.config.get('learning', {}))
+            except ImportError:
+                logger.warning("Learning module not available - feedback collection disabled")
+                self.feedback_collector = None
 
             logger.info("✅ RAG Pipeline components initialized successfully")
 
@@ -175,7 +182,9 @@ class RAGPipeline:
                 # Simplified response generation for now
                 response_text = f"Found {len(final_results)} relevant results for '{query}'"
 
-            # 8. Skip feedback collection for now (simplified)
+            # 8. Record interaction for learning (if available)
+            if self.feedback_collector:
+                await self._record_interaction(search_query, final_results, code_context)
 
             # 9. Build metadata
             metadata = {
@@ -243,6 +252,9 @@ class RAGPipeline:
         context: Optional[CodeContext]
     ):
         """Record interaction for learning purposes"""
+        if not self.feedback_collector:
+            return
+            
         try:
             await self.feedback_collector.record_interaction(
                 query, results, context, "search_completed"
