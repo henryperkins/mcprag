@@ -543,10 +543,10 @@ Type: {ast_chunk.get('type', 'unknown')}
                         # Add vector embedding if available
                         if self.embedder:
                             embedding = self.embedder.generate_code_embedding(
-                                chunk["code_chunk"], chunk["semantic_context"]
+                                chunk["content"], chunk["semantic_context"]
                             )
                             if embedding:
-                                doc["code_vector"] = embedding
+                                doc["content_vector"] = embedding
 
                         documents.append(doc)
 
@@ -616,10 +616,10 @@ Type: {ast_chunk.get('type', 'unknown')}
                     # Add vector embedding if available
                     if self.embedder:
                         embedding = self.embedder.generate_code_embedding(
-                            chunk["code_chunk"], chunk["semantic_context"]
+                            chunk["content"], chunk["semantic_context"]
                         )
                         if embedding:
-                            doc["code_vector"] = embedding
+                            doc["content_vector"] = embedding
 
                     documents.append(doc)
 
