@@ -545,8 +545,10 @@ Type: {ast_chunk.get('type', 'unknown')}
                             embedding = self.embedder.generate_code_embedding(
                                 chunk["content"], chunk["semantic_context"]
                             )
-                            if embedding:
+                            if embedding:  # Check for None
                                 doc["content_vector"] = embedding
+                            else:
+                                logger.warning(f"Failed to generate embedding for {file_path}")
 
                         documents.append(doc)
 
@@ -618,8 +620,10 @@ Type: {ast_chunk.get('type', 'unknown')}
                         embedding = self.embedder.generate_code_embedding(
                             chunk["content"], chunk["semantic_context"]
                         )
-                        if embedding:
+                        if embedding:  # Check for None
                             doc["content_vector"] = embedding
+                        else:
+                            logger.warning(f"Failed to generate embedding for {file_path}")
 
                     documents.append(doc)
 

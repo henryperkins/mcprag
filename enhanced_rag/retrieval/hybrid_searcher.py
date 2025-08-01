@@ -57,8 +57,12 @@ class HybridSearcher:
         try:
             from vector_embeddings import VectorEmbedder
             self.embedder = VectorEmbedder()
+            logger.info("✅ Vector embedder initialized")
         except ImportError:
             logger.warning("Vector embeddings not available, falling back to keyword search only")
+            self.embedder = None
+        except Exception as e:
+            logger.error(f"Failed to initialize embedder: {e}")
             self.embedder = None
     
     async def vector_search(
@@ -214,7 +218,8 @@ class HybridSearcher:
             return None
             
         try:
-            embedding = await self.embedder.embed_text(query)
+            # VectorEmbedder.generate_embedding is SYNC, not async
+            embedding = self.embedder.generate_embedding(query)
             return embedding
         except Exception as e:
             logger.error(f"Failed to generate query embedding: {e}")

@@ -466,9 +466,7 @@ class EnhancedIndexBuilder:
                 ),
                 searchable=True,
                 retrievable=True,  # Set based on needs
-                vector_search_dimensions=self.config.get(
-                    'vector_dimensions', 1536
-                ),
+                vector_search_dimensions=get_config().embedding.dimensions,
                 vector_search_profile_name="vector-profile-hnsw"
             )
         )

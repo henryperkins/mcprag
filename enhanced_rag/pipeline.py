@@ -74,6 +74,15 @@ class RAGPipeline:
 
         # Initialize components
         self._initialize_components()
+        
+        # Initialize vector search if enabled
+        if self.config.get('retrieval', {}).get('enable_vector_search', True):
+            try:
+                from .retrieval.hybrid_searcher import HybridSearcher
+                self.hybrid_searcher = HybridSearcher(self.config)
+                logger.info("✅ Vector search enabled in pipeline")
+            except Exception as e:
+                logger.warning(f"Vector search initialization failed: {e}")
 
         # Component cache for performance
         self._context_cache: Dict[str, CodeContext] = {}
