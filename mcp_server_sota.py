@@ -19,6 +19,8 @@ from enum import Enum
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+load_dotenv()
+
 # Azure imports
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
@@ -72,8 +74,6 @@ except ImportError:
     CodeGenerationTool = None
     ContextAwareTool = None
     ENHANCED_RAG_SUPPORT = False
-
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

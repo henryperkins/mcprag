@@ -4,7 +4,8 @@ from typing import Dict, Any, Optional
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.indexes import SearchIndexClient
-from azure.search.documents.indexes.models import SearchIndex
+from azure.search.documents.indexes.models import SearchIndex, SearchAlias
+from ..utils.error_handler import with_retry
 
 from enhanced_rag.core.config import get_config
 
@@ -23,6 +24,7 @@ class IndexOperations:
             credential=AzureKeyCredential(admin_key or cfg.admin_key),
         )
 
+    @with_retry(op_name="index.create_or_update")
     async def create_or_update_index(self, index: SearchIndex) -> bool:
         """Create or update an index"""
         try:
@@ -60,3 +62,8 @@ class IndexOperations:
             return True
         except Exception:
             return False
+
+    async def swap_alias(self, alias: str, new_index: str) -> None:
+        """Atomically repoint alias to a new index"""
+        alias_obj = SearchAlias(name=alias, indexes=[new_index])
+        self.client.create_or_update_alias(alias_obj)

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
+from ..utils.performance_monitor import PerformanceMonitor
 
 from azure.search.documents import SearchClient
 from azure.search.documents.models import QueryType
@@ -90,7 +91,10 @@ class MultiStageRetriever(Retriever):
     async def retrieve(
         self,
         query: SearchQuery,
-        stages: Optional[List[SearchStage]] = None
+        stages: Optional[List[SearchStage]] = None,
+        *,
+        token_budget_ctx: int = 3500,
+        deadline_ms: Optional[int] = None,
     ) -> List[SearchResult]:
         """
         Execute multi-stage retrieval pipeline
@@ -108,6 +112,15 @@ class MultiStageRetriever(Retriever):
         stage_results = await asyncio.gather(*stage_tasks)
 
         # Fuse results using Reciprocal Rank Fusion (RRF)
+
+        # Budget-pruning: trim candidate pool to fit context tokens
+        approx_tokens_per_doc = 200
+        if (
+            token_budget_ctx
+            and len(stage_results) * approx_tokens_per_doc > token_budget_ctx
+        ):
+            stage_results = stage_results[: int(token_budget_ctx / approx_tokens_per_doc)]
+
         fused_results = await self._fuse_results(stage_results, query)
 
         return fused_results

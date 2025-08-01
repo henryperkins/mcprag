@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 import asyncio
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -68,3 +69,13 @@ class PerformanceMonitor:
             'counters': dict(self.counters),
             'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds()
         }
+
+    # ------------ NEW convenience ------------ #
+    @contextmanager
+    def span(self, name: str):
+        """Usage:  with monitor.span('stage'): ..."""
+        _id = self.start_timer(name)
+        try:
+            yield
+        finally:
+            self.end_timer(_id, name)

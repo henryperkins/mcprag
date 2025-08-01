@@ -3,7 +3,9 @@ Response generation module for creating contextual answers
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+from ..utils.performance_monitor import PerformanceMonitor
+from ..utils.error_handler import with_retry
 
 from ..core.interfaces import Generator
 from ..core.models import SearchResult, SearchIntent, GeneratedResponse
@@ -107,8 +109,15 @@ Style guide compliance:
         # Select appropriate template
         template = self.templates.get(intent, self.templates[SearchIntent.IMPLEMENT])
         
-        # Generate response
-        response_text = self._fill_template(template, query, extracted_info)
+        # TOKEN-BUDGET: keep template + filled data under 7k tokens
+        monitor = PerformanceMonitor()
+        monitor.increment_counter("responses_generated")
+
+        raw_text = self._fill_template(template, query, extracted_info)
+        if len(raw_text) > 28000:  # ~7k tokens rough guardrail
+            raw_text = raw_text[:28000] + "\n\n[TRUNCATED]"
+
+        response_text = raw_text
         
         # Create response object with metadata
         response = GeneratedResponse(

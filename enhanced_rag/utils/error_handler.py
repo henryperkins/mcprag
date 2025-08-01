@@ -1,225 +1,173 @@
 """
-Error handling utilities for Enhanced RAG system
+Robust error-handling, retry and circuit-breaker utilities
 """
 
+from __future__ import annotations
+
+import functools
 import logging
-import traceback
-import time
 import random
-import asyncio
-from typing import Dict, Any, Optional, Callable
-from datetime import datetime
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
 
-logger = logging.getLogger(__name__)
+# Status codes retriable by default (Azure Search & generic HTTP)
+_RETRIABLE_STATUS = {408, 429, 500, 502, 503, 504}
 
-# Lightweight metric hook; PerformanceMonitor may override this via import
-try:
-    from enhanced_rag.utils.performance_monitor import PerformanceMonitor
-    _pm = PerformanceMonitor()
+_log = logging.getLogger(__name__)
 
-    def record_metric(name: str, value_or_dims: Any) -> None:
-        """Record a metric using PerformanceMonitor with safe fallbacks."""
-        if isinstance(value_or_dims, (int, float)):
-            _pm.record_metric(name, float(value_or_dims))
-            return
-        if isinstance(value_or_dims, dict):
-            latency = value_or_dims.get("latency_ms")
-            if latency is not None:
-                _pm.record_metric(f"{name}_latency_ms", float(latency))
-            attempts = value_or_dims.get("attempts")
-            if attempts is not None:
-                _pm.record_metric(f"{name}_attempts", float(attempts))
-            status = value_or_dims.get("status")
-            if status is not None:
-                _pm.record_metric(f"{name}_status_{status}", 1.0)
-            return
-        _pm.increment_counter(f"{name}_count", 1)
-except Exception:
-    def record_metric(name: str, value_or_dims: Any) -> None:
-        """No-op metric recorder if PerformanceMonitor unavailable."""
-        return
+# ------------------------------------------------------------------ #
+# 1.  Structured error envelope
+# ------------------------------------------------------------------ #
 
 
-class ErrorHandler:
+class ErrorCode:
+    RETRYABLE = "RETRYABLE"
+    NON_RETRYABLE = "NON_RETRYABLE"
+    TIMEOUT = "TIMEOUT"
+    CIRCUIT_OPEN = "CIRCUIT_OPEN"
+
+
+@dataclass
+class StructuredError(Exception):
+    code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.code}: {self.message}"
+
+
+# ------------------------------------------------------------------ #
+# 2.  Circuit breaker
+# ------------------------------------------------------------------ #
+
+
+class _CircuitBreaker:
+    def __init__(self, failure_threshold: int = 5, reset_sec: int = 30) -> None:
+        self._failures = 0
+        self._opened_at: Optional[float] = None
+        self._th = failure_threshold
+        self._reset = reset_sec
+        self._lock = threading.Lock()
+
+    def allow(self) -> bool:
+        with self._lock:
+            if self._opened_at is None:
+                return True
+            if (time.time() - self._opened_at) > self._reset:
+                # half-open
+                return True
+            return False
+
+    def success(self) -> None:
+        with self._lock:
+            self._failures = 0
+            self._opened_at = None
+
+    def failure(self) -> None:
+        with self._lock:
+            self._failures += 1
+            if self._failures >= self._th:
+                self._opened_at = time.time()
+
+
+# ------------------------------------------------------------------ #
+# 3.  Exponential-back-off retry decorator with jitter
+# ------------------------------------------------------------------ #
+
+
+def with_retry(
+    *,
+    op_name: str,
+    max_attempts: int = 5,
+    base_delay_ms: int = 200,
+    max_delay_ms: int = 4000,
+    circuit: Optional[_CircuitBreaker] = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
-    Centralized error handling for the RAG pipeline
+    Decorator for automatic retry with full-jitter back-off.
+    The wrapped function **may** accept kwargs: timeout (sec) and/or
+    deadline_ms (absolute epoch ms) – they will be honoured when present.
     """
 
-    def __init__(self):
-        self.error_counts: Dict[str, int] = {}
-        self.last_errors: Dict[str, datetime] = {}
+    circuit = circuit or _CircuitBreaker()
 
-    async def handle_error(
-        self,
-        error: Exception,
-        context: Dict[str, Any],
-        reraise: bool = False
-    ) -> str:
-        """
-        Handle an error with context information
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(func)
+        def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            if not circuit.allow():
+                raise StructuredError(
+                    ErrorCode.CIRCUIT_OPEN,
+                    f"Circuit open – {op_name} temporarily blocked",
+                )
 
-        Args:
-            error: The exception that occurred
-            context: Context information about where the error occurred
-            reraise: Whether to reraise the exception after handling
+            deadline_ms: Optional[int] = kwargs.pop("deadline_ms", None)
 
-        Returns:
-            Error message string
-        """
-        error_type = type(error).__name__
-        error_msg = str(error)
+            def remaining_ms() -> Optional[int]:
+                if deadline_ms is None:
+                    return None
+                return max(0, deadline_ms - int(time.time() * 1000))
 
-        # Track error frequency
-        self.error_counts[error_type] = self.error_counts.get(
-            error_type, 0
-        ) + 1
-        self.last_errors[error_type] = datetime.utcnow()
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    # Inject per-call timeout if caller didn't provide
+                    if "timeout" not in kwargs and remaining_ms() is not None:
+                        kwargs["timeout"] = max(0.001, (remaining_ms() - 50) / 1000)
+                    return func(*args, **kwargs)
+                except StructuredError:
+                    raise  # Preserve wrapped errors
+                except Exception as exc:  # noqa: BLE001
+                    status = getattr(exc, "status_code", None) or getattr(
+                        exc, "status", None
+                    )
+                    retriable = (status in _RETRIABLE_STATUS) or isinstance(
+                        exc, TimeoutError
+                    )
+                    if not retriable or attempt >= max_attempts:
+                        circuit.failure()
+                        raise StructuredError(
+                            ErrorCode.RETRYABLE if retriable else ErrorCode.NON_RETRYABLE,
+                            f"{op_name} failed after {attempt} attempts – {exc}",
+                            {"status": status},
+                        ) from exc
 
-        # Create detailed error message
-        detailed_msg = f"{error_type}: {error_msg}"
+                    delay = min(max_delay_ms, base_delay_ms * (2 ** (attempt - 1)))
+                    delay = random.uniform(delay / 2, delay)  # full-jitter
+                    if remaining_ms() is not None and delay > remaining_ms():
+                        raise StructuredError(
+                            ErrorCode.TIMEOUT, f"Deadline exhausted in {op_name}"
+                        ) from exc
 
-        # Add context if available
-        if context:
-            context_str = ", ".join([f"{k}={v}" for k, v in context.items()])
-            detailed_msg += f" (Context: {context_str})"
+                    _log.debug(
+                        "%s attempt %d/%d failed (%s). Retrying in %.0fms",
+                        op_name,
+                        attempt,
+                        max_attempts,
+                        status,
+                        delay,
+                    )
+                    time.sleep(delay / 1000)
 
-        # Log the error
-        logger.error(f"❌ {detailed_msg}")
-        logger.debug(f"Stack trace: {traceback.format_exc()}")
+        return _wrapper
 
-        if reraise:
-            raise error
-
-        return detailed_msg
-
-    def get_error_stats(self) -> Dict[str, Any]:
-        """Get error statistics"""
-        return {
-            'error_counts': dict(self.error_counts),
-            'last_errors': {
-                error_type: timestamp.isoformat()
-                for error_type, timestamp in self.last_errors.items()
-            },
-            'total_errors': sum(self.error_counts.values())
-        }
-
-
-def _extract_status_code(exc: Exception) -> Optional[int]:
-    status = getattr(exc, "status_code", None)
-    if status is not None:
-        return status
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        sc = getattr(resp, "status_code", None)
-        if sc is not None:
-            return sc
-    return None
+    return decorator
 
 
-def with_retry(func: Callable, *args, **kwargs):
+# ------------------------------------------------------------------ #
+# 4.  Degraded fallback helper
+# ------------------------------------------------------------------ #
+
+
+def degraded_fallback(primary_fn: Callable[[], Any], fallback_fn: Callable[[], Any], *, op_name: str) -> Any:
     """
-    Synchronous retry wrapper with exponential backoff and jitter.
-    Retries on 429/502/503/504 up to max_attempts.
-    Emits metrics: attempts, latency_ms, status.
+    Execute `primary_fn`; on StructuredError return fallback result and log.
     """
-    max_attempts = kwargs.pop("max_attempts", 5)
-    base_delay_ms = kwargs.pop("base_delay_ms", 100)
-    factor = kwargs.pop("factor", 2)
-    jitter_ms = kwargs.pop("jitter_ms", 250)
-
-    attempts = 0
-    last_exc: Optional[Exception] = None
-    start = time.time()
-
-    while attempts < max_attempts:
-        try:
-            result = func(*args, **kwargs)
-            latency_ms = (time.time() - start) * 1000.0
-            record_metric(
-                "azure_call_success",
-                {"attempts": attempts + 1, "latency_ms": latency_ms},
-            )
-            return result
-        except Exception as e:
-            status = _extract_status_code(e)
-            if status not in (429, 502, 503, 504):
-                # Non-retryable
-                raise
-            last_exc = e
-            delay = (
-                (base_delay_ms / 1000.0) * (factor ** attempts)
-                + random.uniform(0, jitter_ms / 1000.0)
-            )
-            record_metric(
-                "azure_call_retry",
-                {"attempts": attempts + 1, "status": status, "delay_s": delay},
-            )
-            attempts += 1
-            time.sleep(delay)
-
-    latency_ms = (time.time() - start) * 1000.0
-    record_metric(
-        "azure_call_failure",
-        {
-            "attempts": attempts,
-            "latency_ms": latency_ms,
-            "status": _extract_status_code(last_exc) if last_exc else None,
-        },
-    )
-    if last_exc:
-        raise last_exc
-    raise RuntimeError(
-        "with_retry exhausted attempts without exception context"
-    )
-
-
-async def with_retry_async(func: Callable, *args, **kwargs):
-    """
-    Async retry wrapper mirroring with_retry semantics.
-    """
-    max_attempts = kwargs.pop("max_attempts", 5)
-    base_delay_ms = kwargs.pop("base_delay_ms", 100)
-    factor = kwargs.pop("factor", 2)
-    jitter_ms = kwargs.pop("jitter_ms", 250)
-
-    attempts = 0
-    last_exc: Optional[Exception] = None
-    start = time.time()
-
-    while attempts < max_attempts:
-        try:
-            result = await func(*args, **kwargs)
-            latency_ms = (time.time() - start) * 1000.0
-            record_metric(
-                "azure_call_success",
-                {"attempts": attempts + 1, "latency_ms": latency_ms},
-            )
-            return result
-        except Exception as e:
-            status = _extract_status_code(e)
-            if status not in (429, 502, 503, 504):
-                raise
-            last_exc = e
-            delay = (
-                (base_delay_ms / 1000.0) * (factor ** attempts)
-                + random.uniform(0, jitter_ms / 1000.0)
-            )
-            record_metric(
-                "azure_call_retry",
-                {"attempts": attempts + 1, "status": status, "delay_s": delay},
-            )
-            attempts += 1
-            await asyncio.sleep(delay)
-
-    latency_ms = (time.time() - start) * 1000.0
-    record_metric(
-        "azure_call_failure",
-        {
-            "attempts": attempts,
-            "latency_ms": latency_ms,
-            "status": _extract_status_code(last_exc) if last_exc else None,
-        },
-    )
-    if last_exc:
-        raise last_exc
-    raise RuntimeError("with_retry_async exhausted attempts without exception context")
+    try:
+        return primary_fn()
+    except StructuredError as e:
+        _log.warning("%s degraded – %s", op_name, e.code)
+        return fallback_fn()

@@ -3,11 +3,12 @@ Hybrid search implementation combining vector and keyword search
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 
 from azure.search.documents import SearchClient
 from azure.search.documents.models import (
+    QueryCaptionType, QueryAnswerType, SemanticConfiguration,
     VectorizedQuery,
     VectorizableTextQuery,
     QueryType,
@@ -16,6 +17,7 @@ from azure.core.credentials import AzureKeyCredential
 from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.config import get_config
+from enhanced_rag.utils.performance_monitor import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +35,25 @@ class HybridSearcher:
     """
     Implements hybrid search combining vector similarity and keyword matching
     """
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        performance_monitor: Optional[PerformanceMonitor] = None
+    ):
+        self.performance_monitor = performance_monitor or PerformanceMonitor()
         self.config = config or get_config()
         self._initialize_client()
         self.embedder = None
         self._setup_embedder()
-        
+
     def _initialize_client(self):
         """Initialize Azure Search client"""
         try:
             endpoint = self.config.azure.endpoint
             admin_key = self.config.azure.admin_key
             index_name = self.config.azure.index_name or 'codebase-mcp-sota'
-            
+
             credential = AzureKeyCredential(admin_key)
             self.search_client = SearchClient(
                 endpoint=endpoint,
@@ -56,7 +63,7 @@ class HybridSearcher:
         except Exception as e:
             logger.error(f"Failed to initialize search client: {e}")
             self.search_client = None
-            
+
     def _setup_embedder(self):
         """Setup vector embedder if available"""
         try:
@@ -71,14 +78,112 @@ class HybridSearcher:
         except Exception as e:
             logger.error(f"Failed to initialize embedder: {e}")
             self.embedder = None
-    
-    async def vector_search(
+
+    # ------------------------------------------------------------------ #
+    #  NEW  – unified hybrid entry-point with semantic + vector + keyword
+    # ------------------------------------------------------------------ #
+
+    async def search(
         self,
         query: str,
         filter_expr: Optional[str] = None,
+        top_k: int = 20,
+        *,
+        include_total_count: bool = True,
+        vector_weight: float = 0.4,
+        semantic_weight: float = 0.4,
+        keyword_weight: float = 0.2,
+        deadline_ms: Optional[int] = None,
+    ) -> List[HybridSearchResult]:
+        """
+        Full hybrid search (semantic + keyword + vector) with
+        deterministic pagination and weighted score fusion.
+        """
+        # ------------------------------------------------------------------
+        # 1.  Build keyword/semantic request
+        # ------------------------------------------------------------------
+
+        kw_sem_results: List[HybridSearchResult] = []
+        try:
+            kw_sem = self.search_client.search(
+                search_text=query,
+                query_type=QueryType.SEMANTIC,
+                semantic_configuration_name="semantic-config",
+                query_caption="extractive",
+                query_answer="extractive",
+                filter=filter_expr,
+                top=top_k * 2,
+                include_total_count=include_total_count,
+                disable_randomization=True,  # deterministic
+                timeout=(deadline_ms / 1000) if deadline_ms else None,
+            )
+            kw_sem_results = self._process_results(kw_sem)
+        except Exception as e:
+            logger.warning("Keyword/Semantic path failed – %s", e)
+
+        # ------------------------------------------------------------------
+        # 2.  Build vector request  (server-side TextVectorization if possible)
+        # ------------------------------------------------------------------
+
+        vec_results: List[HybridSearchResult] = []
+        try:
+            vq = VectorizedQuery(
+                vector=self.embedder.generate_embedding(query)
+                if self.embedder
+                else None,
+                k_nearest_neighbors=top_k * 2,
+                fields="content_vector",
+            )
+            vec = self.search_client.search(
+                search_text="",
+                vector_queries=[vq],
+                filter=filter_expr,
+                top=top_k * 2,
+                include_total_count=False,
+                timeout=(deadline_ms / 1000) if deadline_ms else None,
+            )
+            vec_results = self._process_results(vec)
+        except Exception as e:
+            logger.warning("Vector path failed – %s", e)
+
+        # ------------------------------------------------------------------
+        # 3.  Fuse scores  (linear-weighted)
+        # ------------------------------------------------------------------
+
+        by_id: Dict[str, HybridSearchResult] = {}
+
+        def _update(result: HybridSearchResult, weight: float):
+            if result.id not in by_id:
+                by_id[result.id] = HybridSearchResult(
+                    id=result.id,
+                    score=result.score * weight,
+                    content=result.content,
+                    metadata=result.metadata,
+                )
+            else:
+                by_id[result.id].score += result.score * weight
+
+        for r in kw_sem_results:
+            _update(r, semantic_weight if "@search.rerankerScore" in r.metadata else keyword_weight)
+        for r in vec_results:
+            _update(r, vector_weight)
+
+        fused = sorted(by_id.values(), key=lambda x: x.score, reverse=True)[:top_k]
+        return fused
+
+
+# ------------------------------------------------------------------ #
+#  (legacy) vector_search / keyword_search wrappers kept for callers
+# ------------------------------------------------------------------ #
+
+    async def vector_search(
+        self,
+        query: str,
+        vector_queries: Optional[List[Union[VectorizedQuery, VectorizableTextQuery]]] = None,
+        filter_expr: Optional[str] = None,
         top_k: int = 50
     ) -> List[HybridSearchResult]:
-        """Execute vector similarity search"""
+        """Execute vector similarity search (wrapper keeps old API)"""
         if not self.search_client:
             logger.warning(
                 "Vector search not available, search client not initialized."
@@ -103,7 +208,7 @@ class HybridSearcher:
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
             return []
-    
+
     async def keyword_search(
         self,
         query: str,
@@ -114,7 +219,7 @@ class HybridSearcher:
         if not self.search_client:
             logger.warning("Keyword search not available")
             return []
-            
+
         try:
             # Execute keyword/semantic search with advanced params and retries
             # Select scoring profile with safe defaults
@@ -148,7 +253,7 @@ class HybridSearcher:
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")
             return []
-    
+
     async def hybrid_search(
         self,
         query: str,
@@ -157,22 +262,22 @@ class HybridSearcher:
         vector_weight: float = 0.5
     ) -> List[HybridSearchResult]:
         """Execute hybrid search combining vector and keyword results"""
-        
+
         # Execute both searches in parallel
         vector_results = await self.vector_search(query, filter_expr, top_k * 2)
         keyword_results = await self.keyword_search(query, filter_expr, top_k * 2)
-        
+
         # Combine results with weighted scoring
         combined_results = self._combine_results(
             vector_results,
             keyword_results,
             vector_weight
         )
-        
+
         # Sort by combined score and return top-k
         combined_results.sort(key=lambda x: x.score, reverse=True)
         return combined_results[:top_k]
-    
+
     def _combine_results(
         self,
         vector_results: List[HybridSearchResult],
@@ -182,7 +287,7 @@ class HybridSearcher:
         """Combine vector and keyword results with weighted scoring"""
         combined = {}
         keyword_weight = 1 - vector_weight
-        
+
         # Add vector results
         for result in vector_results:
             combined[result.id] = HybridSearchResult(
@@ -191,7 +296,7 @@ class HybridSearcher:
                 content=result.content,
                 metadata=result.metadata
             )
-        
+
         # Add or update with keyword results
         for result in keyword_results:
             if result.id in combined:
@@ -203,13 +308,13 @@ class HybridSearcher:
                     content=result.content,
                     metadata=result.metadata
                 )
-        
+
         return list(combined.values())
-    
+
     def _process_results(self, results) -> List[HybridSearchResult]:
         """Process Azure Search results into HybridSearchResult objects"""
         processed = []
-        
+
         for result in results:
             try:
                 processed.append(HybridSearchResult(
@@ -228,9 +333,9 @@ class HybridSearcher:
             except Exception as e:
                 logger.error(f"Error processing result: {e}")
                 continue
-                
+
         return processed
-    
+
     def _build_vector_query(self, query: str, k: int) -> Optional[Any]:
         """Build vector query, preferring server-side vectorization."""
         try:
