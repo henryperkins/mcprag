@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
 from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery, QueryType
+from azure.search.documents.models import VectorizedQuery, VectorizableTextQuery, QueryType
 from azure.core.credentials import AzureKeyCredential
 
 from ..core.config import get_config
@@ -72,23 +72,16 @@ class HybridSearcher:
         top_k: int = 50
     ) -> List[HybridSearchResult]:
         """Execute vector similarity search"""
-        if not self.search_client or not self.embedder:
-            logger.warning("Vector search not available")
+        if not self.search_client:
+            logger.warning("Vector search not available, search client not initialized.")
             return []
-            
+
+        vector_query = self._build_vector_query(query, top_k)
+        if not vector_query:
+            logger.warning("Could not build vector query for: %s", query)
+            return []
+
         try:
-            # Generate query embedding
-            query_vector = await self._get_query_embedding(query)
-            if not query_vector:
-                return []
-            
-            # Create vectorized query
-            vector_query = VectorizedQuery(
-                vector=query_vector,
-                k_nearest_neighbors=top_k,
-                fields="content_vector"
-            )
-            
             # Execute search
             results = self.search_client.search(
                 search_text=None,
@@ -96,9 +89,9 @@ class HybridSearcher:
                 filter=filter_expr,
                 top=top_k
             )
-            
+
             return self._process_results(results)
-            
+
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
             return []
@@ -212,15 +205,23 @@ class HybridSearcher:
                 
         return processed
     
-    async def _get_query_embedding(self, query: str) -> Optional[List[float]]:
-        """Generate embedding for query"""
-        if not self.embedder:
-            return None
-            
+    def _build_vector_query(self, query: str, k: int) -> Optional[Any]:
+        """Build vector query, preferring server-side vectorization."""
         try:
-            # VectorEmbedder.generate_embedding is SYNC, not async
-            embedding = self.embedder.generate_embedding(query)
-            return embedding
-        except Exception as e:
-            logger.error(f"Failed to generate query embedding: {e}")
-            return None
+            # Prefer server-side vectorization with VectorizableTextQuery
+            return VectorizableTextQuery(
+                text=query, k_nearest_neighbors=k, fields="content_vector"
+            )
+        except Exception:
+            # Fallback to client-side vectorization if the above is not supported
+            # or if an embedder is explicitly available.
+            if self.embedder:
+                try:
+                    embedding = self.embedder.generate_embedding(query)
+                    if embedding:
+                        return VectorizedQuery(
+                            vector=embedding, k_nearest_neighbors=k, fields="content_vector"
+                        )
+                except Exception as e:
+                    logger.error(f"Client-side embedding failed: {e}")
+        return None

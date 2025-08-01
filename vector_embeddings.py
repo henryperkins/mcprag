@@ -138,17 +138,25 @@ class VectorEmbedder:
             return None  # type: ignore[return-value]
 
     def generate_embeddings_batch(self, texts: Sequence[str]) -> List[List[float]]:
-        """Generate embeddings for *texts* one-by-one to keep memory footprint
-        low and to simplify granular error handling.  Any failures are logged
-        and translated into ``None`` placeholders so the caller can keep the
-        original ordering intact.
+        """Generate embeddings for *texts* in a single batch request for
+        efficiency. Any failures are logged and translated into ``None``
+        placeholders so the caller can keep the original ordering intact.
         """
+        if not texts:
+            return []
 
-        results: List[List[float]] = []
-        for text in texts:
-            embedding = self.generate_embedding(text)
-            results.append(embedding)
-        return results
+        try:
+            response = self._client.embeddings.create(
+                input=list(texts),  # Pass the whole list
+                model=self.model_name,
+            )
+            # Sort embeddings by original index to handle out-of-order responses
+            embeddings = sorted(response.data, key=lambda e: e.index)
+            return [e.embedding for e in embeddings]
+        except Exception as exc:  # pragma: no cover – exercised via mocks
+            logging.getLogger(__name__).warning("Embedding batch API error: %s", exc)
+            # On batch failure, return None for all items
+            return [None] * len(texts)  # type: ignore[list-item]
 
     # Convenience alias used by the indexer -------------------------------------------------
 

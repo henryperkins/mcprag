@@ -131,10 +131,6 @@ class MultiStageRetriever(Retriever):
     
     async def _execute_vector_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute vector similarity search"""
-        if not hasattr(self, 'hybrid_searcher'):
-            from .hybrid_searcher import HybridSearcher
-            self.hybrid_searcher = HybridSearcher(self.config)
-        
         results = await self.hybrid_searcher.vector_search(
             query.query,
             filter_expr=self._build_filter(query),

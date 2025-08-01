@@ -19,6 +19,7 @@ from azure.search.documents.indexes.models import (
     HnswAlgorithmConfiguration,
     HnswParameters,
     VectorSearchProfile,
+    VectorSearchVectorizer,
     SemanticConfiguration,
     SemanticPrioritizedFields,
     SemanticField,
@@ -42,6 +43,7 @@ from azure.core.credentials import AzureKeyCredential
 
 from enhanced_rag.core.config import get_config
 from enhanced_rag.core.models import SearchIntent
+from enhanced_rag.azure_integration.custom_skill_vectorizer import CustomWebApiVectorizer
 
 logger = logging.getLogger(__name__)
 
@@ -573,6 +575,23 @@ class EnhancedIndexBuilder:
             algorithm_configuration_name="hnsw-config"
         )
 
+        # Define the vectorizer if a custom endpoint is configured
+        vectorizers = []
+        vectorizer_config = self.config.get('custom_vectorizer')
+        if vectorizer_config and vectorizer_config.get('uri'):
+            custom_vectorizer = CustomWebApiVectorizer(
+                name="custom-web-api-vectorizer",
+                uri=vectorizer_config['uri'],
+                http_headers=vectorizer_config.get('headers')
+            )
+            vectorizers.append(
+                VectorSearchVectorizer(
+                    name=custom_vectorizer.name,
+                    kind="customWebApi",
+                    custom_web_api_parameters=custom_vectorizer.to_dict()['customWebApiParameters']
+                )
+            )
+
         vector_search = VectorSearch(
             algorithms=[
                 HnswAlgorithmConfiguration(
@@ -585,12 +604,9 @@ class EnhancedIndexBuilder:
                     )
                 )
             ],
-            profiles=[profile]
+            profiles=[profile],
+            vectorizers=vectorizers if vectorizers else None
         )
-
-        # Custom Web API vectorizer via additional properties isn't supported.
-        # Consider query-time vectorization or skillset-based enrichment.
-        # embedding enrichment instead.
 
         return vector_search
     
