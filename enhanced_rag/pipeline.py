@@ -5,7 +5,7 @@ Coordinates all enhanced RAG components for optimal code search
 
 import logging
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .core.models import (
     SearchQuery, SearchResult, CodeContext, EnhancedContext
@@ -177,7 +177,7 @@ class RAGPipeline:
         Returns:
             RAGPipelineResult with search results and optional response
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # 1. Extract and analyze context
@@ -298,7 +298,7 @@ class RAGPipeline:
                 'intent': intent.value,
                 'enhanced_queries': enhanced_queries,
                 'total_results_found': len(raw_results),
-                'processing_time_ms': (datetime.utcnow() - start_time).total_seconds() * 1000,
+                'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
                 'context_used': bool(code_context),
                 'session_id': context.session_id
             }
@@ -323,7 +323,7 @@ class RAGPipeline:
                 success=False,
                 results=[],
                 error=error_msg,
-                metadata={'processing_time_ms': (datetime.utcnow() - start_time).total_seconds() * 1000}
+                metadata={'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000}
             )
 
     async def _extract_context(self, query_context: QueryContext) -> Optional[CodeContext]:

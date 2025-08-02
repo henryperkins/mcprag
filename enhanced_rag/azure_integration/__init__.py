@@ -14,6 +14,12 @@ from .custom_skill_vectorizer import (
     create_code_analysis_endpoint
 )
 from .embedding_provider import IEmbeddingProvider, AzureOpenAIEmbeddingProvider
+from .standard_skills import (
+    TextSplitSkill,
+    AzureOpenAIEmbeddingSkill,
+    StandardSkillsetBuilder,
+    create_standard_skillset
+)
 
 __all__ = [
     # Indexer components
@@ -34,5 +40,11 @@ __all__ = [
     
     # Embedding providers
     'IEmbeddingProvider',
-    'AzureOpenAIEmbeddingProvider'
+    'AzureOpenAIEmbeddingProvider',
+    
+    # Standard skills
+    'TextSplitSkill',
+    'AzureOpenAIEmbeddingSkill',
+    'StandardSkillsetBuilder',
+    'create_standard_skillset'
 ]

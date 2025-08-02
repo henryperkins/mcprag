@@ -2,9 +2,9 @@
 
 ## Quick Setup
 
-1. **Add the MCP server to Claude Code:**
+1. **Add the MCP server to Claude Code (use python3 explicitly):**
 ```bash
-claude mcp add azure-search python /home/azureuser/mcprag/mcp_server_sota.py \
+claude mcp add azure-search python3 /home/azureuser/mcprag/mcp_server_sota.py \
   -e ACS_ENDPOINT="${ACS_ENDPOINT}" \
   -e ACS_ADMIN_KEY="${ACS_ADMIN_KEY}"
 ```
@@ -25,7 +25,7 @@ search for vector dimension configuration
 ### Method 1: Local Scope (Default)
 ```bash
 # Add for current project only
-claude mcp add azure-search python /home/azureuser/mcprag/mcp_server_sota.py \
+claude mcp add azure-search python3 /home/azureuser/mcprag/mcp_server_sota.py \
   -s local \
   -e ACS_ENDPOINT="${ACS_ENDPOINT}" \
   -e ACS_ADMIN_KEY="${ACS_ADMIN_KEY}"
@@ -34,7 +34,7 @@ claude mcp add azure-search python /home/azureuser/mcprag/mcp_server_sota.py \
 ### Method 2: User Scope (All Projects)
 ```bash
 # Add for all your projects
-claude mcp add azure-search python /home/azureuser/mcprag/mcp_server_sota.py \
+claude mcp add azure-search python3 /home/azureuser/mcprag/mcp_server_sota.py \
   -s user \
   -e ACS_ENDPOINT="${ACS_ENDPOINT}" \
   -e ACS_ADMIN_KEY="${ACS_ADMIN_KEY}"
@@ -43,7 +43,7 @@ claude mcp add azure-search python /home/azureuser/mcprag/mcp_server_sota.py \
 ### Method 3: Project Scope (Team Sharing)
 ```bash
 # Add to .mcp.json for team sharing
-claude mcp add azure-search python /home/azureuser/mcprag/mcp_server_sota.py \
+claude mcp add azure-search python3 /home/azureuser/mcprag/mcp_server_sota.py \
   -s project
 ```
 
@@ -52,7 +52,7 @@ This creates `.mcp.json` in your project root:
 {
   "mcpServers": {
     "azure-search": {
-      "command": "python",
+      "command": "python3",
       "args": ["/home/azureuser/mcprag/mcp_server_sota.py"],
       "env": {
         "ACS_ENDPOINT": "${ACS_ENDPOINT}",
@@ -118,7 +118,7 @@ claude mcp remove azure-search
 
 The server also supports API mode for direct HTTP access:
 ```bash
-python /home/azureuser/mcprag/mcp_server_sota.py --api
+python3 /home/azureuser/mcprag/mcp_server_sota.py --api
 ```
 
 This starts a FastAPI server on http://localhost:8001 with Swagger docs at http://localhost:8001/docs

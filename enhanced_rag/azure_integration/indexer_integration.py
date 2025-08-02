@@ -3,6 +3,7 @@ Azure AI Search Indexer Integration
 Leverages Azure indexers for automated data ingestion and enrichment
 """
 
+import os
 import logging
 from typing import Dict, List, Any, Optional, Sequence
 from datetime import timedelta, datetime
@@ -230,6 +231,30 @@ class IndexerIntegration:
     ) -> Optional[SearchIndexerSkillset]:
         """Create skillset for code enrichment"""
         
+        from .standard_skills import StandardSkillsetBuilder
+        
+        # Use standard skills for integrated vectorization
+        azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+        azure_openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "text-embedding-3-large")
+        
+        # Initialize standard skillset builder
+        skillset_builder = StandardSkillsetBuilder(
+            azure_openai_endpoint=azure_openai_endpoint,
+            azure_openai_deployment=azure_openai_deployment,
+            text_split_config={
+                "text_split_mode": "pages",
+                "maximum_page_length": 2000,
+                "page_overlap_length": 200
+            },
+            embedding_config={
+                "model_name": "text-embedding-3-large",
+                "dimensions": get_config().embedding.dimensions  # Use configured dimensions (3072)
+            }
+        )
+        
+        # Get base skills from standard skillset
+        # Note: The standard skills return skill definitions as dictionaries
+        # For now, we'll use the existing SDK skill classes
         skills = []
         
         # 1. Text split skill for chunking
@@ -367,6 +392,111 @@ class IndexerIntegration:
         )
         
         return self.indexer_client.create_or_update_skillset(skillset)
+    
+    async def create_integrated_vectorization_indexer(
+        self,
+        name: str,
+        data_source_type: DataSourceType,
+        connection_string: str,
+        container_name: str,
+        index_name: str,
+        azure_openai_endpoint: str,
+        azure_openai_deployment: str,
+        schedule_interval_minutes: int = 60
+    ) -> SearchIndexer:
+        """
+        Create an indexer with integrated vectorization using standard skills
+        
+        Args:
+            name: Indexer name
+            data_source_type: Type of data source (blob, cosmos, etc.)
+            connection_string: Connection string to data source
+            container_name: Container/collection name
+            index_name: Target index name
+            azure_openai_endpoint: Azure OpenAI endpoint for vectorization
+            azure_openai_deployment: Azure OpenAI deployment name
+            schedule_interval_minutes: How often to run (minimum 5 minutes)
+            
+        Returns:
+            Created indexer with integrated vectorization
+        """
+        from .standard_skills import StandardSkillsetBuilder, create_standard_skillset
+        
+        try:
+            # Create data source connection
+            data_source = await self._create_data_source(
+                name=f"{name}-datasource",
+                data_source_type=data_source_type,
+                connection_string=connection_string,
+                container_name=container_name
+            )
+            
+            # Create standard skillset with integrated vectorization
+            skillset_definition = create_standard_skillset(
+                azure_openai_endpoint=azure_openai_endpoint,
+                azure_openai_deployment=azure_openai_deployment
+            )
+            
+            # Create the skillset using the definition
+            skillset = SearchIndexerSkillset(
+                name=f"{name}-integrated-skillset",
+                description=skillset_definition["description"],
+                skills=skillset_definition["skills"],
+                cognitive_services=skillset_definition.get("cognitiveServices")
+            )
+            
+            created_skillset = self.indexer_client.create_or_update_skillset(skillset)
+            
+            # Configure field mappings
+            field_mappings = self._get_code_field_mappings(data_source_type)
+            
+            # Configure indexing parameters for code files
+            parameters = IndexingParameters(
+                batch_size=50,
+                max_failed_items=10,
+                max_failed_items_per_batch=5,
+                configuration=IndexingParametersConfiguration(
+                    data_to_extract="contentAndMetadata",
+                    parsing_mode="default",
+                    excluded_file_name_extensions=(
+                        ".exe,.dll,.obj,.pdb,.class,.jar"
+                    ),
+                    indexed_file_name_extensions=(
+                        ".py,.js,.ts,.java,.cs,.cpp,.c,.h,.go,.rs,"
+                        ".rb,.php,.swift,.kt,.scala,.r,.m,.mm"
+                    ),
+                    fail_on_unprocessable_document=False,
+                    fail_on_unsupported_content_type=False,
+                    index_storage_metadata_only_for_oversized_documents=True
+                )
+            )
+            
+            # Create indexing schedule
+            schedule = IndexingSchedule(
+                interval=timedelta(minutes=max(schedule_interval_minutes, 5))
+            ) if schedule_interval_minutes > 0 else None
+            
+            # Create the indexer
+            indexer = SearchIndexer(
+                name=name,
+                data_source_name=data_source.name,
+                target_index_name=index_name,
+                skillset_name=created_skillset.name,
+                field_mappings=field_mappings,
+                schedule=schedule,
+                parameters=parameters,
+                description=f"Integrated vectorization indexer for {container_name}"
+            )
+            
+            # Create or update the indexer
+            result = self.indexer_client.create_or_update_indexer(indexer)
+            logger.info(f"Created integrated vectorization indexer '{name}' successfully")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error creating integrated vectorization indexer '{name}': {e}")
+            raise
     
     def _get_code_field_mappings(self, data_source_type: DataSourceType) -> List[FieldMapping]:
         """Get field mappings for code files based on data source type"""

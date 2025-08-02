@@ -292,7 +292,7 @@ claude mcp list
 - It reads the Claude Desktop configuration file from its standard location on those platforms
 - Use the `-s global` flag to add servers to your global configuration
 - Imported servers will have the same names as in Claude Desktop
-- If servers with the same names already exist, they will get a numerical suffix (e.g., `server_1`)
+- If servers with the same names already exist, they will get a numerical_SUFFIX
 
 ---
 

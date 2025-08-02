@@ -1,7 +1,7 @@
 {
   "mcps": {
     "azure-code-search": {
-      "command": "python",
+      "command": "python3",
       "args": [
         "/home/azureuser/mcprag/mcp_server_auto.py"
       ],

@@ -4,6 +4,7 @@ Implements advanced index features based on createindex.md documentation
 """
 
 import logging
+import os
 from datetime import timedelta
 from typing import Dict, List, Any, Optional
 
@@ -20,6 +21,7 @@ from azure.search.documents.indexes.models import (
     HnswParameters,
     VectorSearchProfile,
     VectorSearchVectorizer,
+    AzureOpenAIVectorizer,
     SemanticConfiguration,
     SemanticPrioritizedFields,
     SemanticField,
@@ -38,7 +40,7 @@ from azure.search.documents.indexes.models import (
     CustomAnalyzer,
     LexicalTokenizerName,
     TokenFilterName,
-    SearchSynonymMap,
+    SynonymMap,
 )
 from azure.core.credentials import AzureKeyCredential
 
@@ -123,7 +125,7 @@ class EnhancedIndexBuilder:
         )
         
         # Create or update synonym map resource
-        code_synonyms = SearchSynonymMap(
+        code_synonyms = SynonymMap(
             name="code_synonyms",
             synonyms="\n".join(
                 [
@@ -613,13 +615,26 @@ class EnhancedIndexBuilder:
     
     def _build_vector_search_config(self) -> VectorSearch:
         """Build vector search configuration"""
-        profile = VectorSearchProfile(
-            name="vector-profile-hnsw",
-            algorithm_configuration_name="hnsw-config"
-        )
-
-        # Define the vectorizer if a custom endpoint is configured
+        # Define the vectorizers
         vectorizers = []
+        
+        # Add Azure OpenAI vectorizer for integrated vectorization
+        azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        
+        if azure_openai_endpoint and azure_openai_deployment:
+            vectorizers.append(
+                AzureOpenAIVectorizer(
+                    name="text-embedding-3-large-vectorizer",
+                    parameters={
+                        "resourceUri": azure_openai_endpoint,
+                        "deploymentId": azure_openai_deployment,
+                        "modelName": "text-embedding-3-large"
+                    }
+                )
+            )
+        
+        # Also support custom vectorizer if configured
         vectorizer_config = self.config.get('custom_vectorizer')
         if vectorizer_config and vectorizer_config.get('uri'):
             custom_vectorizer = CustomWebApiVectorizer(
@@ -634,6 +649,13 @@ class EnhancedIndexBuilder:
                     custom_web_api_parameters=custom_vectorizer.to_dict()['customWebApiParameters']
                 )
             )
+        
+        # Create vector profile with vectorizer
+        profile = VectorSearchProfile(
+            name="vector-profile-hnsw",
+            algorithm_configuration_name="hnsw-config",
+            vectorizer_name="text-embedding-3-large-vectorizer" if azure_openai_endpoint else None
+        )
 
         vector_search = VectorSearch(
                     algorithms=[
@@ -1022,3 +1044,242 @@ class EnhancedIndexBuilder:
                 'expected': expected,
                 'message': f"Error accessing index: {str(e)}"
             }
+    
+    def build_index(
+        self,
+        index_name: str,
+        vector_dimensions: int = 3072,
+        enable_integrated_vectorization: bool = True,
+        azure_openai_endpoint: Optional[str] = None,
+        azure_openai_deployment: Optional[str] = None
+    ) -> SearchIndex:
+        """
+        Build an optimized index based on the createavectorindex.md documentation.
+        
+        Args:
+            index_name: Name of the index
+            vector_dimensions: Vector dimensions (3072 for text-embedding-3-large)
+            enable_integrated_vectorization: Enable Azure OpenAI vectorizer
+            azure_openai_endpoint: Azure OpenAI endpoint for vectorization
+            azure_openai_deployment: Azure OpenAI deployment name
+            
+        Returns:
+            SearchIndex object ready to be created
+        """
+        # Build fields including proper vector field configuration
+        fields = []
+        
+        # Document key
+        fields.append(
+            SimpleField(
+                name="id",
+                type=SearchFieldDataType.String,
+                key=True,
+                retrievable=True,
+                filterable=True
+            )
+        )
+        
+        # Content fields (human-readable)
+        fields.extend([
+            SearchableField(
+                name="content",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                retrievable=True,
+                analyzer_name="en.microsoft"
+            ),
+            SimpleField(
+                name="repository",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="file_path",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                sortable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="language",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            SearchableField(
+                name="function_name",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                filterable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            SearchableField(
+                name="semantic_context",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="last_modified",
+                type=SearchFieldDataType.DateTimeOffset,
+                filterable=True,
+                sortable=True,
+                retrievable=True
+            )
+        ])
+        
+        # Additional metadata fields from our enhanced schema
+        fields.extend([
+            SimpleField(
+                name="chunk_type",
+                type=SearchFieldDataType.String,
+                filterable=True,
+                facetable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="start_line",
+                type=SearchFieldDataType.Int32,
+                filterable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="end_line",
+                type=SearchFieldDataType.Int32,
+                filterable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="signature",
+                type=SearchFieldDataType.String,
+                retrievable=True
+            ),
+            SearchableField(
+                name="docstring",
+                type=SearchFieldDataType.String,
+                searchable=True,
+                retrievable=True
+            ),
+            SearchField(
+                name="imports",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                searchable=True,
+                retrievable=True
+            ),
+            SimpleField(
+                name="dependencies",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                retrievable=True
+            )
+        ])
+        
+        # Vector field with proper configuration based on documentation
+        vector_field = SearchField(
+            name="content_vector",
+            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+            searchable=True,
+            retrievable=False,  # Set to False to save storage as recommended
+            stored=False,  # Reduces storage for compressed vectors
+            vector_search_dimensions=vector_dimensions,
+            vector_search_profile_name="vector-profile-hnsw"
+        )
+        fields.append(vector_field)
+        
+        # Build vector search configuration
+        vectorizers = []
+        vectorizer_name = None
+        
+        if enable_integrated_vectorization and azure_openai_endpoint:
+            vectorizer_name = "text-embedding-3-large-vectorizer"
+            vectorizers.append(
+                AzureOpenAIVectorizer(
+                    name=vectorizer_name,
+                    parameters={
+                        "resourceUri": azure_openai_endpoint,
+                        "deploymentId": azure_openai_deployment or "text-embedding-3-large",
+                        "modelName": "text-embedding-3-large"
+                    }
+                )
+            )
+        
+        # HNSW algorithm configuration
+        algorithm = HnswAlgorithmConfiguration(
+            name="hnsw-algorithm",
+            parameters=HnswParameters(
+                m=4,  # As recommended in documentation
+                ef_construction=400,
+                ef_search=500,
+                metric="cosine"  # For Azure OpenAI embeddings
+            )
+        )
+        
+        # Vector profile
+        vector_profile = VectorSearchProfile(
+            name="vector-profile-hnsw",
+            algorithm_configuration_name="hnsw-algorithm",
+            vectorizer_name=vectorizer_name if enable_integrated_vectorization else None
+        )
+        
+        # Vector search configuration
+        vector_search = VectorSearch(
+            algorithms=[algorithm],
+            profiles=[vector_profile],
+            vectorizers=vectorizers if vectorizers else None
+        )
+        
+        # Semantic configuration for hybrid search
+        semantic_config = SemanticConfiguration(
+            name="semantic-config",
+            prioritized_fields=SemanticPrioritizedFields(
+                title_field=SemanticField(field_name="function_name"),
+                content_fields=[
+                    SemanticField(field_name="content"),
+                    SemanticField(field_name="semantic_context")
+                ],
+                keywords_fields=[
+                    SemanticField(field_name="language"),
+                    SemanticField(field_name="repository")
+                ]
+            )
+        )
+        
+        semantic_search = SemanticSearch(
+            configurations=[semantic_config]
+        )
+        
+        # Create the index
+        index = SearchIndex(
+            name=index_name,
+            fields=fields,
+            vector_search=vector_search,
+            semantic_search=semantic_search,
+            cors_options=CorsOptions(
+                allowed_origins=["*"],
+                max_age_in_seconds=300
+            )
+        )
+        
+        return index
+    
+    def create_or_update_index(self, index: SearchIndex) -> SearchIndex:
+        """
+        Create or update an index in Azure Search.
+        
+        Args:
+            index: SearchIndex object to create or update
+            
+        Returns:
+            Created/updated SearchIndex
+        """
+        try:
+            result = self.index_client.create_or_update_index(index)
+            logger.info(f"Successfully created/updated index '{index.name}'")
+            return result
+        except Exception as e:
+            logger.error(f"Error creating/updating index '{index.name}': {e}")
+            raise

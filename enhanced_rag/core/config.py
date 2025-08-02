@@ -18,7 +18,9 @@ class AzureConfig(BaseModel):
     admin_key: str = Field(
         default_factory=lambda: os.getenv("ACS_ADMIN_KEY", "")
     )
-    index_name: str = Field(default="enhanced-rag-index")
+    index_name: str = Field(
+        default_factory=lambda: os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota")
+    )
     semantic_config_name: str = Field(default="enhanced-semantic-config")
     
     # Index settings
@@ -34,7 +36,7 @@ class EmbeddingConfig(BaseModel):
     """Embedding generation configuration"""
     provider: str = Field(default="azure_openai_http")  # Options: azure_openai_http, client, none
     model: str = Field(default="text-embedding-3-large")
-    dimensions: int = Field(default=1536)
+    dimensions: int = Field(default=3072)
     batch_size: int = Field(default=16)
     max_concurrent_requests: int = Field(default=5)
     circuit_breaker_threshold: int = Field(default=5)

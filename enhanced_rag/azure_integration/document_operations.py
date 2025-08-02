@@ -30,7 +30,12 @@ class DocumentOperations:
     async def upload_documents(
         self, index_name: str, documents: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Upload documents to index"""
+        """Upload documents to index
+        
+        Note: If the index has integrated vectorization configured,
+        Azure AI Search will automatically generate embeddings for
+        text fields. No client-side vectorization is needed.
+        """
         try:
             result = self._client(index_name).upload_documents(documents)
             return {"status": "ok", "result": [r.succeeded for r in result]}

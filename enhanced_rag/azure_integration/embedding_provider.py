@@ -127,8 +127,16 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             _get_env("AZURE_OPENAI_EMBEDDING_MODEL")
             or _get_env("EMBEDDING_MODEL")
             or _get_env("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
-            or "text-embedding-ada-002"
+            or _get_env("AZURE_OPENAI_DEPLOYMENT_NAME")
+            or "text-embedding-3-large"
         )
+        
+        # Support for configurable dimensions (text-embedding-3-large supports 256-3072)
+        self.dimensions: Optional[int] = None
+        if "text-embedding-3" in self.model_name:
+            # Default to 3072 for text-embedding-3-large
+            from enhanced_rag.core.config import get_config
+            self.dimensions = get_config().embedding.dimensions
 
         # Instantiate client
         if self.use_azure:
@@ -147,10 +155,15 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
     def generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate a single embedding vector for text."""
         try:
-            response = self._client.embeddings.create(
-                input=text,
-                model=self.model_name,
-            )
+            kwargs = {
+                "input": text,
+                "model": self.model_name,
+            }
+            # Add dimensions parameter for text-embedding-3 models
+            if self.dimensions is not None:
+                kwargs["dimensions"] = self.dimensions
+                
+            response = self._client.embeddings.create(**kwargs)
             return response.data[0].embedding  # type: ignore[attr-defined]
         except Exception as exc:
             self.logger.warning("Embedding API error: %s", exc)
@@ -162,10 +175,15 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             return []
 
         try:
-            response = self._client.embeddings.create(
-                input=list(texts),
-                model=self.model_name,
-            )
+            kwargs = {
+                "input": list(texts),
+                "model": self.model_name,
+            }
+            # Add dimensions parameter for text-embedding-3 models
+            if self.dimensions is not None:
+                kwargs["dimensions"] = self.dimensions
+                
+            response = self._client.embeddings.create(**kwargs)
             # Sort embeddings by original index to handle out-of-order responses
             embeddings = sorted(response.data, key=lambda e: e.index)
             return [e.embedding for e in embeddings]

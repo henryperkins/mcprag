@@ -13,7 +13,6 @@ import asyncio
 import base64
 from abc import ABC, abstractmethod
 import time
-import time
 
 
 from enhanced_rag.core.config import get_config
@@ -277,7 +276,7 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or get_config().embedding.model_dump()
-        self.session = None
+        self.session: Optional[aiohttp.ClientSession] = None
         self._semaphore = asyncio.Semaphore(
             self.config.get('max_concurrent_requests', 5)
         )
@@ -321,9 +320,9 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
         if self.provider is not None:
             # Use client-side embedding provider
             embedding = self.provider.generate_embedding(text)
-            if embedding and len(embedding) != self.config.get('dimensions', 1536):
+            if embedding and len(embedding) != self.config.get('dimensions', get_config().embedding.dimensions):
                 # Truncate or pad to match configured dimensions
-                dimensions = self.config.get('dimensions', 1536)
+                dimensions = self.config.get('dimensions', get_config().embedding.dimensions)
                 if len(embedding) > dimensions:
                     embedding = embedding[:dimensions]
                 else:
@@ -343,24 +342,27 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
             self.session = aiohttp.ClientSession()
 
         endpoint = self.config.get('azure_endpoint')
-        model = self.config.get('model')
+        deployment_id = (
+            self.config.get('deployment_id')
+            or self.config.get('deployment')
+            or self.config.get('model')  # backward-compat
+        )
         api_key = self.config.get('api_key')
         api_version = self.config.get('api_version')
 
-        if not endpoint or not model or not api_key or not api_version:
+        if not endpoint or not deployment_id or not api_key or not api_version:
             raise RuntimeError(
                 "Missing required Azure OpenAI embedding configuration"
             )
 
-        url = f"{endpoint}/openai/deployments/{model}/embeddings"
+        url = f"{endpoint}/openai/deployments/{deployment_id}/embeddings"
         headers = {
             'api-key': api_key,
             'Content-Type': 'application/json'
         }
 
         payload = {
-            'input': text,
-            'model': model
+            'input': text
         }
 
         async with self._semaphore:
@@ -398,10 +400,10 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
                     delay *= 2
                 else:
                     logger.error(f"All embedding attempts failed: {e}")
-                    dims = int(self.config.get('dimensions', 1536))
+                    dims = int(self.config.get('dimensions', get_config().embedding.dimensions))
                     return [0.0] * dims
         # Fallback in case no return occurred above
-        dims = int(self.config.get('dimensions', 1536))
+        dims = int(self.config.get('dimensions', get_config().embedding.dimensions))
         return [0.0] * dims
     
     def _generate_simple_embedding(self, text: str) -> List[float]:
@@ -494,21 +496,38 @@ class CustomWebApiVectorizer:
         """
         async with aiohttp.ClientSession() as session:
             # Prepare payload according to spec
+            # Build the data payload respecting the expected schema
+            if query_type == "imageBinary":
+                encoded = base64.b64encode(query.encode()).decode()
+                data_field = {"imageBinary": encoded}
+            else:
+                data_field = {query_type: query}
+
             payload = {
                 "values": [
                     {
                         "recordId": "0",
-                        "data": {
-                            query_type: query if query_type != "imageBinary" else {
-                                "data": base64.b64encode(query.encode()).decode()
-                            }
-                        }
+                        "data": data_field
                     }
                 ]
             }
 
             headers = self.http_headers.copy()
             headers['Content-Type'] = 'application/json'
+
+            # If a managed identity resource ID was supplied, attempt to acquire
+            # an access token and add it as a bearer token.  We purposefully do
+            # this lazily and ignore failures so that the vectorizer can still
+            # operate for anonymous endpoints.
+            if self.auth_resource_id:
+                try:
+                    from azure.identity.aio import ManagedIdentityCredential  # type: ignore
+
+                    cred = ManagedIdentityCredential(client_id=self.auth_identity) if self.auth_identity else ManagedIdentityCredential()
+                    token_obj = await cred.get_token(f"{self.auth_resource_id}/.default")
+                    headers["Authorization"] = f"Bearer {token_obj.token}"
+                except Exception as ex:  # pylint: disable=broad-except
+                    logger.warning("Failed to acquire managed identity token: %s", ex)
 
             # Circuit breaker parameters
             cfg = get_config().embedding
@@ -519,7 +538,8 @@ class CustomWebApiVectorizer:
             now = time.monotonic()
             if now < self._open_until:
                 logger.warning("Vectorizer circuit breaker open; skipping request")
-                return []
+                expected_dims = get_config().embedding.dimensions
+                return [0.0] * expected_dims
 
             try:
                 async with self._semaphore:
@@ -540,7 +560,22 @@ class CustomWebApiVectorizer:
                         if 'values' in result and len(result['values']) > 0:
                             # Success: reset breaker
                             self._fail_count = 0
-                            return result['values'][0]['data'].get('vector', [])
+                            vector = result['values'][0]['data'].get('vector', [])
+
+                            expected_dims = get_config().embedding.dimensions
+                            if vector and len(vector) != expected_dims:
+                                logger.warning(
+                                    "Vector length %s does not match expected %s – "
+                                    "padding/truncating for compatibility.",
+                                    len(vector),
+                                    expected_dims,
+                                )
+                                if len(vector) > expected_dims:
+                                    vector = vector[:expected_dims]
+                                else:
+                                    vector.extend([0.0] * (expected_dims - len(vector)))
+
+                            return vector
                         else:
                             raise RuntimeError(f"Invalid response from vectorizer: {result}")
 

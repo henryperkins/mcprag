@@ -8,7 +8,7 @@
     ],
     "post-file-change": [
       {
-        "command": "python /home/azureuser/mcprag/smart_indexer.py --files {files}",
+        "command": "python3 /home/azureuser/mcprag/smart_indexer.py --files {files}",
         "description": "Re-index changed files for search",
         "condition": "any([f.endswith(('.py', '.js', '.ts')) for f in {files}])"
       }
@@ -22,7 +22,7 @@
   },
   "mcp-servers": {
     "azure-code-search-auto": {
-      "command": "python",
+      "command": "python3",
       "args": ["/home/azureuser/mcprag/index/mcp_auto_index.py"],
       "env": {
         "ACS_ENDPOINT": "${ACS_ENDPOINT}",

@@ -10,9 +10,103 @@ import json
 import asyncio
 import re
 import logging
+import socket
+
+# ---------------------------------------------------------------------------
+# Workaround for sandbox environments where the `socketpair()` syscall is
+# disallowed by the seccomp profile.  asyncio's selector event loop relies on
+# `socket.socketpair()` for its self-pipe.  We monkey-patch socket.socketpair
+# with an implementation that falls back to a localhost TCP socket pair when
+# the original function raises a PermissionError.
+# ---------------------------------------------------------------------------
+
+_orig_socketpair = socket.socketpair
+
+def _safe_socketpair(*args, **kwargs):  # type: ignore[override]
+    try:
+        return _orig_socketpair(*args, **kwargs)
+    except PermissionError:
+        # Fallback: create a pair of connected IPv4 sockets. This avoids the
+        # blocked `socketpair` syscall while still giving asyncio a pair of
+        # sockets it can use for its self-pipe.
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.setblocking(True)
+        client.connect(("127.0.0.1", port))
+
+        server_side, _ = srv.accept()
+        srv.close()
+
+        # Match the return order of the original socketpair(): (conn1, conn2)
+        return server_side, client
+
+# Apply the monkey-patch
+socket.socketpair = _safe_socketpair  # type: ignore[assignment]
+
+# ---------------------------------------------------------------------------
+# Provide an alternative asyncio event loop that doesn't rely on socketpair.
+# This is a belt-and-suspenders fix for environments where even creating TCP
+# sockets is prohibited. It uses os.pipe() for the self-pipe implementation.
+# ---------------------------------------------------------------------------
+
+import asyncio, os, selectors, errno, fcntl
+
+
+class _PipeSelectorEventLoop(asyncio.SelectorEventLoop):
+    """SelectorEventLoop variant that uses os.pipe() instead of socketpair()."""
+
+    def _make_self_pipe(self):  # type: ignore[override]
+        # Create a non-blocking pipe pair (read/write fds)
+        rfd, wfd = os.pipe()
+        os.set_blocking(rfd, False)
+        os.set_blocking(wfd, False)
+
+        # Wrap the read end with a simple callback that drains the pipe
+        def _read_from_self():
+            try:
+                os.read(rfd, 4096)
+            except BlockingIOError:
+                pass
+            except OSError as exc:
+                if exc.errno != errno.EAGAIN:
+                    raise
+
+        self._add_reader(rfd, _read_from_self)
+
+        # Store fds so that the parent class can close them in _close_self_pipe()
+        class _PipeFD:
+            def __init__(self, fd: int):
+                self._fd = fd
+
+            def fileno(self):  # noqa: D401
+                return self._fd
+
+            def send(self, data: bytes):  # type: ignore[override]
+                os.write(self._fd, data)
+
+            def close(self):  # noqa: D401
+                try:
+                    os.close(self._fd)
+                except OSError:
+                    pass
+
+        self._ssock = _PipeFD(rfd)
+        self._csock = _PipeFD(wfd)
+
+
+class _SafeEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
+    def new_event_loop(self):  # type: ignore[override]
+        return _PipeSelectorEventLoop()
+
+# Install the safe policy **before** anyio / FastMCP create their own loops.
+asyncio.set_event_loop_policy(_SafeEventLoopPolicy())
 from typing import Optional, List, Dict, Any, Sequence
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 # Core imports
@@ -108,6 +202,9 @@ class SearchCodeParams(BaseModel):
     repository: Optional[str] = Field(None, description="Repository to search (defaults to current, use '*' for all)")
     max_results: int = Field(10, ge=1, le=50, description="Maximum number of results")
     include_dependencies: bool = Field(False, description="Include function dependencies")
+    skip: int = Field(0, ge=0, description="Number of results to skip for pagination")
+    orderby: Optional[str] = Field(None, description="Sort order (e.g., 'last_modified desc')")
+    highlight_code: bool = Field(False, description="Enable hit highlighting in code results")
 
 class SearchResult(BaseModel):
     file_path: str
@@ -121,6 +218,7 @@ class SearchResult(BaseModel):
     context: Optional[str] = None
     imports: List[str] = []
     dependencies: List[str] = []
+    highlights: Optional[Dict[str, List[str]]] = None
 
 # ============================================================================
 # Enhanced MCP Server
@@ -135,6 +233,7 @@ class EnhancedMCPServer:
         self._initialize_clients()
         self._repo_cache: Dict[str, str] = {}
         self._query_cache: Dict[str, List[SearchResult]] = {}
+        self._last_total_count: Optional[int] = None
 
     def _format_line_range(self, start_line: Optional[int], end_line: Optional[int]) -> Optional[str]:
         """Format line range from start and end line numbers"""
@@ -163,9 +262,9 @@ class EnhancedMCPServer:
         if VECTOR_SUPPORT and (os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")):
             try:
                 self.embedder = AzureOpenAIEmbeddingProvider()
-                print("✅ Vector search enabled")
+                logger.info("Vector search enabled")
             except Exception as e:
-                print(f"⚠️  Vector search unavailable: {e}")
+                logger.warning("Vector search unavailable: %s", e)
 
     # ========================================================================
     # Core Search Implementation with Advanced Features
@@ -186,10 +285,13 @@ class EnhancedMCPServer:
         repo = self._resolve_repository(params.repository)
 
         # Build search parameters
-        search_params = self._build_search_params(enhanced_query, repo, params.language)
+        search_params = self._build_search_params(enhanced_query, repo, params)
 
         # Execute search
-        raw_results = list(self.search_client.search(**search_params))
+        search_response = self.search_client.search(**search_params)
+        raw_results = list(search_response)
+        # Store total count for later use
+        self._last_total_count = search_response.get_count() if hasattr(search_response, 'get_count') else None
 
         # Filter and rank results
         results = self._filter_and_rank_results(raw_results, params.query, repo)
@@ -203,6 +305,10 @@ class EnhancedMCPServer:
 
         # Cache results
         self._query_cache[cache_key] = search_results
+
+        # Apply skip for pagination after all processing
+        if params.skip > 0:
+            search_results = search_results[params.skip:]
 
         return search_results[:params.max_results]
 
@@ -267,7 +373,7 @@ class EnhancedMCPServer:
         self._repo_cache[cwd] = repo_name
         return repo_name
 
-    def _build_search_params(self, query: str, repo: Optional[str], language: Optional[str]) -> Dict:
+    def _build_search_params(self, query: str, repo: Optional[str], params: SearchCodeParams) -> Dict:
         """Build optimized search parameters"""
         # Note: vector_queries expects a Sequence[VectorizedQuery] at runtime.
         # Some type checkers flag list[VectorizedQuery] for invariance; we use Sequence for compatibility.
@@ -275,6 +381,7 @@ class EnhancedMCPServer:
             "search_text": query,
             "query_type": "semantic",
             "semantic_configuration_name": "semantic-config",
+            "count": True,  # Include total count
             "top": 50,  # Get more for better filtering
             "select": [
                 "id", "repository", "file_path", "language", "content",
@@ -326,11 +433,25 @@ class EnhancedMCPServer:
         filters = []
         if repo:
             filters.append(f"repository eq '{repo}'")
-        if language:
-            filters.append(f"language eq '{language}'")
+        if params.language:
+            filters.append(f"language eq '{params.language}'")
 
         if filters:
             params["filter"] = " and ".join(filters)
+
+        # Add pagination support
+        if params.skip > 0:
+            params["skip"] = params.skip
+
+        # Add ordering support
+        if params.orderby:
+            params["orderby"] = params.orderby
+
+        # Add hit highlighting
+        if params.highlight_code:
+            params["highlight"] = "content,semantic_context,docstring,function_name"
+            params["highlightPreTag"] = "<mark>"
+            params["highlightPostTag"] = "</mark>"
 
         return params
 
@@ -367,7 +488,7 @@ class EnhancedMCPServer:
                 score *= 2.0
 
             # Boost for function name match
-            func_name = result.get('function_signature', '').lower()
+            func_name = result.get('signature', '').lower()
             if func_name:
                 func_words = set(re.findall(r'\w+', func_name))
                 matching_terms = query_terms.intersection(func_words)
@@ -397,7 +518,7 @@ class EnhancedMCPServer:
 
         for result in results:
             # Extract function name from signature
-            signature = result.get('function_signature', '')
+            signature = result.get('signature', '')
             func_name = None
             if signature:
                 match = re.search(r'(?:def|class|async def)\s+(\w+)', signature)
@@ -427,7 +548,8 @@ class EnhancedMCPServer:
                 content=content,
                 context=result.get('semantic_context', '')[:200],
                 imports=result.get('imports', []),
-                dependencies=result.get('dependencies', [])
+                dependencies=result.get('dependencies', []),
+                highlights=result.get('@search.highlights', None)
             ))
 
         return search_results
@@ -472,7 +594,8 @@ class EnhancedMCPServer:
         if not results:
             return self._no_results_message(query)
 
-        formatted = f"🔍 Found {len(results)} relevant results:\n\n"
+        total_msg = f" (out of {self._last_total_count} total matches)" if self._last_total_count else ""
+        formatted = f"🔍 Found {len(results)} relevant results{total_msg}:\n\n"
 
         for i, result in enumerate(results, 1):
             formatted += f"**Result {i}** (Score: {result.score:.2f})\n"
@@ -491,6 +614,13 @@ class EnhancedMCPServer:
 
             if result.imports:
                 formatted += f"📥 Imports: {', '.join(result.imports[:5])}\n"
+
+            # Show highlights if available
+            if result.highlights:
+                formatted += "\n💡 **Highlighted matches:**\n"
+                for field, highlights in result.highlights.items():
+                    if highlights:
+                        formatted += f"  - {field}: {highlights[0]}\n"
 
             formatted += f"\n```{result.language}\n{result.content}\n```\n\n"
 
@@ -529,9 +659,24 @@ async def search_code(
     language: Optional[str] = None,
     repository: Optional[str] = None,
     max_results: int = 10,
-    include_dependencies: bool = False
+    include_dependencies: bool = False,
+    skip: int = 0,
+    orderby: Optional[str] = None,
+    highlight_code: bool = False
 ) -> str:
-    """Search for code with advanced filtering, ranking, and dependency resolution"""
+    """Search for code with advanced filtering, ranking, and dependency resolution
+    
+    Args:
+        query: Natural language search query
+        intent: Search intent (implement/debug/understand/refactor)
+        language: Filter by programming language
+        repository: Filter by repository name (* for all)
+        max_results: Maximum number of results to return
+        include_dependencies: Include function dependencies
+        skip: Number of results to skip for pagination
+        orderby: Sort order (e.g., 'last_modified desc')
+        highlight_code: Enable hit highlighting in results
+    """
 
     params = SearchCodeParams(
         query=query,
@@ -539,7 +684,10 @@ async def search_code(
         language=language,
         repository=repository,
         max_results=max_results,
-        include_dependencies=include_dependencies
+        include_dependencies=include_dependencies,
+        skip=skip,
+        orderby=orderby,
+        highlight_code=highlight_code
     )
 
     results = await server.search_code(params)
@@ -597,7 +745,7 @@ async def list_repositories() -> str:
             "repositories": repo_list,
             "count": len(repo_list),
             "current": current,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }, indent=2)
 
     except Exception as e:
@@ -623,7 +771,7 @@ async def get_statistics() -> str:
                 "repositories_cached": len(server._repo_cache),
                 "queries_cached": len(server._query_cache)
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }, indent=2)
 
     except Exception as e:
@@ -820,7 +968,7 @@ if __name__ == "__main__":
                 include_dependencies=include_dependencies
             )
             results = await server.search_code(params)
-            return {"results": [r.dict() for r in results]}
+            return {"results": [r.model_dump() for r in results]}
 
         uvicorn.run(app, host="0.0.0.0", port=8001)
     else:
