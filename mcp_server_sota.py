@@ -170,6 +170,13 @@ except ImportError:
     ENHANCED_RAG_SUPPORT = False
 
 try:
+    from enhanced_rag.pipeline import RAGPipeline, QueryContext
+    PIPELINE_AVAILABLE = True
+except Exception:
+    RAGPipeline = QueryContext = None
+    PIPELINE_AVAILABLE = False
+
+try:
     from enhanced_rag.ranking.result_explainer import ResultExplainer  # type: ignore
     RESULT_EXPLAINER_AVAILABLE = True
 except Exception:
@@ -1222,6 +1229,7 @@ async def runtime_diagnostics() -> str:
         diag = {
             "feature_flags": {
                 "ENHANCED_RAG_SUPPORT": ENHANCED_RAG_SUPPORT,
+                "PIPELINE_AVAILABLE": PIPELINE_AVAILABLE,
                 "VECTOR_SUPPORT": VECTOR_SUPPORT,
                 "DOCS_SUPPORT": DOCS_SUPPORT,
             },
@@ -1247,6 +1255,16 @@ async def runtime_diagnostics() -> str:
         return json.dumps(_ok(diag), indent=2)
     except Exception as e:
         return json.dumps(_err(str(e)), indent=2)
+
+@mcp.resource("resource://pipeline_status")
+async def pipeline_status() -> str:
+    """Get Enhanced RAG Pipeline status"""
+    global pipeline_instance
+    if not PIPELINE_AVAILABLE:
+        return json.dumps({"available": False, "reason": "Pipeline module not available"}, indent=2)
+    if not pipeline_instance:
+        return json.dumps({"initialized": False}, indent=2)
+    return json.dumps(pipeline_instance.get_pipeline_status(), indent=2)
 
 
 # ============================================================================
@@ -1608,6 +1626,44 @@ async def cache_clear(scope: str = "all") -> Dict[str, Any]:
             "repo_cache": len(server._repo_cache),
         }
         return _ok({"cleared": cleared, "remaining": remaining})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def search_code_pipeline(
+    query: str,
+    current_file: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    session_id: Optional[str] = None,
+    max_results: int = 10,
+    generate_response: bool = True
+) -> Dict[str, Any]:
+    """Run the Enhanced RAG Pipeline end-to-end."""
+    if not PIPELINE_AVAILABLE:
+        return _err("Enhanced RAG Pipeline not available", code="pipeline_unavailable")
+    
+    try:
+        global pipeline_instance
+        if pipeline_instance is None:
+            pipeline_instance = RAGPipeline()
+        ctx = QueryContext(
+            current_file=current_file,
+            workspace_root=workspace_root,
+            session_id=session_id
+        )
+        result = await pipeline_instance.process_query(
+            query=query,
+            context=ctx,
+            generate_response=generate_response,
+            max_results=max_results
+        )
+        return _ok({
+            "success": result.success,
+            "results": [r.model_dump() for r in result.results],
+            "response": result.response,
+            "metadata": result.metadata,
+            "error": result.error
+        })
     except Exception as e:
         return _err(str(e))
 

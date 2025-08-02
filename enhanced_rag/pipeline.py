@@ -212,6 +212,31 @@ class RAGPipeline:
             try:
                 raw_results = await self.retriever.retrieve(search_query)
                 logger.debug(f"Retrieved {len(raw_results)} results from multi-stage retrieval")
+                
+                # Normalize dict results to SearchResult instances
+                if raw_results and isinstance(raw_results[0], dict):
+                    from .core.models import SearchResult as CoreSearchResult
+                    normalized = []
+                    for r in raw_results:
+                        normalized.append(CoreSearchResult(
+                            id=r.get('id') or r.get('@search.documentId') or '',
+                            score=r.get('score') or r.get('@search.score', 0.0),
+                            file_path=r.get('file_path', ''),
+                            repository=r.get('repository', ''),
+                            language=r.get('language', ''),
+                            function_name=r.get('function_name'),
+                            class_name=r.get('class_name'),
+                            code_snippet=r.get('content') or r.get('code_snippet', ''),
+                            signature=r.get('signature', ''),
+                            semantic_context=r.get('semantic_context', ''),
+                            imports=r.get('imports') or [],
+                            dependencies=r.get('dependencies') or [],
+                            start_line=r.get('start_line'),
+                            end_line=r.get('end_line'),
+                            highlights=r.get('@search.highlights') or r.get('highlights', {})
+                        ))
+                    raw_results = normalized
+                    
             except Exception as e:
                 logger.error(f"Multi-stage retrieval failed: {e}")
                 # Fallback to HybridSearcher if available
@@ -234,7 +259,11 @@ class RAGPipeline:
                                 class_name=hr.metadata.get('class_name'),
                                 code_snippet=hr.content,
                                 language=hr.metadata.get('language', ''),
-                                highlights=hr.metadata.get('highlights', {})
+                                highlights=hr.metadata.get('highlights', {}),
+                                signature=hr.metadata.get('signature', ''),  # add
+                                semantic_context=hr.metadata.get('semantic_context', ''),  # add
+                                imports=hr.metadata.get('imports') or [],  # add
+                                dependencies=hr.metadata.get('dependencies') or []  # add
                             )
                             raw_results.append(search_result)
                         logger.info(f"HybridSearcher fallback returned {len(raw_results)} results")
@@ -245,6 +274,10 @@ class RAGPipeline:
                     raw_results = []
 
             # 5. Rank and filter results
+            if raw_results:
+                # Optional augmentation to fill missing metadata for better ranking
+                self._augment_code_understanding(raw_results)
+
             if raw_results and code_context:
                 try:
                     # Convert CodeContext to EnhancedContext for ranking
