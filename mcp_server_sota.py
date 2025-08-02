@@ -188,9 +188,12 @@ except Exception:
 
 try:
     from enhanced_rag.ranking.result_explainer import ResultExplainer  # type: ignore
+    from enhanced_rag.core.models import SearchResult as CoreSearchResult, SearchQuery as CoreSearchQuery
     RESULT_EXPLAINER_AVAILABLE = True
 except Exception:
     ResultExplainer = None
+    CoreSearchResult = None
+    CoreSearchQuery = None
     RESULT_EXPLAINER_AVAILABLE = False
 
 try:
@@ -542,7 +545,8 @@ class EnhancedMCPServer:
             pass
 
         # Execute search
-        search_response = self.search_client.search(**search_params)
+        from enhanced_rag.utils.error_handler import with_retry
+        search_response = with_retry(op_name="acs.search")(self.search_client.search)(**search_params)
         raw_results = list(search_response)
         # Store total count for later use
         self._last_total_count = search_response.get_count() if hasattr(search_response, 'get_count') else None
@@ -741,9 +745,9 @@ class EnhancedMCPServer:
 
         # Add hit highlighting
         if params.highlight_code:
-            search_params["highlight"] = "content,semantic_context,docstring,function_name"
-            search_params["highlightPreTag"] = "<mark>"
-            search_params["highlightPostTag"] = "</mark>"
+            search_params["highlight_fields"] = "content,docstring"
+            search_params["highlight_pre_tag"] = "<mark>"
+            search_params["highlight_post_tag"] = "</mark>"
 
         return search_params
 
@@ -1170,20 +1174,39 @@ async def explain_ranking(
     if RESULT_EXPLAINER_AVAILABLE and 'ResultExplainer' in globals():
         try:
             explainer = ResultExplainer()
+            cq = CoreSearchQuery(
+                query=query or "",
+                language=language,
+                intent=SearchIntent(intent) if intent else None
+            )
             out = []
             for item in raw_items:
                 try:
-                    exp = await explainer.explain_ranking(
-                        result=item,
-                        query=None,
-                        context=None
-                    )
+                    if isinstance(item, dict):
+                        r = CoreSearchResult(
+                            id=item.get("file_path", "") or item.get("id", ""),
+                            score=item.get("score", 0.0),
+                            file_path=item.get("file_path", ""),
+                            repository=item.get("repository", ""),
+                            language=item.get("language", "") or (language or ""),
+                            function_name=item.get("function_name"),
+                            class_name=item.get("class_name"),
+                            code_snippet=item.get("content") or "",
+                            signature=item.get("signature", ""),
+                            semantic_context=item.get("context", "") or item.get("semantic_context", ""),
+                            imports=item.get("imports") or [],
+                            dependencies=item.get("dependencies") or [],
+                            highlights=item.get("highlights") or item.get("@search.highlights") or {}
+                        )
+                    else:
+                        r = item
+                    exp = await explainer.explain_ranking(result=r, query=cq, context=None)
                     out.append(exp)
                 except Exception:
                     continue
             if out:
                 return _ok({
-                    "mode": mode if ENHANCED_RAG_SUPPORT else "base",
+                    "mode": "enhanced" if ENHANCED_RAG_SUPPORT and mode == "enhanced" else "base",
                     "query": query,
                     "explanations": out
                 })
@@ -1255,6 +1278,7 @@ async def diagnose_query(
             return _ok(out)
         else:
             # Base ACS
+            timer = _Timer()
             params = SearchCodeParams(
                 query=query,
                 intent=SearchIntent(intent) if intent else None,
@@ -1294,7 +1318,10 @@ async def preview_query_processing(
         if ENHANCED_RAG_SUPPORT and SEMANTIC_TOOLS_AVAILABLE:
             try:
                 classifier = IntentClassifier()
-                detected = classifier.classify(query)
+                try:
+                    detected = (await classifier.classify_intent(query)).value
+                except Exception:
+                    detected = intent
             except Exception:
                 detected = intent
 
@@ -1407,6 +1434,7 @@ async def search_code_hybrid(
                 pass
 
         # Base fallback: one pass (semantic + possibly vector). We cannot split stages reliably, but return the results.
+        timer = _Timer()
         params = SearchCodeParams(
             query=query,
             intent=SearchIntent(intent) if intent else None,
@@ -1416,10 +1444,11 @@ async def search_code_hybrid(
             include_dependencies=False
         )
         results = await server.search_code(params)
+        timer.mark("base_search")
         out = {
             "weights": {"bm25": bm25_weight, "vector": vector_weight},
             "final_results": [r.model_dump() for r in results],
-            "stages": None
+            "stages": [{"stage": "base_hybrid", "count": len(results), "duration_ms": timer.durations().get("start→base_search", 0.0)}] if include_stage_results else None
         }
         return _ok(out)
     except Exception as e:
