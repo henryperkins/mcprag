@@ -535,13 +535,14 @@ class IndexerIntegration:
                     source_field_name="metadata_storage_last_modified",
                     target_field_name="last_modified"
                 ),
-                # repository ← container (https://.../container/...), token position 3 is the container name
+                # repository ← first folder after container (https://{acct}.blob.core.windows.net/{container}/{repo}/...)
+                # token position 4 extracts the repository name from the blob path
                 FieldMapping(
                     source_field_name="metadata_storage_path",
                     target_field_name="repository",
                     mapping_function=FieldMappingFunction(
                         name="extractTokenAtPosition",
-                        parameters={"delimiter": "/", "position": 3}
+                        parameters={"delimiter": "/", "position": 4}
                     )
                 )
             ]

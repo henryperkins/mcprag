@@ -337,6 +337,17 @@ class EnhancedMCPServer:
         except Exception:
             self._semantic_available = False
 
+        # Auto-detect vector search availability
+        self._vector_available = True
+        try:
+            from azure.search.documents.indexes import SearchIndexClient
+            idx_client = SearchIndexClient(endpoint=endpoint, credential=AzureKeyCredential(admin_key))
+            idx = idx_client.get_index(index_name)
+            vf = next((f for f in idx.fields if f.name == "content_vector"), None)
+            self._vector_available = bool(vf and getattr(vf, "vector_search_dimensions", None))
+        except Exception:
+            self._vector_available = False
+
         # Initialize vector support
         self.embedder = None
         if VECTOR_SUPPORT and (os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")):
@@ -1207,8 +1218,8 @@ async def get_statistics() -> str:
             "total_documents": doc_count,
             "index_name": os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),
             "features": {
-                "vector_search": True,  # semantic + vector queries enabled (integrated or client-side)
-                "semantic_search": True,
+                "vector_search": bool(getattr(server, "_vector_available", True)),
+                "semantic_search": bool(getattr(server, "_semantic_available", True)),
                 "microsoft_docs": DOCS_SUPPORT,
                 "dependency_resolution": True,
                 "intelligent_filtering": True
