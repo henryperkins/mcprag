@@ -138,6 +138,8 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             from enhanced_rag.core.config import get_config
             self.dimensions = get_config().embedding.dimensions
 
+        self.enabled: bool = True
+
         # Instantiate client
         if self.use_azure:
             # Use AzureOpenAI client for Azure endpoints
@@ -202,6 +204,9 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             combined = combined[:MAX_INPUT_CHARS] + "..."
 
         return self.generate_embedding(combined)
+
+    def is_enabled(self) -> bool:
+        return bool(self.enabled)
 
 
 class NullEmbeddingProvider(IEmbeddingProvider):

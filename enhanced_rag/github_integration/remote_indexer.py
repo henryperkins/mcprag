@@ -61,7 +61,7 @@ class RemoteIndexer:
         self.batch_size = 50
         self.logger = logging.getLogger(__name__)
         
-        # Detect integrated vectorization presence once
+        # Determine if integrated vectorization is configured on target index
         self._integrated_vectors = False
         try:
             from azure.search.documents.indexes import SearchIndexClient

@@ -461,7 +461,7 @@ class EnhancedMCPServer:
             "count": True,  # Include total count
             "top": 50,  # Get more for better filtering
             "select": [
-                "id", "repository", "file_path", "language", "content",
+                "repository", "file_path", "language", "content",
                 "semantic_context", "signature", "imports",
                 "dependencies", "chunk_type", "start_line", "end_line",
                 "function_name", "class_name", "docstring"

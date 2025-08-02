@@ -437,6 +437,8 @@ class EnhancedIndexBuilder:
             )
         )
         
+        # IMPORTANT: vector_search_dimensions must match both indexer-side embedding skill dimensions
+        # (when integrated vectorization is used) and client-side provider.dimensions when used.
         # Vector field for semantic similarity
         fields.append(
             SearchField(

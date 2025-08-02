@@ -37,7 +37,11 @@ class DocumentOperations:
         text fields. No client-side vectorization is needed.
         """
         try:
-            result = self._client(index_name).upload_documents(documents)
+            client = self._client(index_name)
+            if hasattr(client, "merge_or_upload_documents"):
+                result = client.merge_or_upload_documents(documents)
+            else:
+                result = client.upload_documents(documents)
             return {"status": "ok", "result": [r.succeeded for r in result]}
         except Exception as e:
             return {"error": str(e)}

@@ -535,7 +535,7 @@ class IndexerIntegration:
                     source_field_name="metadata_storage_last_modified",
                     target_field_name="last_modified"
                 ),
-                # NEW: best-effort repository mapping (uses container name from blob path)
+                # repository ← container (https://.../container/...), token position 3 is the container name
                 FieldMapping(
                     source_field_name="metadata_storage_path",
                     target_field_name="repository",
@@ -914,15 +914,8 @@ class LocalRepositoryIndexer:
             embed_vectors = self.provider is not None
             
         # If index uses integrated vectorization, do not upload client-side vectors
-        try:
-            from azure.search.documents.indexes import SearchIndexClient
-            idx_client = SearchIndexClient(endpoint=self.endpoint, credential=AzureKeyCredential(self.admin_key))
-            idx = idx_client.get_index(self.index_name)
-            has_vectorizers = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
-            if has_vectorizers:
-                embed_vectors = False
-        except Exception:
-            pass
+        if self._integrated_vectors:
+            embed_vectors = False
             
         total_indexed = 0
         
@@ -1082,20 +1075,12 @@ class LocalRepositoryIndexer:
                     }
                     
                     # Add vector embedding if available and index is not doing integrated vectorization
-                    if self.provider:
-                        try:
-                            from azure.search.documents.indexes import SearchIndexClient
-                            idx_client = SearchIndexClient(endpoint=self.endpoint, credential=AzureKeyCredential(self.admin_key))
-                            idx = idx_client.get_index(self.index_name)
-                            has_vectorizers = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
-                        except Exception:
-                            has_vectorizers = False
-                        if not has_vectorizers:
-                            embedding = self.provider.generate_code_embedding(
-                                chunk["content"], chunk["semantic_context"]
-                            )
-                            if embedding:
-                                doc["content_vector"] = embedding
+                    if self.provider and not self._integrated_vectors:
+                        embedding = self.provider.generate_code_embedding(
+                            chunk["content"], chunk["semantic_context"]
+                        )
+                        if embedding:
+                            doc["content_vector"] = embedding
                             
                     # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
                     if len(doc.get("content", "")) > 20000:

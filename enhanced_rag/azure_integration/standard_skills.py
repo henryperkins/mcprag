@@ -126,7 +126,7 @@ class AzureOpenAIEmbeddingSkill:
         resource_uri: str,
         deployment_id: str,
         model_name: str = "text-embedding-3-large",
-        dimensions: int = 3072
+        dimensions: int = 0
     ):
         """
         Initialize Azure OpenAI Embedding skill
@@ -137,6 +137,9 @@ class AzureOpenAIEmbeddingSkill:
             model_name: Model name (e.g., text-embedding-3-large)
             dimensions: Number of dimensions for embeddings
         """
+        if not dimensions:
+            from enhanced_rag.core.config import get_config
+            dimensions = get_config().embedding.dimensions
         self.resource_uri = resource_uri
         self.deployment_id = deployment_id
         self.model_name = model_name
