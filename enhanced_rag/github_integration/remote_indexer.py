@@ -156,6 +156,10 @@ class RemoteIndexer:
                                 f"Failed to generate embedding for {file_info['path']}"
                             )
                     
+                    # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
+                    if len(doc.get("content", "")) > 20000:
+                        doc["content"] = doc["content"][:20000] + "\n..."
+                        
                     documents.append(doc)
                     
                     # Upload in batches
@@ -258,6 +262,10 @@ class RemoteIndexer:
                         if embedding:
                             doc["content_vector"] = embedding
                     
+                    # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
+                    if len(doc.get("content", "")) > 20000:
+                        doc["content"] = doc["content"][:20000] + "\n..."
+                        
                     documents.append(doc)
                     
             except Exception as e:

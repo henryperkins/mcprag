@@ -446,6 +446,21 @@ class IndexerIntegration:
             
             # Configure field mappings
             field_mappings = self._get_code_field_mappings(data_source_type)
+
+            # Standard skills output mapping (map pages and vectors)
+            from .standard_skills import StandardSkillsetBuilder
+            builder = StandardSkillsetBuilder(
+                azure_openai_endpoint=azure_openai_endpoint,
+                azure_openai_deployment=azure_openai_deployment
+            )
+            output_field_mappings = [
+                OutputFieldMappingEntry(
+                    name=f"map{i}",
+                    source_name=m["sourceFieldName"],
+                    target_name=m["targetFieldName"]
+                )
+                for i, m in enumerate(builder.build_index_mapping())
+            ]
             
             # Configure indexing parameters for code files
             parameters = IndexingParameters(
@@ -480,6 +495,7 @@ class IndexerIntegration:
                 target_index_name=index_name,
                 skillset_name=created_skillset.name,
                 field_mappings=field_mappings,
+                output_field_mappings=output_field_mappings,
                 schedule=schedule,
                 parameters=parameters,
                 description=f"Integrated vectorization indexer for {container_name}"
@@ -519,13 +535,13 @@ class IndexerIntegration:
                     source_field_name="metadata_storage_last_modified",
                     target_field_name="last_modified"
                 ),
-                # NEW: best-effort repository mapping (uses first path segment of metadata_storage_path)
+                # NEW: best-effort repository mapping (uses container name from blob path)
                 FieldMapping(
                     source_field_name="metadata_storage_path",
                     target_field_name="repository",
                     mapping_function=FieldMappingFunction(
                         name="extractTokenAtPosition",
-                        parameters={"delimiter": "/", "position": 0}
+                        parameters={"delimiter": "/", "position": 3}
                     )
                 )
             ]
@@ -986,6 +1002,10 @@ class LocalRepositoryIndexer:
                                     f"Failed to generate embedding for {file_path}"
                                 )
                                 
+                        # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
+                        if len(doc.get("content", "")) > 20000:
+                            doc["content"] = doc["content"][:20000] + "\n..."
+                            
                         documents.append(doc)
                         
                         # Upload in batches
@@ -1061,14 +1081,26 @@ class LocalRepositoryIndexer:
                         **chunk,
                     }
                     
-                    # Add vector embedding if available
+                    # Add vector embedding if available and index is not doing integrated vectorization
                     if self.provider:
-                        embedding = self.provider.generate_code_embedding(
-                            chunk["content"], chunk["semantic_context"]
-                        )
-                        if embedding:
-                            doc["content_vector"] = embedding
+                        try:
+                            from azure.search.documents.indexes import SearchIndexClient
+                            idx_client = SearchIndexClient(endpoint=self.endpoint, credential=AzureKeyCredential(self.admin_key))
+                            idx = idx_client.get_index(self.index_name)
+                            has_vectorizers = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
+                        except Exception:
+                            has_vectorizers = False
+                        if not has_vectorizers:
+                            embedding = self.provider.generate_code_embedding(
+                                chunk["content"], chunk["semantic_context"]
+                            )
+                            if embedding:
+                                doc["content_vector"] = embedding
                             
+                    # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
+                    if len(doc.get("content", "")) > 20000:
+                        doc["content"] = doc["content"][:20000] + "\n..."
+                        
                     documents.append(doc)
                     
             except Exception as e:
