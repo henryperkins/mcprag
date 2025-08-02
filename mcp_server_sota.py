@@ -509,7 +509,7 @@ class EnhancedMCPServer:
         # Build filters
         filters = []
         if repo:
-            filters.append(f"repository eq '{repo}'")
+            filters.append(f"(repository eq '{repo}' or endswith(repository, '/{repo}'))")
         if params.language:
             filters.append(f"language eq '{params.language}'")
 

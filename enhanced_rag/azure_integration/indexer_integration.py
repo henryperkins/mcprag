@@ -518,6 +518,15 @@ class IndexerIntegration:
                 FieldMapping(
                     source_field_name="metadata_storage_last_modified",
                     target_field_name="last_modified"
+                ),
+                # NEW: best-effort repository mapping (uses first path segment of metadata_storage_path)
+                FieldMapping(
+                    source_field_name="metadata_storage_path",
+                    target_field_name="repository",
+                    mapping_function=FieldMappingFunction(
+                        name="extractTokenAtPosition",
+                        parameters={"delimiter": "/", "position": 0}
+                    )
                 )
             ]
         else:
@@ -540,13 +549,12 @@ class IndexerIntegration:
     def _get_code_output_mappings(self) -> List[OutputFieldMappingEntry]:
         """Get output field mappings from skillset to index"""
         return [
-            # Map split pages (string chunks) into 'content'
             OutputFieldMappingEntry(
                 name="map_content",
                 source_name="/document/pages/*",
                 target_name="content"
             ),
-            # Map code analyzer outputs (if present)
+            # Map code analyzer (from WebApiSkill outputs target_name)
             OutputFieldMappingEntry(
                 name="map_functions",
                 source_name="/document/pages/*/functions",
@@ -567,13 +575,16 @@ class IndexerIntegration:
                 source_name="/document/pages/*/complexity_score",
                 target_name="complexity_score"
             ),
-            # KeyPhraseExtraction outputs 'keyPhrases' → map to tags
+            OutputFieldMappingEntry(
+                name="map_patterns",
+                source_name="/document/pages/*/detected_patterns",
+                target_name="detected_patterns"
+            ),
             OutputFieldMappingEntry(
                 name="map_key_phrases",
                 source_name="/document/pages/*/keyPhrases",
                 target_name="tags"
             ),
-            # Embedding skill (custom or standard) should output 'content_vector'
             OutputFieldMappingEntry(
                 name="map_vector",
                 source_name="/document/pages/*/content_vector",
