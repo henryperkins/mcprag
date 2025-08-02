@@ -195,8 +195,8 @@ except Exception:
 
 try:
     from enhanced_rag.semantic.intent_classifier import IntentClassifier  # type: ignore
-    from enhanced_rag.semantic.query_enhancer import QueryEnhancer  # type: ignore
-    from enhanced_rag.semantic.query_rewriter import QueryRewriter  # type: ignore
+    from enhanced_rag.semantic.query_enhancer import ContextualQueryEnhancer  # type: ignore
+    from enhanced_rag.semantic.query_rewriter import MultiVariantQueryRewriter  # type: ignore
     SEMANTIC_TOOLS_AVAILABLE = True
 except Exception:
     IntentClassifier = QueryEnhancer = QueryRewriter = None
@@ -1000,6 +1000,13 @@ async def search_code(
     Returns JSON with items[], total, took_ms, cache_status.
     """
     timer = _Timer()
+    import re as _re
+    auto_exact = None
+    if exact_terms is None and query:
+        quoted = _re.findall(r'"([^"]+)"|\'([^\']+)\'', query)
+        quoted_terms = [t for pair in quoted for t in pair if t]
+        numeric_terms = _re.findall(r'(?<![\w.])(\\d{2,})(?![\w.])', query)
+        auto_exact = [t.strip() for t in (quoted_terms + numeric_terms) if t.strip()]
     params = SearchCodeParams(
         query=query,
         intent=SearchIntent(intent) if intent else None,
@@ -1011,14 +1018,17 @@ async def search_code(
         orderby=orderby,
         highlight_code=highlight_code,
         bm25_only=bm25_only,
-        exact_terms=exact_terms,
+        exact_terms=exact_terms if exact_terms is not None else auto_exact,
         disable_cache=disable_cache
     )
     # Determine cache key and hit before execution
     cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
     cache_hit = (cache_key in server._query_cache and cache_key in server._query_cache_ts and (time.time() - server._query_cache_ts[cache_key]) <= server._ttl_seconds) if not disable_cache and not include_dependencies else False
 
-    results = await server.search_code(params)
+    try:
+        results = await server.search_code(params)
+    except Exception as e:
+        return _err(str(e))
     timer.mark("done")
 
     payload = {
@@ -1029,10 +1039,12 @@ async def search_code(
     }
     durations = timer.durations()
     payload["took_ms"] = durations.get("total", payload["took_ms"])
+    payload["timings_ms"] = durations
     payload["cache_status"] = {
         "hit": cache_hit,
         "ttl_seconds": server._ttl_seconds,
-        "max_entries": server._cache_max_entries
+        "max_entries": server._cache_max_entries,
+        "key": cache_key
     }
     return _ok(payload)
 
@@ -1065,7 +1077,10 @@ async def search_code_raw(
         highlight_code=highlight_code,
         bm25_only=bm25_only
     )
-    results = await server.search_code(params)
+    try:
+        results = await server.search_code(params)
+    except Exception as e:
+        return _err(str(e))
     return _ok({
         "results": [r.model_dump() for r in results],
         "count": len(results),
@@ -1139,7 +1154,6 @@ async def explain_ranking(
         except Exception as e:
             raw_items = []
     else:
-    else:
         # Base ACS path
         params = SearchCodeParams(
             query=query,
@@ -1153,16 +1167,27 @@ async def explain_ranking(
         raw_items = [r.model_dump() for r in base_results]
 
     # Try proper explainer
-    if RESULT_EXPLAINER_AVAILABLE and ENHANCED_RAG_SUPPORT and 'ResultExplainer' in globals():
+    if RESULT_EXPLAINER_AVAILABLE and 'ResultExplainer' in globals():
         try:
             explainer = ResultExplainer()
-            explanations = explainer.explain(raw_items, query=query)
-            return _ok({
-                "mode": mode if ENHANCED_RAG_SUPPORT else "base",
-                "query": query,
-                "explanations": explanations
-            })
-        except Exception as e:
+            out = []
+            for item in raw_items:
+                try:
+                    exp = await explainer.explain_ranking(
+                        result=item,
+                        query=None,
+                        context=None
+                    )
+                    out.append(exp)
+                except Exception:
+                    continue
+            if out:
+                return _ok({
+                    "mode": mode if ENHANCED_RAG_SUPPORT else "base",
+                    "query": query,
+                    "explanations": out
+                })
+        except Exception:
             pass
 
     # Fallback heuristic explanation
@@ -1239,8 +1264,9 @@ async def diagnose_query(
                 include_dependencies=False
             )
             # Try to detect simple cache use
-            cache_key = f"{params.query}:{params.intent}:{params.repository}:{params.language}"
-            cache_hit = cache_key in server._query_cache
+            cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
+            ts = server._query_cache_ts.get(cache_key)
+            cache_hit = (cache_key in server._query_cache and ts is not None and (time.time() - ts) <= server._ttl_seconds)
             res = await server.search_code(params)
             timer.mark("base_search")
             out = {
@@ -1276,18 +1302,15 @@ async def preview_query_processing(
             rewrites = []
             rules = []
             try:
-                enhancer = QueryEnhancer()
-                enhanced = enhancer.enhance(query, intent=detected or intent, language=language)
+                enhancer = ContextualQueryEnhancer()
+                enhanced = await enhancer.enhance_query(query, context=None, intent=(detected or intent))
                 enhancements = enhanced or {}
             except Exception:
                 pass
             try:
-                rewriter = QueryRewriter()
-                rw = rewriter.rewrite(query, intent=detected or intent, language=language)
-                if isinstance(rw, dict):
-                    rewrites = rw.get("rewrites", [])
-                    rules = rw.get("applied_rules", [])
-                elif isinstance(rw, list):
+                rewriter = MultiVariantQueryRewriter()
+                rw = await rewriter.rewrite_query(query, intent=(detected or intent))
+                if isinstance(rw, list):
                     rewrites = rw
             except Exception:
                 pass
