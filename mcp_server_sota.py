@@ -328,6 +328,18 @@ class EnhancedMCPServer:
                     logger.info(f"Vector search enabled with {self.embedder.dimensions} dimensions")
                 else:
                     logger.info("Vector search enabled")
+                
+                # Check for vector dimension mismatch
+                try:
+                    from azure.search.documents.indexes import SearchIndexClient
+                    idx_client = SearchIndexClient(endpoint=endpoint, credential=AzureKeyCredential(admin_key))
+                    idx = idx_client.get_index(index_name)
+                    vf = next((f for f in idx.fields if f.name == "content_vector"), None)
+                    if vf and getattr(vf, "vector_search_dimensions", None) and hasattr(self.embedder, "dimensions") and self.embedder.dimensions:
+                        if vf.vector_search_dimensions != self.embedder.dimensions:
+                            logger.warning("Vector dim mismatch: index=%s, client=%s", vf.vector_search_dimensions, self.embedder.dimensions)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.warning("Vector search unavailable: %s", e)
 
@@ -442,7 +454,7 @@ class EnhancedMCPServer:
         """Build optimized search parameters"""
         # Note: vector_queries expects a Sequence[VectorizedQuery] at runtime.
         # Some type checkers flag list[VectorizedQuery] for invariance; we use Sequence for compatibility.
-        params: Dict[str, Any] = {
+        search_params: Dict[str, Any] = {
             "search_text": query,
             "query_type": "semantic",
             "semantic_configuration_name": "semantic-config",
@@ -464,7 +476,7 @@ class EnhancedMCPServer:
                     k_nearest_neighbors=50,
                     fields="content_vector"
                 )
-                params["vector_queries"] = [vector_query]
+                search_params["vector_queries"] = [vector_query]
             except Exception as e:
                 # Fallback to client-side embedding if available
                 if self.embedder:
@@ -476,7 +488,7 @@ class EnhancedMCPServer:
                                 k_nearest_neighbors=50,
                                 fields="content_vector"
                             )
-                            params["vector_queries"] = [vector_query]
+                            search_params["vector_queries"] = [vector_query]
                     except:
                         pass
         else:
@@ -490,7 +502,7 @@ class EnhancedMCPServer:
                             k_nearest_neighbors=50,
                             fields="content_vector"
                         )
-                        params["vector_queries"] = [vector_query]
+                        search_params["vector_queries"] = [vector_query]
                 except:
                     pass
 
@@ -502,23 +514,23 @@ class EnhancedMCPServer:
             filters.append(f"language eq '{params.language}'")
 
         if filters:
-            params["filter"] = " and ".join(filters)
+            search_params["filter"] = " and ".join(filters)
 
         # Add pagination support
         if params.skip > 0:
-            params["skip"] = params.skip
+            search_params["skip"] = params.skip
 
         # Add ordering support
         if params.orderby:
-            params["orderby"] = params.orderby
+            search_params["orderby"] = params.orderby
 
         # Add hit highlighting
         if params.highlight_code:
-            params["highlight"] = "content,semantic_context,docstring,function_name"
-            params["highlightPreTag"] = "<mark>"
-            params["highlightPostTag"] = "</mark>"
+            search_params["highlight"] = "content,semantic_context,docstring,function_name"
+            search_params["highlightPreTag"] = "<mark>"
+            search_params["highlightPostTag"] = "</mark>"
 
-        return params
+        return search_params
 
     def _filter_and_rank_results(self, results: List[Dict], query: str, repo: Optional[str]) -> List[Dict]:
         """Apply intelligent filtering and custom ranking"""
@@ -1515,7 +1527,8 @@ async def github_index_repo(
     try:
         owner, repo_name = repo.split('/')
         indexer = RemoteIndexer()
-        result = await indexer.index_remote_repository(owner, repo_name, ref=branch)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, lambda: indexer.index_remote_repository(owner, repo_name, ref=branch))
         return _ok({"repo": repo, "branch": branch, "mode": mode, "result": result})
     except Exception as e:
         return _err(str(e))

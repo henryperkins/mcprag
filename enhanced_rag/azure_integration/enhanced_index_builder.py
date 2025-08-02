@@ -140,13 +140,7 @@ class EnhancedIndexBuilder:
 
         # Attach synonym map names to relevant fields if present
         for f in fields:
-            if isinstance(f, SearchableField) and f.name in (
-                "function_name",
-                "class_name",
-                "tags",
-                "content",
-                "docstring",
-            ):
+            if f.name in ("function_name", "class_name", "tags", "content", "docstring"):
                 # ensure synonym map list exists and include code_synonyms
                 current = getattr(f, "synonym_map_names", None) or []
                 if "code_synonyms" not in current:
@@ -388,38 +382,7 @@ class EnhancedIndexBuilder:
             )
         )
         
-        # Metadata fields (filterable/facetable)
-        fields.append(
-            SimpleField(
-                name="file_path",
-                type=SearchFieldDataType.String,
-                filterable=True,
-                sortable=True,
-                facetable=True,
-                retrievable=True
-            )
-        )
-        
-        fields.append(
-            SimpleField(
-                name="file_name",
-                type=SearchFieldDataType.String,
-                filterable=True,
-                facetable=True,
-                retrievable=True
-            )
-        )
-        
-        fields.append(
-            SimpleField(
-                name="language",
-                type=SearchFieldDataType.String,
-                filterable=True,
-                facetable=True,
-                retrievable=True
-            )
-        )
-        
+        # Framework field
         fields.append(
             SimpleField(
                 name="framework",
@@ -430,40 +393,10 @@ class EnhancedIndexBuilder:
             )
         )
         
-        fields.append(
-            SimpleField(
-                name="repository",
-                type=SearchFieldDataType.String,
-                filterable=True,
-                facetable=True,
-                retrievable=True
-            )
-        )
-        
         # Scoring-related fields
         fields.append(
             SimpleField(
-                name="last_modified",
-                type=SearchFieldDataType.DateTimeOffset,
-                filterable=True,
-                sortable=True,
-                retrievable=True
-            )
-        )
-        
-        fields.append(
-            SimpleField(
                 name="complexity_score",
-                type=SearchFieldDataType.Double,
-                filterable=True,
-                sortable=True,
-                retrievable=True
-            )
-        )
-        
-        fields.append(
-            SimpleField(
-                name="quality_score",
                 type=SearchFieldDataType.Double,
                 filterable=True,
                 sortable=True,

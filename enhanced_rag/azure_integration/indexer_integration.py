@@ -145,21 +145,18 @@ class IndexerIntegration:
                 interval=timedelta(minutes=max(schedule_interval_minutes, 5))
             ) if schedule_interval_minutes > 0 else None
             
-            # Create the indexer (assign output mappings after instantiation to
-            # avoid type variance complaints)
+            # Create the indexer
             indexer = SearchIndexer(
                 name=name,
                 data_source_name=data_source.name,
                 target_index_name=index_name,
                 skillset_name=skillset.name if skillset else None,
                 field_mappings=field_mappings,
+                output_field_mappings=output_field_mappings,
                 schedule=schedule,
                 parameters=parameters,
                 description=f"Code repository indexer for {container_name}"
             )
-            # Note: Some SDK versions expose 'output_field_mappings' with a type
-            # that conflicts under static type checking. We omit it here to keep
-            # type checkers happy; skill outputs target fields directly.
 
             # Create or update the indexer
             result = self.indexer_client.create_or_update_indexer(indexer)
