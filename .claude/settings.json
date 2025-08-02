@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "search_code"
+    ],
+    "deny": []
+  }
+}

@@ -395,6 +395,57 @@ Key points include:
     - Add new vector configurations, assigned to new fields but not existing fields that are already vectorized.
     - Change `retrievable` (values are true or false) on an existing field. Vector fields must be searchable and retrievable, but if you want to disable access to a vector field in situations where drop and rebuild isn't feasible, you can set retrievable to false.
 
+## Expected Index Schema (Canonical) for MCP Server
+
+The MCP server expects these canonical field names in your Azure Cognitive Search index. A field-mapping layer provides backward compatibility with older schemas, but aligning to these names is recommended.
+
+Required fields:
+- repository (filterable)
+- file_path (filterable)
+- language (filterable)
+- content (searchable)
+
+Recommended/optional fields:
+- content_vector (Collection(Edm.Single), vector profile attached)
+- function_name (searchable, filterable)
+- class_name (searchable, filterable)
+- signature
+- imports (Collection(String), searchable)
+- dependencies (Collection(String))
+- semantic_context (searchable)
+- start_line (Int32)
+- end_line (Int32)
+- docstring (searchable)
+- chunk_type (filterable)
+- last_modified (Edm.DateTimeOffset)
+
+### Backward-compatible Field Mapping
+
+The server will automatically normalize the following legacy/alternate names:
+
+- repository ⇄ repo
+- file_path ⇄ path
+- content ⇄ code_chunk, code_content
+- imports ⇄ imports_used
+- dependencies ⇄ calls_functions
+- signature ⇄ function_signature
+
+If optional fields are missing, search still works with available fields (graceful degradation). Repository filters are removed automatically when the repository field is not present.
+
+### Startup Schema Validation
+
+On startup, the server queries the index definition and validates required fields. If any are missing, the server fails fast with an explicit error listing the missing fields. This prevents runtime 400s and hard-to-debug failures.
+
+### Create/Validate the Index
+
+Use the enhanced index builder:
+
+```bash
+python index/create_enhanced_index.py
+```
+
+This creates index "codebase-mcp-sota" with vectors and semantic search enabled and validates that required fields exist.
+
 ## Next steps
 
 As a next step, we recommend [Create a vector query](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query).

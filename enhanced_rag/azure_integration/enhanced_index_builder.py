@@ -138,13 +138,15 @@ class EnhancedIndexBuilder:
             ),
         )
 
-        # Attach synonym map names to relevant fields if present
+        # Attach synonym map names ONLY to searchable fields per service rules
         for f in fields:
-            if f.name in ("function_name", "class_name", "tags", "content", "docstring"):
-                # ensure synonym map list exists and include code_synonyms
+            # Only SearchableField types can carry synonym maps
+            searchable_names = ("function_name", "class_name", "content", "docstring", "comments", "semantic_context")
+            if f.name in searchable_names:
                 current = getattr(f, "synonym_map_names", None) or []
-                if "code_synonyms" not in current:
-                    current.append("code_synonyms")
+                # use compliant synonym map name; will be ensured to exist before index creation
+                if "code-synonyms" not in current:
+                    current.append("code-synonyms")
                 f.synonym_map_names = current
 
         # Create the index
@@ -160,21 +162,36 @@ class EnhancedIndexBuilder:
             cors_options=cors_options,
             e_tag=None
         )
-        # Wire the synonym map at index level (name reference)
+        # Ensure field-level synonym_map_names are compliant with service constraints
+        # Azure requires synonym map names to be lowercase letters, digits, or dashes.
+        compliant_synonym_name = "code-synonyms"
         try:
-            # Some SDK versions expose index.synonym_maps; if not, index service will associate by field reference
-            if hasattr(index, "synonym_maps"):
-                index.synonym_maps = [code_synonyms.name]
+            for f in index.fields or []:
+                names = getattr(f, "synonym_map_names", None)
+                if names:
+                    # Replace any non-compliant or different name with the compliant one
+                    f.synonym_map_names = [compliant_synonym_name for _ in names]
         except Exception:
             pass
         
         # SDK lacks a typed 'description' field on SearchIndex; skipping.
         
         try:
-            # Ensure synonym map exists/updated before index (idempotent)
+            # Ensure synonym map exists/updated before index (idempotent) with compliant name
+            from azure.search.documents.indexes.models import SynonymMap as _SynonymMap  # import at outer scope of try
             try:
-                self.index_client.create_or_update_synonym_map(code_synonyms)
-                logger.info("Upserted synonym map 'code_synonyms'")
+                synonyms = "\n".join(
+                    [
+                        "func, function, method, procedure",
+                        "err, error, exception",
+                        "init, initialize, constructor, ctor",
+                        "auth, authenticate, authorization, authorize",
+                        "db, database, storage",
+                    ]
+                )
+                compliant_synonym = _SynonymMap(name="code-synonyms", synonyms=synonyms)
+                self.index_client.create_or_update_synonym_map(compliant_synonym)
+                logger.info("Upserted synonym map 'code-synonyms'")
             except Exception as syn_err:
                 logger.warning(f"Synonym map upsert warning: {syn_err}")
             result = self.index_client.create_or_update_index(index)
@@ -732,10 +749,11 @@ class EnhancedIndexBuilder:
     
     def _build_suggesters(self) -> List[SearchSuggester]:
         """Build suggesters for autocomplete"""
+        # Ensure suggester only references existing fields in this schema
         return [
             SearchSuggester(
                 name="code_suggester",
-                source_fields=["function_name", "class_name", "file_name"]
+                source_fields=["function_name", "class_name", "file_path"]
             )
         ]
     
@@ -989,7 +1007,7 @@ class EnhancedIndexBuilder:
     def build_index(
         self,
         index_name: str,
-        vector_dimensions: int = 3072,
+        vector_dimensions: int = 1536,
         enable_integrated_vectorization: bool = True,
         azure_openai_endpoint: Optional[str] = None,
         azure_openai_deployment: Optional[str] = None
@@ -1136,14 +1154,14 @@ class EnhancedIndexBuilder:
         vectorizer_name = None
         
         if enable_integrated_vectorization and azure_openai_endpoint:
-            vectorizer_name = "text-embedding-3-large-vectorizer"
+            vectorizer_name = "vectorizer-1753995386159"
             vectorizers.append(
                 AzureOpenAIVectorizer(
                     name=vectorizer_name,
                     parameters={
                         "resourceUri": azure_openai_endpoint,
-                        "deploymentId": azure_openai_deployment or "text-embedding-3-large",
-                        "modelName": "text-embedding-3-large"
+                        "deploymentId": azure_openai_deployment or "text-embedding-ada-002",
+                        "modelName": "text-embedding-ada-002"
                     }
                 )
             )

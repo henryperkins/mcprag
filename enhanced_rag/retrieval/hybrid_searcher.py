@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 from azure.search.documents import SearchClient
 from azure.search.documents.models import (
-    QueryCaptionType, QueryAnswerType, SemanticConfiguration,
     VectorizedQuery,
     VectorizableTextQuery,
     QueryType,
@@ -35,6 +34,43 @@ class HybridSearcher:
     """
     Implements hybrid search combining vector similarity and keyword matching
     """
+
+    def _sanitize_search_kwargs(self, params: dict) -> dict:
+        """
+        Compatibility shim:
+        - Map legacy 'count' -> 'include_total_count'
+        - Whitelist only supported SDK kwargs
+        - Drop unknown keys to avoid passing unexpected HTTP params
+        """
+        if not params:
+            return {}
+        out = {}
+        for k, v in params.items():
+            if k == "count":
+                out["include_total_count"] = bool(v)
+            elif k in {
+                "search_text",
+                "query_type",
+                "semantic_configuration_name",
+                "query_caption",
+                "query_answer",
+                "filter",
+                "top",
+                "include_total_count",
+                "disable_randomization",
+                "timeout",
+                "vector_queries",
+                "facets",
+                "highlight_fields",
+                "highlight_pre_tag",
+                "highlight_post_tag",
+                "scoring_profile",
+                "scoring_parameters",
+                "search_fields",
+            }:
+                if v is not None:
+                    out[k] = v
+        return out
 
     def __init__(
         self,
@@ -105,18 +141,19 @@ class HybridSearcher:
 
         kw_sem_results: List[HybridSearchResult] = []
         try:
-            kw_sem = self.search_client.search(
-                search_text=query,
-                query_type=QueryType.SEMANTIC,
-                semantic_configuration_name="semantic-config",
-                query_caption="extractive",
-                query_answer="extractive",
-                filter=filter_expr,
-                top=top_k * 2,
-                include_total_count=include_total_count,
-                disable_randomization=True,  # deterministic
-                timeout=(deadline_ms / 1000) if deadline_ms else None,
-            )
+            kw_sem_kwargs = self._sanitize_search_kwargs({
+                "search_text": query,
+                "query_type": QueryType.SEMANTIC,
+                "semantic_configuration_name": "semantic-config",
+                "query_caption": "extractive",
+                "query_answer": "extractive",
+                "filter": filter_expr,
+                "top": top_k * 2,
+                "include_total_count": include_total_count,
+                "disable_randomization": True,  # deterministic
+                "timeout": (deadline_ms / 1000) if deadline_ms else None,
+            })
+            kw_sem = self.search_client.search(**kw_sem_kwargs)
             kw_sem_results = self._process_results(kw_sem)
         except Exception as e:
             logger.warning("Keyword/Semantic path failed – %s", e)
@@ -134,14 +171,15 @@ class HybridSearcher:
                 k_nearest_neighbors=top_k * 2,
                 fields="content_vector",
             )
-            vec = self.search_client.search(
-                search_text="",
-                vector_queries=[vq],
-                filter=filter_expr,
-                top=top_k * 2,
-                include_total_count=False,
-                timeout=(deadline_ms / 1000) if deadline_ms else None,
-            )
+            vec_kwargs = self._sanitize_search_kwargs({
+                "search_text": "",
+                "vector_queries": [vq],
+                "filter": filter_expr,
+                "top": top_k * 2,
+                "include_total_count": False,
+                "timeout": (deadline_ms / 1000) if deadline_ms else None,
+            })
+            vec = self.search_client.search(**vec_kwargs)
             vec_results = self._process_results(vec)
         except Exception as e:
             logger.warning("Vector path failed – %s", e)
@@ -234,21 +272,21 @@ class HybridSearcher:
             except Exception:
                 scoring_profile = "code_quality_boost"
             enable_semantic = True
-            results = with_retry(
-                self.search_client.search,
-                search_text=query,
-                query_type=QueryType.SEMANTIC if enable_semantic else QueryType.SIMPLE,
-                semantic_configuration_name="semantic-config" if enable_semantic else None,
-                scoring_profile=scoring_profile,
-                filter=filter_expr,
-                facets=["language,count:20", "repository,count:20", "tags,count:20"],
-                query_caption="extractive" if enable_semantic else None,
-                query_answer="extractive" if enable_semantic else None,
-                highlight_fields="content,docstring",
-                include_total_count=True,
-                top=top_k,
-                search_fields=["content", "function_name", "class_name", "docstring"]
-            )
+            kw_kwargs = self._sanitize_search_kwargs({
+                "search_text": query,
+                "query_type": QueryType.SEMANTIC if enable_semantic else QueryType.SIMPLE,
+                "semantic_configuration_name": "semantic-config" if enable_semantic else None,
+                "scoring_profile": scoring_profile,
+                "filter": filter_expr,
+                "facets": ["language,count:20", "repository,count:20", "tags,count:20"],
+                "query_caption": "extractive" if enable_semantic else None,
+                "query_answer": "extractive" if enable_semantic else None,
+                "highlight_fields": "content,docstring",
+                "include_total_count": True,
+                "top": top_k,
+                "search_fields": ["content", "function_name", "class_name", "docstring"],
+            })
+            results = with_retry(self.search_client.search, **kw_kwargs)
             return self._process_results(results)
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")

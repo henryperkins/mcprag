@@ -23,12 +23,30 @@
 - Added proper field extraction (function_name, class_name, docstring)
 - Fixed line number handling
 
-### 4. **MCP Server**
-- Added missing logging import
-- Updated search select fields to canonical names
-- Fixed repository filter field name
-- Updated result mapping to handle both old and new field names
-- Fixed semantic configuration name
+### 4. MCP Server (mcp_server_sota.py) schema hardening
+
+- Immediate field fix: server now uses canonical names with mapping
+  - repository/repo normalized to `repository`
+  - file_path/path normalized to `file_path`
+- Startup schema validation:
+  - On server init we read index schema and validate required fields: `repository`, `file_path`, `language`, `content`
+  - If required fields are missing the server fails fast with a clear error
+- Field mapping layer:
+  - Version-aware mapper supports older/alternate names:
+    - repository: ["repository","repo"]
+    - file_path: ["file_path","path"]
+    - content: ["content","code_chunk","code_content"]
+    - imports: ["imports","imports_used"]
+    - dependencies: ["dependencies","calls_functions"]
+    - signature: ["signature","function_signature"]
+  - Graceful degradation when optional fields are absent (defaults applied)
+- Query building:
+  - select list built from live index schema via FieldMapper to avoid 400s
+  - repository filter is automatically removed if the field is unavailable
+- Result conversion:
+  - All field access routes through FieldMapper; highlights preserved
+- Semantic/vector:
+  - Existing logic retained; vector queries only added when available
 
 ### 5. **IndexerIntegration**
 - Implemented _create_data_source for AZURE_BLOB and COSMOS_DB

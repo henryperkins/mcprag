@@ -1,0 +1,548 @@
+{
+  "name": "codebase-mcp-sota",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "filterable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "content",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "en.microsoft",
+      "synonymMaps": ["code-synonyms"]
+    },
+    {
+      "name": "title",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "analyzer": "en.microsoft"
+    },
+    {
+      "name": "description",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "en.microsoft"
+    },
+    {
+      "name": "code_content",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "code_content_analyzer"
+    },
+    {
+      "name": "repository",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "file_path",
+      "type": "Edm.String",
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false
+    },
+    {
+      "name": "file_extension",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "language",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "last_modified",
+      "type": "Edm.DateTimeOffset",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "size_bytes",
+      "type": "Edm.Int64",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "quality_score",
+      "type": "Edm.Double",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "chunk_id",
+      "type": "Edm.String",
+      "filterable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "semantic_context",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "synonymMaps": ["code-synonyms"]
+    },
+    {
+      "name": "chunk_type",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "function_name",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": true,
+      "facetable": true,
+      "sortable": false,
+      "synonymMaps": ["code-synonyms"]
+    },
+    {
+      "name": "class_name",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": true,
+      "facetable": true,
+      "sortable": false,
+      "synonymMaps": ["code-synonyms"]
+    },
+    {
+      "name": "imports",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "dependencies",
+      "type": "Collection(Edm.String)",
+      "retrievable": true,
+      "searchable": false,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "docstring",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "en.microsoft",
+      "synonymMaps": ["code-synonyms"]
+    },
+    {
+      "name": "signature",
+      "type": "Edm.String",
+      "retrievable": true,
+      "searchable": false,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "comments",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "en.microsoft",
+      "synonymMaps": ["code-synonyms"]
+    },
+    {
+      "name": "framework",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "complexity_score",
+      "type": "Edm.Double",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "test_coverage",
+      "type": "Edm.Double",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "reference_count",
+      "type": "Edm.Int32",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "tags",
+      "type": "Collection(Edm.String)",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "content_vector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "retrievable": false,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "dimensions": 1536,
+      "vectorSearchProfile": "vector-profile-hnsw"
+    },
+    {
+      "name": "start_line",
+      "type": "Edm.Int32",
+      "filterable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "end_line",
+      "type": "Edm.Int32",
+      "filterable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "git_branch",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "git_commit",
+      "type": "Edm.String",
+      "filterable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "git_commit_count",
+      "type": "Edm.Int32",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "git_last_modified",
+      "type": "Edm.DateTimeOffset",
+      "filterable": true,
+      "sortable": true,
+      "retrievable": true,
+      "searchable": false,
+      "facetable": false
+    },
+    {
+      "name": "git_authors",
+      "type": "Collection(Edm.String)",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "detected_patterns",
+      "type": "Collection(Edm.String)",
+      "filterable": true,
+      "facetable": true,
+      "retrievable": true,
+      "searchable": false,
+      "sortable": false
+    },
+    {
+      "name": "intent_keywords",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "retrievable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "hnsw-config",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "m": 12,
+          "efConstruction": 300,
+          "efSearch": 120,
+          "metric": "cosine"
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "vector-profile-hnsw",
+        "algorithmConfigurationName": "hnsw-config",
+        "vectorizerName": "text-embedding-3-large-vectorizer"
+      }
+    ],
+    "vectorizers": [
+      {
+        "name": "text-embedding-3-large-vectorizer",
+        "kind": "azureOpenAI",
+        "azureOpenAIParameters": {
+          "resourceUri": "${AZURE_OPENAI_ENDPOINT}",
+          "deploymentId": "${AZURE_OPENAI_DEPLOYMENT_NAME}",
+          "modelName": "text-embedding-3-large"
+        }
+      }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "semantic-config",
+        "prioritizedFields": {
+          "titleField": {
+            "fieldName": "function_name"
+          },
+          "contentFields": [
+            {
+              "fieldName": "content"
+            },
+            {
+              "fieldName": "docstring"
+            }
+          ],
+          "keywordsFields": [
+            {
+              "fieldName": "tags"
+            },
+            {
+              "fieldName": "language"
+            },
+            {
+              "fieldName": "framework"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "scoringProfiles": [
+    {
+      "name": "code_quality_boost",
+      "textWeights": {
+        "function_name": 3.0,
+        "class_name": 2.5,
+        "content": 2.0,
+        "docstring": 1.5,
+        "comments": 1.0
+      },
+      "functions": [
+        {
+          "fieldName": "quality_score",
+          "interpolation": "linear",
+          "type": "magnitude",
+          "boost": 2.0,
+          "magnitude": {
+            "boostingRangeStart": 0.7,
+            "boostingRangeEnd": 1.0
+          }
+        },
+        {
+          "fieldName": "test_coverage",
+          "interpolation": "linear",
+          "type": "magnitude",
+          "boost": 1.5,
+          "magnitude": {
+            "boostingRangeStart": 0.8,
+            "boostingRangeEnd": 1.0
+          }
+        }
+      ],
+      "functionAggregation": "sum"
+    },
+    {
+      "name": "freshness_boost",
+      "textWeights": {
+        "content": 2.0,
+        "function_name": 2.0
+      },
+      "functions": [
+        {
+          "fieldName": "last_modified",
+          "interpolation": "linear",
+          "type": "freshness",
+          "boost": 2.5,
+          "freshness": {
+            "boostingDuration": "P30D"
+          }
+        }
+      ],
+      "functionAggregation": "sum"
+    },
+    {
+      "name": "popularity_boost",
+      "functions": [
+        {
+          "fieldName": "reference_count",
+          "interpolation": "logarithmic",
+          "type": "magnitude",
+          "boost": 2.0,
+          "magnitude": {
+            "boostingRangeStart": 5,
+            "boostingRangeEnd": 100,
+            "shouldBoostBeyondRangeByConstant": true
+          }
+        }
+      ],
+      "functionAggregation": "sum"
+    },
+    {
+      "name": "tag_boost",
+      "functions": [
+        {
+          "fieldName": "tags",
+          "interpolation": "linear",
+          "type": "tag",
+          "boost": 3.0,
+          "tag": {
+            "tagsParameter": "boosttags"
+          }
+        }
+      ],
+      "functionAggregation": "sum"
+    }
+  ],
+  "defaultScoringProfile": "code_quality_boost",
+  "suggesters": [
+    {
+      "name": "code_suggester",
+      "searchMode": "analyzingInfixMatching",
+      "sourceFields": [
+        "function_name",
+        "class_name",
+        "file_path"
+      ]
+    }
+  ],
+  "analyzers": [
+    {
+      "name": "code_content_analyzer",
+      "tokenizer": "whitespace",
+      "tokenFilters": [
+        "lowercase",
+        "stop"
+      ]
+    },
+    {
+      "name": "code_identifier_analyzer",
+      "tokenizer": "pattern",
+      "tokenFilters": [
+        "lowercase"
+      ]
+    },
+    {
+      "name": "import_path_analyzer",
+      "tokenizer": "path_hierarchy",
+      "tokenFilters": [
+        "lowercase"
+      ]
+    }
+  ],
+  "synonymMaps": [
+    {
+      "name": "code-synonyms",
+      "synonyms": "func,function,method,procedure\nerr,error,exception\ninit,initialize,constructor,ctor\nauth,authenticate,authorization,authorize\ndb,database,storage"
+    }
+  ],
+  "corsOptions": {
+    "allowedOrigins": ["*"],
+    "maxAgeInSeconds": 300
+  }
+}
