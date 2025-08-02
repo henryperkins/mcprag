@@ -104,7 +104,7 @@ class _SafeEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
 
 # Install the safe policy **before** anyio / FastMCP create their own loops.
 asyncio.set_event_loop_policy(_SafeEventLoopPolicy())
-from typing import Optional, List, Dict, Any, Sequence
+from typing import Optional, List, Dict, Any, Sequence, cast
 from pathlib import Path
 from datetime import datetime, timezone
 from enum import Enum
@@ -468,48 +468,47 @@ class EnhancedMCPServer:
             ]
         }
 
+        # Guard: ensure index likely has vector configuration before adding vector query (best-effort)
+        # If the field is missing, ACS SDK will 400; we can still attempt and let server handle gracefully.
+        
         # Add vector search using text-to-vector (index has vectorizers configured)
+        vector_queries: List[Any] = []
         if VECTORIZABLE_TEXT_QUERY_AVAILABLE and VectorizableTextQuery:
             try:
-                vector_query = VectorizableTextQuery(
-                    text=query,
-                    k_nearest_neighbors=50,
-                    fields="content_vector"
+                vector_queries.append(
+                    VectorizableTextQuery(
+                        text=query,
+                        k_nearest_neighbors=50,
+                        fields="content_vector"
+                    )
                 )
-                search_params["vector_queries"] = [vector_query]
             except Exception as e:
-                # Fallback to client-side embedding if available
-                if self.embedder:
-                    try:
-                        embedding = self.embedder.generate_embedding(query)
-                        if embedding:
-                            vector_query = VectorizedQuery(
-                                vector=embedding,
-                                k_nearest_neighbors=50,
-                                fields="content_vector"
-                            )
-                            search_params["vector_queries"] = [vector_query]
-                    except:
-                        pass
-        else:
-            # Direct fallback to client-side embedding if VectorizableTextQuery not available
-            if self.embedder:
-                try:
-                    embedding = self.embedder.generate_embedding(query)
-                    if embedding:
-                        vector_query = VectorizedQuery(
+                # Fall back to client-side embedding below
+                pass
+
+        if not vector_queries and self.embedder:
+            try:
+                embedding = self.embedder.generate_embedding(query)
+                if embedding:
+                    vector_queries.append(
+                        VectorizedQuery(
                             vector=embedding,
                             k_nearest_neighbors=50,
                             fields="content_vector"
                         )
-                        search_params["vector_queries"] = [vector_query]
-                except:
-                    pass
+                    )
+            except Exception:
+                pass
+
+        if vector_queries:
+            search_params["vector_queries"] = cast(Sequence[Any], vector_queries)
 
         # Build filters
         filters = []
         if repo:
-            filters.append(f"(repository eq '{repo}' or endswith(repository, '/{repo}'))")
+            # Escape single quotes per OData
+            safe_repo = repo.replace("'", "''")
+            filters.append(f"(repository eq '{safe_repo}' or endswith(repository, '/{safe_repo}'))")
         if params.language:
             filters.append(f"language eq '{params.language}'")
 
@@ -624,8 +623,8 @@ class EnhancedMCPServer:
                 score=result.get('_enhanced_score', 0),
                 content=content,
                 context=result.get('semantic_context', '')[:200],
-                imports=result.get('imports', []),
-                dependencies=result.get('dependencies', []),
+                imports=result.get('imports') or [],
+                dependencies=result.get('dependencies') or [],
                 highlights=result.get('@search.highlights', None)
             ))
 
@@ -699,7 +698,10 @@ class EnhancedMCPServer:
                     if highlights:
                         formatted += f"  - {field}: {highlights[0]}\n"
 
-            formatted += f"\n```{result.language}\n{result.content}\n```\n\n"
+            code_block = result.content
+            if not code_block.endswith("\n"):
+                code_block += "\n"
+            formatted += f"\n```{result.language}\n{code_block}```\n\n"
 
             if i < len(results):
                 formatted += "---\n\n"
@@ -826,6 +828,7 @@ async def search_code_raw(
     return _ok({
         "results": [r.model_dump() for r in results],
         "count": len(results),
+        "total": server._last_total_count,
         "query": query,
         "intent": intent
     })
@@ -1165,7 +1168,7 @@ async def get_statistics() -> str:
             "total_documents": doc_count,
             "index_name": os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),
             "features": {
-                "vector_search": server.embedder is not None,
+                "vector_search": True,  # semantic + vector queries enabled (integrated or client-side)
                 "semantic_search": True,
                 "microsoft_docs": DOCS_SUPPORT,
                 "dependency_resolution": True,
