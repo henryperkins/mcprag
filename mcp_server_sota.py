@@ -262,6 +262,8 @@ class SearchCodeParams(BaseModel):
     skip: int = Field(0, ge=0, description="Number of results to skip for pagination")
     orderby: Optional[str] = Field(None, description="Sort order (e.g., 'last_modified desc')")
     highlight_code: bool = Field(False, description="Enable hit highlighting in code results")
+    bm25_only: bool = Field(False, description="Force basic BM25 (keyword) search only")
+    query_type: Optional[str] = Field(None, description="Override Azure query_type (simple|full|semantic)")
 
 class SearchResult(BaseModel):
     file_path: str
@@ -317,6 +319,16 @@ class EnhancedMCPServer:
             index_name=index_name,
             credential=AzureKeyCredential(admin_key)
         )
+
+        # Auto-detect semantic availability
+        self._semantic_available = True
+        try:
+            from azure.search.documents.indexes import SearchIndexClient
+            idx_client = SearchIndexClient(endpoint=endpoint, credential=AzureKeyCredential(admin_key))
+            idx = idx_client.get_index(index_name)
+            self._semantic_available = bool(getattr(idx, "semantic_search", None))
+        except Exception:
+            self._semantic_available = False
 
         # Initialize vector support
         self.embedder = None
@@ -454,10 +466,10 @@ class EnhancedMCPServer:
         """Build optimized search parameters"""
         # Note: vector_queries expects a Sequence[VectorizedQuery] at runtime.
         # Some type checkers flag list[VectorizedQuery] for invariance; we use Sequence for compatibility.
+        use_semantic = (not getattr(params, "bm25_only", False)) and getattr(self, "_semantic_available", False)
+        
         search_params: Dict[str, Any] = {
             "search_text": query,
-            "query_type": "semantic",
-            "semantic_configuration_name": "semantic-config",
             "count": True,  # Include total count
             "top": 50,  # Get more for better filtering
             "select": [
@@ -467,41 +479,55 @@ class EnhancedMCPServer:
                 "function_name", "class_name", "docstring"
             ]
         }
+        
+        # Apply query_type override if provided
+        if getattr(params, "query_type", None):
+            search_params["query_type"] = params.query_type
+            # Only set semantic_configuration_name if semantic chosen and available
+            if params.query_type == "semantic" and getattr(self, "_semantic_available", False):
+                search_params["semantic_configuration_name"] = "semantic-config"
+            # If user forces 'full', do not add semantic or vector queries
+            if params.query_type != "semantic":
+                use_semantic = False
+        elif use_semantic:
+            search_params["query_type"] = "semantic"
+            search_params["semantic_configuration_name"] = "semantic-config"
 
         # Guard: ensure index likely has vector configuration before adding vector query (best-effort)
         # If the field is missing, ACS SDK will 400; we can still attempt and let server handle gracefully.
         
-        # Add vector search using text-to-vector (index has vectorizers configured)
-        vector_queries: List[Any] = []
-        if VECTORIZABLE_TEXT_QUERY_AVAILABLE and VectorizableTextQuery:
-            try:
-                vector_queries.append(
-                    VectorizableTextQuery(
-                        text=query,
-                        k_nearest_neighbors=50,
-                        fields="content_vector"
-                    )
-                )
-            except Exception as e:
-                # Fall back to client-side embedding below
-                pass
-
-        if not vector_queries and self.embedder:
-            try:
-                embedding = self.embedder.generate_embedding(query)
-                if embedding:
+        if use_semantic:
+            # Add vector search using text-to-vector (index has vectorizers configured)
+            vector_queries: List[Any] = []
+            if VECTORIZABLE_TEXT_QUERY_AVAILABLE and VectorizableTextQuery:
+                try:
                     vector_queries.append(
-                        VectorizedQuery(
-                            vector=embedding,
+                        VectorizableTextQuery(
+                            text=query,
                             k_nearest_neighbors=50,
                             fields="content_vector"
                         )
                     )
-            except Exception:
-                pass
+                except Exception as e:
+                    # Fall back to client-side embedding below
+                    pass
 
-        if vector_queries:
-            search_params["vector_queries"] = cast(Sequence[Any], vector_queries)
+            if not vector_queries and self.embedder:
+                try:
+                    embedding = self.embedder.generate_embedding(query)
+                    if embedding:
+                        vector_queries.append(
+                            VectorizedQuery(
+                                vector=embedding,
+                                k_nearest_neighbors=50,
+                                fields="content_vector"
+                            )
+                        )
+                except Exception:
+                    pass
+
+            if vector_queries:
+                search_params["vector_queries"] = cast(Sequence[Any], vector_queries)
 
         # Build filters
         filters = []
@@ -766,7 +792,8 @@ async def search_code(
     include_dependencies: bool = False,
     skip: int = 0,
     orderby: Optional[str] = None,
-    highlight_code: bool = False
+    highlight_code: bool = False,
+    bm25_only: bool = False
 ) -> str:
     """Search for code with advanced filtering, ranking, and dependency resolution
     
@@ -780,6 +807,7 @@ async def search_code(
         skip: Number of results to skip for pagination
         orderby: Sort order (e.g., 'last_modified desc')
         highlight_code: Enable hit highlighting in results
+        bm25_only: Force basic BM25 (keyword) search only
     """
 
     params = SearchCodeParams(
@@ -791,7 +819,8 @@ async def search_code(
         include_dependencies=include_dependencies,
         skip=skip,
         orderby=orderby,
-        highlight_code=highlight_code
+        highlight_code=highlight_code,
+        bm25_only=bm25_only
     )
 
     results = await server.search_code(params)
@@ -807,7 +836,8 @@ async def search_code_raw(
     include_dependencies: bool = False,
     skip: int = 0,
     orderby: Optional[str] = None,
-    highlight_code: bool = False
+    highlight_code: bool = False,
+    bm25_only: bool = False
 ) -> Dict[str, Any]:
     """
     Raw JSON results for code search (base ACS path).
@@ -822,7 +852,8 @@ async def search_code_raw(
         include_dependencies=include_dependencies,
         skip=skip,
         orderby=orderby,
-        highlight_code=highlight_code
+        highlight_code=highlight_code,
+        bm25_only=bm25_only
     )
     results = await server.search_code(params)
     return _ok({
