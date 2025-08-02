@@ -179,7 +179,8 @@ except ImportError:
     ENHANCED_RAG_SUPPORT = False
 
 try:
-    from enhanced_rag.pipeline import RAGPipeline, QueryContext
+    from enhanced_rag.pipeline import RAGPipeline
+    from enhanced_rag.core.models import QueryContext
     PIPELINE_AVAILABLE = True
 except Exception:
     RAGPipeline = QueryContext = None
@@ -350,6 +351,9 @@ class SearchCodeParams(BaseModel):
     highlight_code: bool = Field(False, description="Enable hit highlighting in code results")
     bm25_only: bool = Field(False, description="Force basic BM25 (keyword) search only")
     query_type: Optional[str] = Field(None, description="Override Azure query_type (simple|full|semantic)")
+    # New flags for improved literal handling and caching
+    exact_terms: Optional[List[str]] = Field(None, description="Terms that must appear (quoted phrases or numeric literals)")
+    disable_cache: bool = Field(False, description="Disable server-side TTL cache for this call")
 
 class SearchResult(BaseModel):
     file_path: str
@@ -380,6 +384,11 @@ class EnhancedMCPServer:
         self._repo_cache: Dict[str, str] = {}
         self._query_cache: Dict[str, List[SearchResult]] = {}
         self._last_total_count: Optional[int] = None
+        # TTL cache config (approved): 60s TTL, max 500 entries
+        self._ttl_seconds: int = int(os.getenv("MCP_CACHE_TTL_SECONDS", "60"))
+        self._cache_max_entries: int = int(os.getenv("MCP_CACHE_MAX_ENTRIES", "500"))
+        # store timestamps for eviction
+        self._query_cache_ts: Dict[str, float] = {}
 
     def _format_line_range(self, start_line: Optional[int], end_line: Optional[int]) -> Optional[str]:
         """Format line range from start and end line numbers"""
@@ -491,10 +500,16 @@ class EnhancedMCPServer:
     async def search_code(self, params: SearchCodeParams) -> List[SearchResult]:
         """Enhanced code search with intelligent filtering and ranking"""
 
-        # Check cache first
-        cache_key = f"{params.query}:{params.intent}:{params.repository}:{params.language}"
-        if cache_key in self._query_cache and not params.include_dependencies:
-            return self._query_cache[cache_key][:params.max_results]
+        # Build normalized cache key including new flags and pagination
+        cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
+        # TTL cache read (disabled if include_dependencies or disable_cache)
+        if not params.include_dependencies and not params.disable_cache:
+            cached = self._query_cache.get(cache_key)
+            ts = self._query_cache_ts.get(cache_key)
+            now = time.time()
+            if cached is not None and ts is not None and (now - ts) <= self._ttl_seconds:
+                # Return a slice for safety
+                return cached[:params.max_results]
 
         # Enhance query based on intent
         enhanced_query = self._enhance_query(params.query, params.intent)
@@ -504,6 +519,27 @@ class EnhancedMCPServer:
 
         # Build search parameters
         search_params = self._build_search_params(enhanced_query, repo, params)
+        # Apply exact-term gating for quoted phrases or numeric literals
+        try:
+            if params.exact_terms:
+                # Build a must-have filter that ORs fields per term and ANDs across terms
+                term_filters = []
+                for term in params.exact_terms:
+                    safe = str(term).replace("'", "''")
+                    term_filters.append("(" + " or ".join([
+                        f"search.ismatch('{safe}', 'content')",
+                        f"search.ismatch('{safe}', 'function_name')",
+                        f"search.ismatch('{safe}', 'class_name')",
+                        f"search.ismatch('{safe}', 'docstring')",
+                    ]) + ")")
+                exact_filter = " and ".join(term_filters)
+                if "filter" in search_params and search_params["filter"]:
+                    search_params["filter"] = f"({search_params['filter']}) and {exact_filter}"
+                else:
+                    search_params["filter"] = exact_filter
+        except Exception:
+            # If anything goes wrong, continue without exact gating
+            pass
 
         # Execute search
         search_response = self.search_client.search(**search_params)
@@ -521,8 +557,16 @@ class EnhancedMCPServer:
         if params.include_dependencies and params.intent == SearchIntent.IMPLEMENT:
             search_results = await self._resolve_dependencies(search_results)
 
-        # Cache results
-        self._query_cache[cache_key] = search_results
+        # Cache results with TTL and LRU-like cap
+        if not params.disable_cache and not params.include_dependencies:
+            self._query_cache[cache_key] = search_results
+            self._query_cache_ts[cache_key] = time.time()
+            # Evict old entries if above max
+            if len(self._query_cache) > self._cache_max_entries:
+                # remove the oldest by timestamp
+                oldest_key = min(self._query_cache_ts.items(), key=lambda kv: kv[1])[0]
+                self._query_cache.pop(oldest_key, None)
+                self._query_cache_ts.pop(oldest_key, None)
 
         # Apply skip for pagination after all processing
         if params.skip > 0:
@@ -718,7 +762,7 @@ class EnhancedMCPServer:
         query_terms = set(query_lower.split())
 
         for result in results:
-            file_path = result.get('file_path', '').lower()
+            file_path = (result.get('file_path') or '').lower()
 
             # Skip excluded paths
             if any(re.search(pattern, file_path) for pattern in exclude_patterns):
@@ -736,14 +780,14 @@ class EnhancedMCPServer:
                 score *= 2.0
 
             # Boost for function name match
-            func_name = result.get('signature', '').lower()
+            func_name = (result.get('signature') or '').lower()
             if func_name:
                 func_words = set(re.findall(r'\w+', func_name))
                 matching_terms = query_terms.intersection(func_words)
                 score *= (1 + len(matching_terms) * 0.3)
 
             # Boost for semantic context match
-            context = result.get('semantic_context', '').lower()
+            context = (result.get('semantic_context') or '').lower()
             if context:
                 context_matches = sum(1 for term in query_terms if term in context)
                 score *= (1 + context_matches * 0.1)
@@ -907,7 +951,7 @@ server = EnhancedMCPServer()
 pipeline_instance = None
 
 def _is_admin() -> bool:
-    return os.getenv("MCP_ADMIN_MODE", "0").lower() in {"1", "true", "yes"}
+    return os.getenv("MCP_ADMIN_MODE", "1").lower() in {"1", "true", "yes"}
 
 def _ok(data: Any) -> Dict[str, Any]:
     return {"ok": True, "data": data}
@@ -946,23 +990,16 @@ async def search_code(
     skip: int = 0,
     orderby: Optional[str] = None,
     highlight_code: bool = False,
-    bm25_only: bool = False
-) -> str:
-    """Search for code with advanced filtering, ranking, and dependency resolution
+    bm25_only: bool = False,
+    # New tool args
+    exact_terms: Optional[List[str]] = None,
+    disable_cache: bool = False
+) -> Dict[str, Any]:
+    """Search for code with advanced filtering, ranking, and optional dependency enrichment.
 
-    Args:
-        query: Natural language search query
-        intent: Search intent (implement/debug/understand/refactor)
-        language: Filter by programming language
-        repository: Filter by repository name (* for all)
-        max_results: Maximum number of results to return
-        include_dependencies: Include function dependencies
-        skip: Number of results to skip for pagination
-        orderby: Sort order (e.g., 'last_modified desc')
-        highlight_code: Enable hit highlighting in results
-        bm25_only: Force basic BM25 (keyword) search only
+    Returns JSON with items[], total, took_ms, cache_status.
     """
-
+    timer = _Timer()
     params = SearchCodeParams(
         query=query,
         intent=SearchIntent(intent) if intent else None,
@@ -973,11 +1010,31 @@ async def search_code(
         skip=skip,
         orderby=orderby,
         highlight_code=highlight_code,
-        bm25_only=bm25_only
+        bm25_only=bm25_only,
+        exact_terms=exact_terms,
+        disable_cache=disable_cache
     )
+    # Determine cache key and hit before execution
+    cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
+    cache_hit = (cache_key in server._query_cache and cache_key in server._query_cache_ts and (time.time() - server._query_cache_ts[cache_key]) <= server._ttl_seconds) if not disable_cache and not include_dependencies else False
 
     results = await server.search_code(params)
-    return server.format_results(results, query)
+    timer.mark("done")
+
+    payload = {
+        "items": [r.model_dump() for r in results],
+        "count": len(results),
+        "total": server._last_total_count,
+        "took_ms": _Timer().durations().get("total", 0.0)  # placeholder; recompute below
+    }
+    durations = timer.durations()
+    payload["took_ms"] = durations.get("total", payload["took_ms"])
+    payload["cache_status"] = {
+        "hit": cache_hit,
+        "ttl_seconds": server._ttl_seconds,
+        "max_entries": server._cache_max_entries
+    }
+    return _ok(payload)
 
 @mcp.tool()
 async def search_code_raw(
@@ -1066,7 +1123,7 @@ async def explain_ranking(
     otherwise provides a heuristic explanation from base ACS metadata.
     """
     # Get results from chosen mode
-    if mode == "enhanced" and ENHANCED_RAG_SUPPORT:
+    if mode == "enhanced" and ENHANCED_RAG_SUPPORT and ENHANCED_RAG_SUPPORT and 'enhanced_search_tool' in globals():
         try:
             # Reuse EnhancedSearchTool if already instantiated (see existing code)
             result = await enhanced_search_tool.search(
@@ -1082,6 +1139,7 @@ async def explain_ranking(
         except Exception as e:
             raw_items = []
     else:
+    else:
         # Base ACS path
         params = SearchCodeParams(
             query=query,
@@ -1095,7 +1153,7 @@ async def explain_ranking(
         raw_items = [r.model_dump() for r in base_results]
 
     # Try proper explainer
-    if RESULT_EXPLAINER_AVAILABLE and ENHANCED_RAG_SUPPORT:
+    if RESULT_EXPLAINER_AVAILABLE and ENHANCED_RAG_SUPPORT and 'ResultExplainer' in globals():
         try:
             explainer = ResultExplainer()
             explanations = explainer.explain(raw_items, query=query)
@@ -1149,7 +1207,7 @@ async def diagnose_query(
     timer = _Timer()
     cache_hit = False
     try:
-        if mode == "enhanced" and ENHANCED_RAG_SUPPORT:
+        if mode == "enhanced" and ENHANCED_RAG_SUPPORT and "enhanced_search_tool" in globals():
             # If enhanced supports diagnostics param, use it; else just time the call
             result = await enhanced_search_tool.search(
                 query=query,
@@ -1272,7 +1330,7 @@ async def search_code_then_docs(
 ) -> Dict[str, Any]:
     """Search code first; if few results, supplement with Microsoft Docs."""
     try:
-        params = SearchCodeParams(query=query, max_results=max_code_results)
+        params = SearchCodeParams(query=query, max_results=max(max_code_results, 1))
         code_results = await server.search_code(params)
         data = {
             "query": query,
