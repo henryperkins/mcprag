@@ -759,6 +759,7 @@ class EnhancedMCPServer:
 
 mcp = FastMCP("azure-code-search-enhanced")
 server = EnhancedMCPServer()
+pipeline_instance = None
 
 def _is_admin() -> bool:
     return os.getenv("MCP_ADMIN_MODE", "0").lower() in {"1", "true", "yes"}

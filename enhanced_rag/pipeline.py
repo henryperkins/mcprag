@@ -385,6 +385,19 @@ class RAGPipeline:
             logger.warning(f"⚠️ Failed to extract context: {e}")
             return None
 
+    def _augment_code_understanding(self, results: List[SearchResult]) -> None:
+        """Augment results with lightweight code understanding analysis"""
+        import re
+        for r in results:
+            if not r.function_name and r.signature:
+                m = re.search(r'(?:def|async\s+def|function|class)\s+(\w+)', r.signature)
+                if m:
+                    r.function_name = m.group(1)
+            if not r.function_name and r.code_snippet:
+                m = re.search(r'(?:def|async\s+def|function)\s+(\w+)\s*\(', r.code_snippet)
+                if m:
+                    r.function_name = m.group(1)
+
     async def _record_interaction(
         self,
         query: SearchQuery,
