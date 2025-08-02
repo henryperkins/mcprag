@@ -91,8 +91,9 @@ async def cmd_create_enhanced_index(args):
     try:
         index = await builder.create_enhanced_rag_index(
             index_name=args.name,
-            enable_vector_search=enable_vectors,
-            enable_semantic_search=enable_semantic
+            description=f"Enhanced RAG index {args.name}",
+            enable_vectors=enable_vectors,
+            enable_semantic=enable_semantic
         )
         logger.info(f"Successfully created index: {index.name}")
         logger.info(f"Fields: {len(index.fields)}")

@@ -239,12 +239,8 @@ class StandardSkillsetBuilder:
         """
         return [
             {
-                "sourceFieldName": "/document/content",
-                "targetFieldName": "content"
-            },
-            {
                 "sourceFieldName": "/document/pages/*",
-                "targetFieldName": "chunks"
+                "targetFieldName": "content"
             },
             {
                 "sourceFieldName": "/document/pages/*/content_vector",

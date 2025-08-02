@@ -330,7 +330,7 @@ class IndexerIntegration:
                     InputFieldMappingEntry(name="text", source="/document/pages/*")
                 ],
                 outputs=[
-                    OutputFieldMappingEntry(name="keyPhrases", target_name="key_phrases")
+                    OutputFieldMappingEntry(name="keyPhrases", target_name="keyPhrases")
                 ]
             )
         )
@@ -540,11 +540,13 @@ class IndexerIntegration:
     def _get_code_output_mappings(self) -> List[OutputFieldMappingEntry]:
         """Get output field mappings from skillset to index"""
         return [
+            # Map split pages (string chunks) into 'content'
             OutputFieldMappingEntry(
                 name="map_content",
                 source_name="/document/pages/*",
                 target_name="content"
             ),
+            # Map code analyzer outputs (if present)
             OutputFieldMappingEntry(
                 name="map_functions",
                 source_name="/document/pages/*/functions",
@@ -565,16 +567,18 @@ class IndexerIntegration:
                 source_name="/document/pages/*/complexity_score",
                 target_name="complexity_score"
             ),
+            # KeyPhraseExtraction outputs 'keyPhrases' → map to tags
             OutputFieldMappingEntry(
                 name="map_key_phrases",
-                source_name="/document/pages/*/key_phrases",
+                source_name="/document/pages/*/keyPhrases",
                 target_name="tags"
             ),
+            # Embedding skill (custom or standard) should output 'content_vector'
             OutputFieldMappingEntry(
                 name="map_vector",
-                source_name="/document/pages/*/code_vector",
+                source_name="/document/pages/*/content_vector",
                 target_name="content_vector"
-            )
+            ),
         ]
     
     async def create_multi_repository_indexers(
@@ -881,6 +885,17 @@ class LocalRepositoryIndexer:
         # Auto-detect embedding mode if not specified
         if embed_vectors is None:
             embed_vectors = self.provider is not None
+            
+        # If index uses integrated vectorization, do not upload client-side vectors
+        try:
+            from azure.search.documents.indexes import SearchIndexClient
+            idx_client = SearchIndexClient(endpoint=self.endpoint, credential=AzureKeyCredential(self.admin_key))
+            idx = idx_client.get_index(self.index_name)
+            has_vectorizers = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
+            if has_vectorizers:
+                embed_vectors = False
+        except Exception:
+            pass
             
         total_indexed = 0
         

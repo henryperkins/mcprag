@@ -60,6 +60,16 @@ class RemoteIndexer:
         
         self.batch_size = 50
         self.logger = logging.getLogger(__name__)
+        
+        # Detect integrated vectorization presence once
+        self._integrated_vectors = False
+        try:
+            from azure.search.documents.indexes import SearchIndexClient
+            idx_client = SearchIndexClient(endpoint=self.endpoint, credential=AzureKeyCredential(self.admin_key))
+            idx = idx_client.get_index(self.index_name)
+            self._integrated_vectors = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
+        except Exception:
+            self._integrated_vectors = False
     
     def index_remote_repository(
         self,
@@ -135,7 +145,7 @@ class RemoteIndexer:
                     }
                     
                     # Add vector embedding if enabled
-                    if self.provider:
+                    if self.provider and not self._integrated_vectors:
                         embedding = self.provider.generate_code_embedding(
                             chunk["content"], chunk["semantic_context"]
                         )
@@ -241,7 +251,7 @@ class RemoteIndexer:
                     }
                     
                     # Add vector embedding if enabled
-                    if self.provider:
+                    if self.provider and not self._integrated_vectors:
                         embedding = self.provider.generate_code_embedding(
                             chunk["content"], chunk["semantic_context"]
                         )

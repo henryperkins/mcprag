@@ -445,7 +445,7 @@ class EnhancedIndexBuilder:
                     SearchFieldDataType.Single
                 ),
                 searchable=True,
-                retrievable=True,  # Set based on needs
+                retrievable=False,  # Set to False to save storage
                 vector_search_dimensions=get_config().embedding.dimensions,
                 vector_search_profile_name="vector-profile-hnsw"
             )
