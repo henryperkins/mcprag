@@ -251,9 +251,13 @@ class EnhancedMCPServer:
         if not endpoint or not admin_key:
             raise ValueError("Missing Azure Search credentials")
 
+        # Get index name from environment or use default
+        index_name = os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota")
+        logger.info(f"Using Azure Search index: {index_name}")
+        
         self.search_client = SearchClient(
             endpoint=endpoint,
-            index_name="codebase-mcp-sota",
+            index_name=index_name,
             credential=AzureKeyCredential(admin_key)
         )
 
@@ -262,7 +266,11 @@ class EnhancedMCPServer:
         if VECTOR_SUPPORT and (os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")):
             try:
                 self.embedder = AzureOpenAIEmbeddingProvider()
-                logger.info("Vector search enabled")
+                # Log embedding configuration
+                if hasattr(self.embedder, 'dimensions') and self.embedder.dimensions:
+                    logger.info(f"Vector search enabled with {self.embedder.dimensions} dimensions")
+                else:
+                    logger.info("Vector search enabled")
             except Exception as e:
                 logger.warning("Vector search unavailable: %s", e)
 
@@ -759,7 +767,7 @@ async def get_statistics() -> str:
 
         return json.dumps({
             "total_documents": doc_count,
-            "index_name": "codebase-mcp-sota",
+            "index_name": os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),
             "features": {
                 "vector_search": server.embedder is not None,
                 "semantic_search": True,
