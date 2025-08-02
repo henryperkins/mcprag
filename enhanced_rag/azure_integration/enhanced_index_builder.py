@@ -585,11 +585,17 @@ class EnhancedIndexBuilder:
                 )
             )
         
-        # Create vector profile with vectorizer
+        chosen_vectorizer_name = None
+        if azure_openai_endpoint and azure_openai_deployment:
+            chosen_vectorizer_name = "text-embedding-3-large-vectorizer"
+        elif vectorizers:
+            # If only custom vectorizer exists, pick the first one
+            chosen_vectorizer_name = vectorizers[0].name
+
         profile = VectorSearchProfile(
             name="vector-profile-hnsw",
             algorithm_configuration_name="hnsw-config",
-            vectorizer_name="text-embedding-3-large-vectorizer" if azure_openai_endpoint else None
+            vectorizer_name=chosen_vectorizer_name
         )
 
         vector_search = VectorSearch(

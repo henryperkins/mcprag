@@ -564,13 +564,12 @@ class IndexerIntegration:
     
     def _get_code_output_mappings(self) -> List[OutputFieldMappingEntry]:
         """Get output field mappings from skillset to index"""
-        return [
+        mappings = [
             OutputFieldMappingEntry(
                 name="map_content",
                 source_name="/document/pages/*",
                 target_name="content"
             ),
-            # Map code analyzer (from WebApiSkill outputs target_name)
             OutputFieldMappingEntry(
                 name="map_functions",
                 source_name="/document/pages/*/functions",
@@ -601,12 +600,26 @@ class IndexerIntegration:
                 source_name="/document/pages/*/keyPhrases",
                 target_name="tags"
             ),
-            OutputFieldMappingEntry(
-                name="map_vector",
-                source_name="/document/pages/*/content_vector",
-                target_name="content_vector"
-            ),
         ]
+        # Only map vectors when a vector output exists and won't conflict.
+        # Prefer integrated skill 'content_vector' when present; else accept custom 'code_vector'.
+        if self.custom_skill_endpoints.get('embedder'):
+            mappings.append(
+                OutputFieldMappingEntry(
+                    name="map_vector_custom",
+                    source_name="/document/pages/*/code_vector",
+                    target_name="content_vector"
+                )
+            )
+        else:
+            mappings.append(
+                OutputFieldMappingEntry(
+                    name="map_vector",
+                    source_name="/document/pages/*/content_vector",
+                    target_name="content_vector"
+                )
+            )
+        return mappings
     
     async def create_multi_repository_indexers(
         self,
@@ -853,6 +866,16 @@ class LocalRepositoryIndexer:
             index_name=self.index_name,
             credential=AzureKeyCredential(self.admin_key)
         )
+        
+        # Determine if integrated vectorization is configured on target index
+        self._integrated_vectors = False
+        try:
+            from azure.search.documents.indexes import SearchIndexClient
+            idx_client = SearchIndexClient(endpoint=self.endpoint, credential=AzureKeyCredential(self.admin_key))
+            idx = idx_client.get_index(self.index_name)
+            self._integrated_vectors = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
+        except Exception:
+            self._integrated_vectors = False
         
         # Initialize embedding provider based on config
         self.provider = None
