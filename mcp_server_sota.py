@@ -169,6 +169,60 @@ except ImportError:
     ContextAwareTool = None
     ENHANCED_RAG_SUPPORT = False
 
+try:
+    from enhanced_rag.ranking.result_explainer import ResultExplainer  # type: ignore
+    RESULT_EXPLAINER_AVAILABLE = True
+except Exception:
+    ResultExplainer = None
+    RESULT_EXPLAINER_AVAILABLE = False
+
+try:
+    from enhanced_rag.semantic.intent_classifier import IntentClassifier  # type: ignore
+    from enhanced_rag.semantic.query_enhancer import QueryEnhancer  # type: ignore
+    from enhanced_rag.semantic.query_rewriter import QueryRewriter  # type: ignore
+    SEMANTIC_TOOLS_AVAILABLE = True
+except Exception:
+    IntentClassifier = QueryEnhancer = QueryRewriter = None
+    SEMANTIC_TOOLS_AVAILABLE = False
+
+try:
+    from enhanced_rag.learning.feedback_collector import FeedbackCollector  # type: ignore
+    from enhanced_rag.learning.usage_analyzer import UsageAnalyzer  # type: ignore
+    from enhanced_rag.learning.model_updater import ModelUpdater  # type: ignore
+    LEARNING_SUPPORT = True
+except Exception:
+    FeedbackCollector = None
+    UsageAnalyzer = None
+    ModelUpdater = None
+    LEARNING_SUPPORT = False
+
+try:
+    from enhanced_rag.azure_integration.index_operations import IndexOperations  # type: ignore
+    from enhanced_rag.azure_integration.indexer_integration import IndexerIntegration  # type: ignore
+    from enhanced_rag.azure_integration.document_operations import DocumentOperations  # type: ignore
+    AZURE_ADMIN_SUPPORT = True
+except Exception:
+    IndexOperations = None
+    IndexerIntegration = None
+    DocumentOperations = None
+    AZURE_ADMIN_SUPPORT = False
+
+try:
+    from enhanced_rag.github_integration.api_client import GitHubClient  # type: ignore
+    from enhanced_rag.github_integration.remote_indexer import RemoteIndexer  # type: ignore
+    GITHUB_SUPPORT = True
+except Exception:
+    GitHubClient = None
+    RemoteIndexer = None
+    GITHUB_SUPPORT = False
+
+try:
+    from enhanced_rag.utils.cache_manager import CacheManager  # type: ignore
+    RAG_CACHE_SUPPORT = True
+except Exception:
+    CacheManager = None
+    RAG_CACHE_SUPPORT = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -184,6 +238,9 @@ if VECTOR_SUPPORT:
 
 if DOCS_SUPPORT:
     logger.info("Microsoft Docs search support is available")
+
+FEEDBACK_DIR = os.getenv("MCP_FEEDBACK_DIR", ".mcp_feedback")
+Path(FEEDBACK_DIR).mkdir(parents=True, exist_ok=True)
 
 # ============================================================================
 # Pydantic Models for Type Safety
@@ -656,6 +713,31 @@ class EnhancedMCPServer:
 mcp = FastMCP("azure-code-search-enhanced")
 server = EnhancedMCPServer()
 
+def _is_admin() -> bool:
+    return os.getenv("MCP_ADMIN_MODE", "0").lower() in {"1", "true", "yes"}
+
+def _ok(data: Any) -> Dict[str, Any]:
+    return {"ok": True, "data": data}
+
+def _err(msg: str, code: str = "error") -> Dict[str, Any]:
+    return {"ok": False, "error": msg, "code": code}
+
+import time
+
+class _Timer:
+    def __init__(self):
+        self._marks = {"start": time.perf_counter()}
+    def mark(self, name: str):
+        self._marks[name] = time.perf_counter()
+    def durations(self) -> Dict[str, float]:
+        keys = list(self._marks.keys())
+        out = {}
+        for i in range(1, len(keys)):
+            out[f"{keys[i-1]}→{keys[i]}"] = (self._marks[keys[i]] - self._marks[keys[i-1]]) * 1000.0
+        out["total"] = (time.perf_counter() - self._marks["start"]) * 1000.0
+        return out
+
+
 # ============================================================================
 # Tool Implementations
 # ============================================================================
@@ -702,6 +784,41 @@ async def search_code(
     return server.format_results(results, query)
 
 @mcp.tool()
+async def search_code_raw(
+    query: str,
+    intent: Optional[str] = None,
+    language: Optional[str] = None,
+    repository: Optional[str] = None,
+    max_results: int = 10,
+    include_dependencies: bool = False,
+    skip: int = 0,
+    orderby: Optional[str] = None,
+    highlight_code: bool = False
+) -> Dict[str, Any]:
+    """
+    Raw JSON results for code search (base ACS path).
+    Returns structured SearchResult objects for SDK-friendly consumption.
+    """
+    params = SearchCodeParams(
+        query=query,
+        intent=SearchIntent(intent) if intent else None,
+        language=language,
+        repository=repository,
+        max_results=max_results,
+        include_dependencies=include_dependencies,
+        skip=skip,
+        orderby=orderby,
+        highlight_code=highlight_code
+    )
+    results = await server.search_code(params)
+    return _ok({
+        "results": [r.model_dump() for r in results],
+        "count": len(results),
+        "query": query,
+        "intent": intent
+    })
+
+@mcp.tool()
 async def search_microsoft_docs(query: str, max_results: int = 10) -> str:
     """Search Microsoft Learn documentation"""
     if not DOCS_SUPPORT:
@@ -725,6 +842,273 @@ async def search_microsoft_docs(query: str, max_results: int = 10) -> str:
             return formatted
     except Exception as e:
         return f"Error searching Microsoft Docs: {str(e)}"
+
+@mcp.tool()
+async def explain_ranking(
+    query: str,
+    mode: str = "enhanced",
+    max_results: int = 10,
+    intent: Optional[str] = None,
+    language: Optional[str] = None,
+    repository: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Explain ranking factors for results. Uses Enhanced RAG explainer when available,
+    otherwise provides a heuristic explanation from base ACS metadata.
+    """
+    # Get results from chosen mode
+    if mode == "enhanced" and ENHANCED_RAG_SUPPORT:
+        try:
+            # Reuse EnhancedSearchTool if already instantiated (see existing code)
+            result = await enhanced_search_tool.search(
+                query=query,
+                intent=intent,
+                language=language,
+                repository=repository,
+                max_results=max_results,
+                include_dependencies=False,
+                generate_response=False,
+            )
+            raw_items = result.get("results", []) or result.get("final_results", []) or []
+        except Exception as e:
+            raw_items = []
+    else:
+        # Base ACS path
+        params = SearchCodeParams(
+            query=query,
+            intent=SearchIntent(intent) if intent else None,
+            language=language,
+            repository=repository,
+            max_results=max_results,
+            include_dependencies=False
+        )
+        base_results = await server.search_code(params)
+        raw_items = [r.model_dump() for r in base_results]
+
+    # Try proper explainer
+    if RESULT_EXPLAINER_AVAILABLE and ENHANCED_RAG_SUPPORT:
+        try:
+            explainer = ResultExplainer()
+            explanations = explainer.explain(raw_items, query=query)
+            return _ok({
+                "mode": mode if ENHANCED_RAG_SUPPORT else "base",
+                "query": query,
+                "explanations": explanations
+            })
+        except Exception as e:
+            pass
+
+    # Fallback heuristic explanation
+    explanations = []
+    q_terms = set((query or "").lower().split())
+    for item in raw_items:
+        content = (item.get("content") or "").lower()
+        signature = (item.get("signature") or "").lower()
+        repo = item.get("repository")
+        file_path = item.get("file_path")
+        score = item.get("score", 0.0)
+        overlap = sum(1 for t in q_terms if t in content or t in signature)
+        factors = []
+        if overlap:
+            factors.append({"name": "term_overlap", "weight": 0.4, "contribution": overlap * 0.1})
+        if repo:
+            factors.append({"name": "repo_presence", "weight": 0.2, "contribution": 0.1})
+        if signature:
+            factors.append({"name": "signature_match", "weight": 0.2, "contribution": 0.1})
+        factors.append({"name": "base_score", "weight": 0.2, "contribution": score * 0.1})
+        explanations.append({
+            "file_path": file_path,
+            "repository": repo,
+            "score": score,
+            "factors": factors,
+            "summary": f"Heuristic explanation: {overlap} query-term overlaps; base score {score:.2f}"
+        })
+    return _ok({"mode": "base" if mode != "enhanced" or not ENHANCED_RAG_SUPPORT else "enhanced", "query": query, "explanations": explanations})
+
+@mcp.tool()
+async def diagnose_query(
+    query: str,
+    mode: str = "enhanced",
+    intent: Optional[str] = None,
+    language: Optional[str] = None,
+    repository: Optional[str] = None,
+    max_results: int = 10
+) -> Dict[str, Any]:
+    """
+    Run a query and return approximate stage timings and cache hints.
+    """
+    timer = _Timer()
+    cache_hit = False
+    try:
+        if mode == "enhanced" and ENHANCED_RAG_SUPPORT:
+            # If enhanced supports diagnostics param, use it; else just time the call
+            result = await enhanced_search_tool.search(
+                query=query,
+                intent=intent,
+                language=language,
+                repository=repository,
+                max_results=max_results,
+                include_dependencies=False,
+                generate_response=False
+            )
+            timer.mark("enhanced_search")
+            stages = result.get("stages") or []
+            out = {
+                "mode": "enhanced",
+                "query": query,
+                "timings_ms": timer.durations(),
+                "stages": stages,
+                "cache": {"hit": cache_hit, "cache_key": None}
+            }
+            return _ok(out)
+        else:
+            # Base ACS
+            params = SearchCodeParams(
+                query=query,
+                intent=SearchIntent(intent) if intent else None,
+                language=language,
+                repository=repository,
+                max_results=max_results,
+                include_dependencies=False
+            )
+            # Try to detect simple cache use
+            cache_key = f"{params.query}:{params.intent}:{params.repository}:{params.language}"
+            cache_hit = cache_key in server._query_cache
+            res = await server.search_code(params)
+            timer.mark("base_search")
+            out = {
+                "mode": "base",
+                "query": query,
+                "timings_ms": timer.durations(),
+                "stages": [{"stage": "base_search", "count": len(res), "duration_ms": timer.durations().get("start→base_search", 0.0)}],
+                "cache": {"hit": cache_hit, "cache_key": cache_key if cache_hit else None}
+            }
+            return _ok(out)
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def preview_query_processing(
+    query: str,
+    intent: Optional[str] = None,
+    language: Optional[str] = None,
+    repository: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Show intent classification, enhancements, rewrites, and applied rules for a query.
+    """
+    try:
+        if ENHANCED_RAG_SUPPORT and SEMANTIC_TOOLS_AVAILABLE:
+            try:
+                classifier = IntentClassifier()
+                detected = classifier.classify(query)
+            except Exception:
+                detected = intent
+
+            enhancements = {}
+            rewrites = []
+            rules = []
+            try:
+                enhancer = QueryEnhancer()
+                enhanced = enhancer.enhance(query, intent=detected or intent, language=language)
+                enhancements = enhanced or {}
+            except Exception:
+                pass
+            try:
+                rewriter = QueryRewriter()
+                rw = rewriter.rewrite(query, intent=detected or intent, language=language)
+                if isinstance(rw, dict):
+                    rewrites = rw.get("rewrites", [])
+                    rules = rw.get("applied_rules", [])
+                elif isinstance(rw, list):
+                    rewrites = rw
+            except Exception:
+                pass
+
+            return _ok({
+                "input_query": query,
+                "detected_intent": detected,
+                "enhancements": enhancements,
+                "rewritten_queries": rewrites,
+                "applied_rules": rules
+            })
+        else:
+            # Base fallback using server._enhance_query
+            enhanced = server._enhance_query(query, SearchIntent(intent) if intent else None)
+            boost_terms = []
+            if intent:
+                if intent == "implement":
+                    boost_terms = ["function", "class", "method", "def", "async"]
+                elif intent == "debug":
+                    boost_terms = ["try", "except", "catch", "error", "exception", "raise", "throw"]
+                elif intent == "understand":
+                    boost_terms = ["docstring", "comment", "README", "example", "usage"]
+                elif intent == "refactor":
+                    boost_terms = ["pattern", "design", "architecture", "best practice"]
+            return _ok({
+                "input_query": query,
+                "detected_intent": intent,
+                "enhancements": {"prefix": None, "boost_terms": boost_terms},
+                "rewritten_queries": [enhanced] if enhanced and enhanced != query else [],
+                "applied_rules": []
+            })
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def search_code_hybrid(
+    query: str,
+    bm25_weight: float = 0.5,
+    vector_weight: float = 0.5,
+    max_results: int = 10,
+    intent: Optional[str] = None,
+    language: Optional[str] = None,
+    repository: Optional[str] = None,
+    include_stage_results: bool = True
+) -> Dict[str, Any]:
+    """
+    Hybrid BM25 + Vector search. Uses Enhanced RAG when available; base fallback merges available signals.
+    """
+    try:
+        if ENHANCED_RAG_SUPPORT:
+            try:
+                result = await enhanced_search_tool.search(
+                    query=query,
+                    intent=intent,
+                    language=language,
+                    repository=repository,
+                    max_results=max_results,
+                    include_dependencies=False,
+                    generate_response=False
+                )
+                # Expect result to possibly contain stage breakdown
+                out = {
+                    "weights": {"bm25": bm25_weight, "vector": vector_weight},
+                    "final_results": result.get("results") or result.get("final_results") or [],
+                    "stages": result.get("stages") if include_stage_results else None
+                }
+                return _ok(out)
+            except Exception:
+                pass
+
+        # Base fallback: one pass (semantic + possibly vector). We cannot split stages reliably, but return the results.
+        params = SearchCodeParams(
+            query=query,
+            intent=SearchIntent(intent) if intent else None,
+            language=language,
+            repository=repository,
+            max_results=max_results,
+            include_dependencies=False
+        )
+        results = await server.search_code(params)
+        out = {
+            "weights": {"bm25": bm25_weight, "vector": vector_weight},
+            "final_results": [r.model_dump() for r in results],
+            "stages": None
+        }
+        return _ok(out)
+    except Exception as e:
+        return _err(str(e))
 
 # ============================================================================
 # Resources
@@ -784,6 +1168,40 @@ async def get_statistics() -> str:
 
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+@mcp.resource("resource://runtime_diagnostics")
+async def runtime_diagnostics() -> str:
+    try:
+        import platform
+        diag = {
+            "feature_flags": {
+                "ENHANCED_RAG_SUPPORT": ENHANCED_RAG_SUPPORT,
+                "VECTOR_SUPPORT": VECTOR_SUPPORT,
+                "DOCS_SUPPORT": DOCS_SUPPORT,
+            },
+            "index": {
+                "name": os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),
+            },
+            "asyncio": {
+                "policy": type(asyncio.get_event_loop_policy()).__name__,
+                "socketpair_patched": (socket.socketpair is _safe_socketpair),
+            },
+            "versions": {
+                "python": platform.python_version(),
+                "azure_sdk": "azure-search-documents",
+                "mcp": "fastmcp" if MCP_SDK_AVAILABLE else "fallback",
+            },
+        }
+        try:
+            # Safe to attempt; ignore errors
+            diag["index"]["document_count"] = server.search_client.get_document_count()
+        except Exception as _:
+            diag["index"]["document_count"] = None
+
+        return json.dumps(_ok(diag), indent=2)
+    except Exception as e:
+        return json.dumps(_err(str(e)), indent=2)
+
 
 # ============================================================================
 # Prompts
@@ -945,6 +1363,206 @@ if ENHANCED_RAG_SUPPORT:
             focus=focus,
             include_examples=include_examples
         )
+
+@mcp.tool()
+async def submit_feedback(
+    target_id: str,
+    kind: str,  # "search_result" | "code_gen"
+    rating: int,  # e.g., 1-5
+    notes: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Store user feedback for learning loops.
+    """
+    if not LEARNING_SUPPORT or not FeedbackCollector:
+        return _err("enhanced_rag_learning_unavailable", code="enhanced_unavailable")
+
+    try:
+        collector = FeedbackCollector(storage_path=FEEDBACK_DIR)
+        await collector.record_explicit_feedback(
+            interaction_id=target_id,
+            satisfaction=rating,
+            comment=notes
+        )
+        return _ok({"stored": True})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def usage_report(
+    range: str = "7d"  # e.g., "24h", "7d", "30d"
+) -> Dict[str, Any]:
+    """
+    Summarize usage analytics from stored feedback/usage data.
+    """
+    if not LEARNING_SUPPORT or not UsageAnalyzer:
+        return _err("enhanced_rag_learning_unavailable", code="enhanced_unavailable")
+
+    try:
+        collector = FeedbackCollector(storage_path=FEEDBACK_DIR)
+        analyzer = UsageAnalyzer(feedback_collector=collector)
+        summary = await analyzer.get_performance_metrics()
+        return _ok({"range": range, "summary": summary})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def update_learning_model(
+    dry_run: bool = True
+) -> Dict[str, Any]:
+    """
+    Update ranking/learning artifacts. Requires admin when dry_run is False.
+    """
+    if not LEARNING_SUPPORT or not ModelUpdater:
+        return _err("enhanced_rag_learning_unavailable", code="enhanced_unavailable")
+
+    if not dry_run and not _is_admin():
+        return _err("admin_required", code="admin_required")
+
+    return _err("not_implemented", code="not_implemented")
+
+@mcp.tool()
+async def index_status() -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not AZURE_ADMIN_SUPPORT or not IndexOperations:
+        return _err("azure_admin_unavailable", code="enhanced_unavailable")
+    try:
+        ops = IndexOperations(
+            endpoint=os.getenv("ACS_ENDPOINT"),
+            admin_key=os.getenv("ACS_ADMIN_KEY"),
+        )
+        status = await ops.get_index_statistics(os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"))
+        return _ok(status)
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def index_create_or_update(profile: Optional[str] = None) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not AZURE_ADMIN_SUPPORT or not IndexOperations:
+        return _err("azure_admin_unavailable", code="enhanced_unavailable")
+    
+    return _err("not_implemented", code="not_implemented")
+
+
+@mcp.tool()
+async def index_rebuild(repository: Optional[str] = None) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not AZURE_ADMIN_SUPPORT or not IndexerIntegration:
+        return _err("azure_admin_unavailable", code="enhanced_unavailable")
+    try:
+        idx = IndexerIntegration()
+        result = await idx.run_indexer_on_demand(repository)
+        return _ok({"repository": repository, "result": result})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def document_upsert(document: Dict[str, Any]) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not AZURE_ADMIN_SUPPORT or not DocumentOperations:
+        return _err("azure_admin_unavailable", code="enhanced_unavailable")
+    try:
+        docs = DocumentOperations(
+            endpoint=os.getenv("ACS_ENDPOINT"),
+            admin_key=os.getenv("ACS_ADMIN_KEY"),
+        )
+        result = await docs.upload_documents(os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),[document])
+        return _ok({"upserted": True, "result": result})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def document_delete(doc_id: str) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not AZURE_ADMIN_SUPPORT or not DocumentOperations:
+        return _err("azure_admin_unavailable", code="enhanced_unavailable")
+    try:
+        docs = DocumentOperations(
+            endpoint=os.getenv("ACS_ENDPOINT"),
+            admin_key=os.getenv("ACS_ADMIN_KEY"),
+        )
+        result = await docs.delete_documents(os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),[doc_id])
+        return _ok({"deleted": True, "doc_id": doc_id, "result": result})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def github_list_repos(org: str, max_repos: int = 50) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not GITHUB_SUPPORT or not GitHubClient:
+        return _err("github_integration_unavailable", code="enhanced_unavailable")
+    
+    return _err("not_implemented", code="not_implemented")
+
+@mcp.tool()
+async def github_index_repo(
+    repo: str,  # "org/name"
+    branch: Optional[str] = None,
+    mode: str = "full"  # "full" | "incremental"
+) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not GITHUB_SUPPORT or not RemoteIndexer:
+        return _err("github_integration_unavailable", code="enhanced_unavailable")
+    try:
+        owner, repo_name = repo.split('/')
+        indexer = RemoteIndexer()
+        result = await indexer.index_remote_repository(owner, repo_name, ref=branch)
+        return _ok({"repo": repo, "branch": branch, "mode": mode, "result": result})
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def github_index_status(repo: str) -> Dict[str, Any]:
+    if not _is_admin():
+        return _err("admin_required", code="admin_required")
+    if not GITHUB_SUPPORT or not RemoteIndexer:
+        return _err("github_integration_unavailable", code="enhanced_unavailable")
+    
+    return _err("not_implemented", code="not_implemented")
+
+@mcp.tool()
+async def cache_stats() -> Dict[str, Any]:
+    try:
+        rag_cache = None
+        if ENHANCED_RAG_SUPPORT and RAG_CACHE_SUPPORT and CacheManager:
+            rag_cache = _err("not_implemented", code="not_implemented")
+        data = {
+            "server_query_cache": len(server._query_cache),
+            "repo_cache": len(server._repo_cache),
+            "rag_cache": rag_cache
+        }
+        return _ok(data)
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
+async def cache_clear(scope: str = "all") -> Dict[str, Any]:
+    try:
+        cleared = []
+        if scope in ("all", "queries"):
+            server._query_cache.clear()
+            cleared.append("queries")
+        if scope in ("all", "repos"):
+            server._repo_cache.clear()
+            cleared.append("repos")
+        if scope in ("all", "rag") and ENHANCED_RAG_SUPPORT and RAG_CACHE_SUPPORT and CacheManager:
+            cleared.append("rag")
+        remaining = {
+            "server_query_cache": len(server._query_cache),
+            "repo_cache": len(server._repo_cache),
+        }
+        return _ok({"cleared": cleared, "remaining": remaining})
+    except Exception as e:
+        return _err(str(e))
 
 # ============================================================================
 # Main Entry Point with Multiple Modes
