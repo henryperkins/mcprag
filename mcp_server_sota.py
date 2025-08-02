@@ -886,27 +886,37 @@ async def search_code_raw(
 @mcp.tool()
 async def search_microsoft_docs(query: str, max_results: int = 10) -> str:
     """Search Microsoft Learn documentation"""
-    if not DOCS_SUPPORT:
+    if not DOCS_SUPPORT or not MicrosoftDocsMCPClient:
         return "Microsoft Docs search is not available. Please install microsoft_docs_mcp_client."
 
     try:
-        if not MicrosoftDocsMCPClient:
-            return "Microsoft Docs client is not available. Please install microsoft_docs_mcp_client."
         async with MicrosoftDocsMCPClient() as client:
             results = await client.search_docs(query=query, max_results=max_results)
 
-            if not results:
-                return f"No Microsoft documentation found for '{query}'."
+        if not results:
+            return f"No Microsoft documentation found for '{query}'."
 
-            formatted = f"📚 Found {len(results)} Microsoft Docs:\n\n"
-            for i, doc in enumerate(results, 1):
-                formatted += f"**{i}. {doc.get('title', 'Untitled')}**\n"
-                formatted += f"🔗 {doc.get('url', '')}\n"
-                formatted += f"{doc.get('content', '')[:300]}...\n\n"
-
-            return formatted
+        formatted = [f"📚 Found {len(results)} Microsoft Docs:\n"]
+        for i, doc in enumerate(results, 1):
+            title = doc.get("title") or "Untitled"
+            url = doc.get("url") or ""
+            snippet = (doc.get("content") or "")[:300]
+            formatted.append(f"{i}. {title}\n   {url}\n   {snippet}...\n")
+        return "\n".join(formatted)
     except Exception as e:
         return f"Error searching Microsoft Docs: {str(e)}"
+
+@mcp.tool()
+async def search_microsoft_docs_raw(query: str, max_results: int = 10) -> Dict[str, Any]:
+    """Search Microsoft Learn documentation (raw JSON)."""
+    if not DOCS_SUPPORT or not MicrosoftDocsMCPClient:
+        return _err("docs_unavailable", code="enhanced_unavailable")
+    try:
+        async with MicrosoftDocsMCPClient() as client:
+            results = await client.search_docs(query=query, max_results=max_results)
+        return _ok({"query": query, "count": len(results or []), "results": results or []})
+    except Exception as e:
+        return _err(str(e))
 
 @mcp.tool()
 async def explain_ranking(
@@ -1121,6 +1131,31 @@ async def preview_query_processing(
         return _err(str(e))
 
 @mcp.tool()
+async def search_code_then_docs(
+    query: str,
+    max_code_results: int = 5,
+    max_doc_results: int = 5
+) -> Dict[str, Any]:
+    """Search code first; if few results, supplement with Microsoft Docs."""
+    try:
+        params = SearchCodeParams(query=query, max_results=max_code_results)
+        code_results = await server.search_code(params)
+        data = {
+            "query": query,
+            "code_results": [r.model_dump() for r in code_results],
+        }
+        if len(code_results) < max_code_results // 2 and DOCS_SUPPORT and MicrosoftDocsMCPClient:
+            try:
+                async with MicrosoftDocsMCPClient() as client:
+                    docs = await client.search_docs(query=query, max_results=max_doc_results)
+                data["docs_results"] = docs or []
+            except Exception as e:
+                data["docs_error"] = str(e)
+        return _ok(data)
+    except Exception as e:
+        return _err(str(e))
+
+@mcp.tool()
 async def search_code_hybrid(
     query: str,
     bm25_weight: float = 0.5,
@@ -1247,6 +1282,7 @@ async def runtime_diagnostics() -> str:
             },
             "index": {
                 "name": os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota"),
+                "docs_available": DOCS_SUPPORT,
             },
             "asyncio": {
                 "policy": type(asyncio.get_event_loop_policy()).__name__,
