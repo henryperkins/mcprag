@@ -69,9 +69,27 @@ class MultiStageRetriever(Retriever):
             logger.warning(f"Failed to get Azure Search configuration: {e}")
             return clients
 
-        # Initialize clients for different indexes
+        # ----------------------------------------------------------
+        # Resolve index names.
+        # When ``self.config`` is a dict (from ``model_dump``) we need to
+        # extract the nested ``azure`` section manually to stay consistent
+        # with the object version.  Falling back to the historical default
+        # keeps backward-compatibility.
+        # ----------------------------------------------------------
+
+        main_index_name: str
+        if hasattr(self.config, "azure"):
+            main_index_name = getattr(self.config.azure, "index_name", None) or "codebase-mcp-sota"
+        elif isinstance(self.config, dict):
+            main_index_name = (
+                self.config.get("azure", {}).get("index_name")
+                or "codebase-mcp-sota"
+            )
+        else:
+            main_index_name = "codebase-mcp-sota"
+
         index_names = {
-            'main': (getattr(self.config.azure, "index_name", None) if hasattr(self.config, "azure") else None) or 'codebase-mcp-sota',
+            'main': main_index_name,
             'patterns': 'codebase-patterns',
             'dependencies': 'codebase-dependencies'
         }

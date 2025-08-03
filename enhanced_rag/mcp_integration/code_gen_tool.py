@@ -108,12 +108,37 @@ class CodeGenerationTool:
             )
 
             # -----------------------------------------------------------------
-            # Generate code using new modules
+            # Generate code and analyze style in parallel
             # -----------------------------------------------------------------
-            generation_result = await self.code_generator.generate(generation_context)
+            # Start style analysis task
+            style_task = asyncio.create_task(
+                self.style_matcher.analyze_style(result.results[:5], language)
+            )
+            
+            # Start code generation task
+            generation_task = asyncio.create_task(
+                self.code_generator.generate(generation_context)
+            )
+            
+            # Get generation result first (critical path)
+            generation_result = await generation_task
             
             if not generation_result['success']:
+                # Cancel style task if generation failed
+                style_task.cancel()
                 return {"success": False, "error": generation_result.get('error', 'Code generation failed')}
+            
+            # Get style info (non-blocking)
+            style_info = None
+            try:
+                style_info = await style_task
+            except Exception:
+                # Style analysis failure is non-critical
+                style_info = None
+            
+            # Attach style info if available
+            if style_info:
+                generation_result['style_info'] = style_info
 
             # -----------------------------------------------------------------
             # Build final response
@@ -133,6 +158,8 @@ class CodeGenerationTool:
                             + ("..." if len((getattr(r, "code_snippet", None) or getattr(r, "content", "") or "")) > 200 else "")
                         ),
                         "relevance": r.score,
+                        "start_line": getattr(r, "start_line", None),
+                        "end_line": getattr(r, "end_line", None),
                     }
                     for r in result.results[:5]
                 ],

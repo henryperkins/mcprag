@@ -54,8 +54,27 @@ class RemoteIndexer:
         Args:
             config: Configuration object (uses get_config() if not provided)
         """
+        # --------------------------------------------------------------
+        # Resolve configuration – accept either the EnhancedConfig object
+        # or a plain ``dict`` produced via ``Config.model_dump()``.  Falling
+        # back to the global singleton keeps existing behaviour while
+        # allowing callers to inject an ad-hoc JSON/dict configuration.
+        # --------------------------------------------------------------
+
         if config is None:
             config = get_config()
+
+        elif isinstance(config, dict):
+            # Reconstruct an EnhancedConfig instance so downstream attribute
+            # access (``config.azure.*``) works uniformly.
+            from enhanced_rag.core.config import get_config as _get_default
+            base = _get_default()
+            azure_overrides = config.get("azure", {})
+            for key in ("endpoint", "admin_key", "index_name"):
+                if key in azure_overrides:
+                    setattr(base.azure, key, azure_overrides[key])
+            # Other top-level sections can be merged similarly if required.
+            config = base
             
         # Check for network disabled environment
         self.network_disabled = os.getenv("CODEX_SANDBOX_NETWORK_DISABLED") == "1"

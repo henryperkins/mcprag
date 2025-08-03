@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## IMPORTANT: Index Creation and Management
+
+**Always use the canonical index creation path to avoid schema drift:**
+
+```bash
+# Create/recreate the canonical index with all features
+python index/create_enhanced_index.py
+
+# Validate index configuration
+python scripts/validate_index_canonical.py
+
+# Check detailed schema (alternative validation)
+python scripts/check_index_schema_v2.py
+```
+
+The canonical index uses:
+- Index name: `codebase-mcp-sota` (set via `ACS_INDEX_NAME` env var)
+- Vector dimensions: 3072 (matching text-embedding-3-large)
+- Semantic config: `semantic-config`
+- Required fields: content, function_name, repository, language, content_vector
+- Enhanced features: vector search, semantic search, scoring profiles
+
 ## Quick Start: Index Your Repository
 
 ```bash
@@ -473,6 +495,10 @@ To maintain code quality and keep the search index updated, consider adding thes
     ],
     "pre-commit": [
       {
+        "command": "bash scripts/pre-commit-index-check.sh",
+        "description": "Check for prohibited index creator files"
+      },
+      {
         "command": "flake8 {staged_files}",
         "description": "Lint Python files before commit"
       },
@@ -749,6 +775,18 @@ python smart_indexer.py --include-metrics --include-test-coverage
 ```
 
 See `docs/AZURE_SEARCH_ADVANCED_FEATURES.md` for detailed implementation guide.
+
+## Index Schema Documentation
+
+For detailed information about Azure AI Search index configuration:
+- [`docs/createindex.md`](docs/createindex.md) - Schema and index creation fundamentals
+- [`docs/createRESTapi.md`](docs/createRESTapi.md) - REST API structure reference
+- [`docs/createavectorindex.md`](docs/createavectorindex.md) - Vector index design and configuration
+- [`docs/updateindex.md`](docs/updateindex.md) - **Primary guide for updates and MCP canonical fields** (see lines 398-449)
+- [`docs/sharesearchresults.md`](docs/sharesearchresults.md) - Result composition and query shaping
+- [`docs/index-plan.md`](docs/index-plan.md) - Comprehensive standardization plan
+
+**Important**: Always use `index/create_enhanced_index.py` for production index creation. The EnhancedIndexBuilder is the single source of truth for schema configuration.
 
 ## Additional Components
 

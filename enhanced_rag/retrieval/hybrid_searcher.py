@@ -86,16 +86,42 @@ class HybridSearcher:
     def _initialize_client(self):
         """Initialize Azure Search client"""
         try:
-            # Support both Config object and dict-like config
+            # --------------------------------------------------------------
+            # Resolve Azure Search connection details from the supplied
+            # configuration. We support 3 shapes:
+            #   1. EnhancedConfig / BaseModel instance – has ``azure`` attr
+            #   2. ``dict`` produced by ``Config.model_dump()`` – contains an
+            #      ``{"azure": { ... }}`` mapping
+            #   3. Fallback to global singleton ``get_config()``.
+            # Keeping the logic here avoids duplicating a helper module-wide
+            # and ensures **exactly one** place determines the active index
+            # name, which is critical for index-stability across the codebase.
+            # --------------------------------------------------------------
+
+            endpoint = admin_key = index_name = None  # sensible defaults
+
+            # Case 1 – Pydantic config object
             if hasattr(self.config, "azure"):
                 endpoint = getattr(self.config.azure, "endpoint", None)
                 admin_key = getattr(self.config.azure, "admin_key", None)
-                index_name = getattr(self.config.azure, "index_name", None) or "codebase-mcp-sota"
-            else:
+                index_name = getattr(self.config.azure, "index_name", None)
+
+            # Case 2 – dict coming from ``model_dump`` or handcrafted
+            elif isinstance(self.config, dict):
+                azure_section = self.config.get("azure", {}) if isinstance(self.config, dict) else {}
+                endpoint = azure_section.get("endpoint")
+                admin_key = azure_section.get("admin_key")
+                index_name = azure_section.get("index_name")
+
+            # Case 3 – final fallback to singleton env-driven config
+            if not all([endpoint, admin_key, index_name]):
                 fallback = get_config()
-                endpoint = getattr(fallback.azure, "endpoint", None)
-                admin_key = getattr(fallback.azure, "admin_key", None)
-                index_name = getattr(fallback.azure, "index_name", None) or "codebase-mcp-sota"
+                endpoint = endpoint or getattr(fallback.azure, "endpoint", None)
+                admin_key = admin_key or getattr(fallback.azure, "admin_key", None)
+                index_name = index_name or getattr(fallback.azure, "index_name", None)
+
+            # Absolute last-chance default to preserve historical behaviour
+            index_name = index_name or "codebase-mcp-sota"
 
             credential = AzureKeyCredential(admin_key)
             self.search_client = SearchClient(
@@ -257,13 +283,17 @@ class HybridSearcher:
             for r in exact_results:
                 if r.id in by_id:
                     by_id[r.id].score += max(r.score, 1.0) * exact_boost
+                    # Mark that this item received exact boost
+                    by_id[r.id].metadata["exact_boost"] = True
                 else:
                     # Seed unseen exact hits so they can surface
+                    metadata_with_boost = r.metadata.copy()
+                    metadata_with_boost["exact_boost"] = True
                     by_id[r.id] = HybridSearchResult(
                         id=r.id,
                         score=max(r.score, 1.0) * exact_boost,
                         content=r.content,
-                        metadata=r.metadata,
+                        metadata=metadata_with_boost,
                     )
 
         fused = sorted(by_id.values(), key=lambda x: x.score, reverse=True)[:top_k]

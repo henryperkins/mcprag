@@ -10,6 +10,7 @@ import re
 import time
 import asyncio
 import logging
+import difflib
 
 # Fix: Move all imports to the top
 from ..utils.response_helpers import ok, err
@@ -638,6 +639,23 @@ async def _search_code_impl(
 
         backend = "enhanced" if server.enhanced_search and not bm25_only else "basic"
 
+        # Guard: if ultra format and items are already strings, pass through
+        if detail_level == "ultra" and items and isinstance(items[0], str):
+            response = {
+                "items": items,
+                "count": len(items),
+                "total": total,
+                "took_ms": took_ms,
+                "query": query,
+                "applied_exact_terms": bool(exact_terms),
+                "backend": backend,
+            }
+            if disable_cache:
+                response["cache_disabled"] = True
+            if include_timings:
+                response["timings_ms"] = {"total": took_ms}
+            return ok(response)
+
         # Normalize to a stable schema for presentation
         items = _normalize_items(items)
 
@@ -658,22 +676,46 @@ async def _search_code_impl(
         # Build compact and ultra lists
         def _build_compact(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             out = []
-            for e in entries:
+            for i, e in enumerate(entries, start=1):
                 line_ref = f":{e['start_line']}" if e.get('start_line') else ""
-                out.append({
+                compact_entry = {
+                    "id": e.get("id"),
+                    "rank": i,
                     "file": f"{e['file']}{line_ref}",
+                    "repo": e.get("repository"),
+                    "language": e.get("language"),
+                    "lines": [e.get("start_line"), e.get("end_line")],
+                    "score": round(float(e.get("relevance", 0) or 0), 4),
                     "match": e.get("function_name") or e.get("class_name") or _first_highlight(e) or "Code match",
                     "context_type": "implementation" if "def " in (e.get("content","")) or "class " in (e.get("content","")) else "general",
-                })
+                    "headline": _headline_from_content(e.get("content", ""))
+                }
+                
+                # Add highlight information if available
+                if e.get("highlights"):
+                    for field, hls in e.get("highlights", {}).items():
+                        if hls:
+                            compact_entry["why"] = hls[0][:120]
+                            compact_entry["why_field"] = field
+                            break
+                else:
+                    # Fallback to first highlight
+                    first_hl = _first_highlight(e)
+                    if first_hl:
+                        compact_entry["why"] = first_hl[:120]
+                        
+                out.append(compact_entry)
             return out
 
         def _build_ultra(entries: List[Dict[str, Any]]) -> List[str]:
             out = []
-            for e in entries:
+            for i, e in enumerate(entries, start=1):
                 line_ref = f":{e['start_line']}" if e.get('start_line') else ""
                 why = _first_highlight(e) or "Match"
                 head = _headline_from_content(e.get("content", ""))
-                out.append(f"{e['file']}{line_ref} | {why} | {head}")
+                lang = e.get('language', '?')
+                score = e.get('relevance', 0)
+                out.append(f"#{i} {e['file']}{line_ref} [{lang}] score={score:.3f} | {why} || {head}")
             return out
 
         results_compact = _build_compact(items)
@@ -689,6 +731,8 @@ async def _search_code_impl(
             "exact_terms": exact_terms,
             "detail_level": detail_level,
             "backend": backend,
+            "has_more": skip + len(items) < total,
+            "next_skip": skip + len(items) if skip + len(items) < total else None,
         }
         if include_timings:
             response["timings_ms"] = {
@@ -760,9 +804,14 @@ async def _basic_search(
         search_params["orderby"] = orderby
 
     loop = asyncio.get_running_loop()
-    response = await loop.run_in_executor(None, lambda: search_client.search(**search_params))
-    items = await loop.run_in_executor(None, lambda: list(response))
-    total = response.get_count() if hasattr(response, "get_count") else len(items)
+    
+    def _exec_search(sc, sp):
+        resp = sc.search(**sp)
+        items = list(resp)
+        total = resp.get_count() if hasattr(resp, "get_count") else len(items)
+        return items, total
+    
+    items, total = await loop.run_in_executor(None, lambda: _exec_search(search_client, search_params))
     return items, total
 
 
@@ -782,11 +831,21 @@ def _truncate_snippets(items: List[Dict[str, Any]], snippet_lines: int) -> None:
 
         if snippet_lines > 1:
             lines = [ln.rstrip() for ln in snippet_full.splitlines()]
-            # If we have a headline, find its position; else use first line index
-            try:
-                idx = next(i for i, ln in enumerate(lines) if _sanitize_text(ln).strip() == headline.strip())
-            except StopIteration:
-                idx = 0
+            # If we have a headline, find its position with fuzzy matching
+            def _find_index(lines, headline):
+                norm = lambda s: _sanitize_text(s).lower()
+                h = norm(headline)
+                # First try exact match
+                for i, ln in enumerate(lines):
+                    if h in norm(ln):
+                        return i
+                # Fallback to fuzzy match
+                for i, ln in enumerate(lines):
+                    if difflib.SequenceMatcher(None, norm(ln), h).ratio() >= 0.6:
+                        return i
+                return 0
+            
+            idx = _find_index(lines, headline) if headline else 0
             # Add subsequent lines, skipping blanks/comments
             extra_needed = snippet_lines - 1
             for ln in lines[idx+1:]:

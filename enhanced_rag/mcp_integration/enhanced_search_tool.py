@@ -85,16 +85,31 @@ class EnhancedSearchTool:
         results_compact = []
         results_ultra_compact = []
 
-        for r in results:
+        for i, r in enumerate(results, start=1):
             # Infer context type from content and explanation
             context_type = self._infer_context_type(r)
 
             # Compact format: structured object with key info
             compact_entry = {
+                'id': getattr(r, 'id', None),
+                'rank': i,
                 'file': f"{r.file_path}:{r.start_line}" if hasattr(r, 'start_line') and r.start_line else r.file_path,
+                'repo': getattr(r, 'repository', None),
+                'language': getattr(r, 'language', None),
+                'lines': [getattr(r, 'start_line', None), getattr(r, 'end_line', None)],
+                'score': round(float(getattr(r, 'score', 0) or 0), 4),
                 'match': self._extract_match_summary(r),
                 'context_type': context_type
             }
+            
+            # Add highlight information if available
+            if hasattr(r, 'highlights') and r.highlights:
+                for field, hls in r.highlights.items():
+                    if hls:
+                        compact_entry['why'] = hls[0][:120]
+                        compact_entry['why_field'] = field
+                        break
+            
             results_compact.append(compact_entry)
 
             # Ultra-compact format: single line string

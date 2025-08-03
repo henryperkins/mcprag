@@ -2,6 +2,7 @@
 Context-aware MCP tool for intelligent assistance
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List, Set
 from pathlib import Path
@@ -92,6 +93,10 @@ class ContextAwareTool:
 
             result['related_files'] = await self._find_related_files(context)
             result['summary'] = self._generate_context_summary(context, result)
+            
+            # Surface git history when requested
+            if include_git_history:
+                result['git_history'] = await self._get_git_history(file_path)
 
             return result
 
@@ -321,14 +326,26 @@ class ContextAwareTool:
     
     async def _get_indirect_imports(self, context: Any) -> List[str]:
         """Get indirect imports through dependencies (batched)"""
+        # Create semaphore for throttling and cache for memoization
+        sem = asyncio.Semaphore(8)
+        cache = {}
+        
         async def analyze_one(p: str):
-            try:
-                return await self.context_analyzer.analyze(p, depth=1)
-            except Exception:
-                return None
+            if p in cache:
+                return cache[p]
+            async with sem:
+                try:
+                    res = await self.context_analyzer.analyze(p, depth=1)
+                except Exception:
+                    res = None
+                cache[p] = res
+                return res
 
         imports = list(set(context.file_context.imports))
-        results = await asyncio.gather(*(analyze_one(imp) for imp in imports))
+        # Cap the number of imports analyzed (top 20)
+        imports_to_analyze = imports[:20]
+        
+        results = await asyncio.gather(*(analyze_one(imp) for imp in imports_to_analyze))
         out: Set[str] = set()
         for r in results:
             if r:
@@ -485,9 +502,17 @@ class ContextAwareTool:
         if scope == 'module':
             return context.module_context.files
         elif scope == 'project':
-            return []  # Would enumerate project files
-        else:
-            return []  # Would enumerate all indexed files
+            # Use project context fields if present
+            if hasattr(context, 'project_context') and hasattr(context.project_context, 'files'):
+                return context.project_context.files
+            # Fallback to empty list
+            return []
+        else:  # scope == 'all'
+            # Use indexed files from project context
+            if hasattr(context, 'project_context') and hasattr(context.project_context, 'indexed_files'):
+                return context.project_context.indexed_files
+            # Fallback to empty list
+            return []
     
     async def _calculate_similarity(self, ast1: Dict, ast2: Dict) -> float:
         """Calculate similarity between two AST structures"""

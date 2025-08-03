@@ -30,7 +30,7 @@ SearchIntent = None
 async def search_code(*args, **kwargs):
     """Compatibility wrapper for search_code."""
     # Import via package to avoid workspace-root import ambiguity
-    from .mcp.mcp.tools import register_tools  # type: ignore
+    from .mcp.tools import register_tools  # type: ignore
 
     # Build a minimal mock MCP to capture the function reference
     captured = {}
