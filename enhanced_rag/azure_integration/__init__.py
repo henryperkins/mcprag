@@ -20,6 +20,8 @@ from .standard_skills import (
     StandardSkillsetBuilder,
     create_standard_skillset
 )
+from .reindex_operations import ReindexOperations, ReindexMethod
+from .index_management import IndexManagement, IndexStats, DocumentStats
 
 __all__ = [
     # Indexer components
@@ -46,5 +48,14 @@ __all__ = [
     'TextSplitSkill',
     'AzureOpenAIEmbeddingSkill',
     'StandardSkillsetBuilder',
-    'create_standard_skillset'
+    'create_standard_skillset',
+    
+    # Reindexing operations
+    'ReindexOperations',
+    'ReindexMethod',
+    
+    # Index management
+    'IndexManagement',
+    'IndexStats',
+    'DocumentStats'
 ]

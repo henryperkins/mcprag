@@ -8,9 +8,12 @@ from typing import Optional, List, Dict, Any
 import re
 import time
 import asyncio
+import logging
 
 from ..utils.response_helpers import ok, err
 from ..config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def register_tools(mcp: Any, server: 'MCPServer') -> None:
@@ -31,9 +34,27 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
         exact_terms: Optional[List[str]] = None,
         disable_cache: bool = False,
         include_timings: bool = False,
-        dependency_mode: str = "auto"
+        dependency_mode: str = "auto",
+        detail_level: str = "full",  # full | compact | ultra
+        snippet_lines: int = 0  # 0 = no truncation, >0 = max lines in snippet
     ) -> Dict[str, Any]:
-        """Search for code using enhanced RAG pipeline."""
+        """Search for code using enhanced RAG pipeline.
+
+        Parameters affecting verbosity:
+        detail_level: Return format of each result.
+            - "full": original rich objects with code snippets (default)
+            - "compact": small dict per result (file/match/context_type)
+            - "ultra": single-line strings optimised for chat UIs
+
+        snippet_lines: If >0 (and detail_level == "full") a smarter truncation
+            algorithm is applied:
+                1. Try the first highlight string ("@search.highlights" / "highlights").
+                2. Otherwise use the first non-empty, non-comment line.
+                3. Fallback to the first raw line.
+            The selected headline is trimmed to 120 chars. When
+            `snippet_lines` > 1, additional raw lines from the snippet are
+            appended up to the requested count.
+        """
         start_time = time.time()
 
         # Ensure async components are started
@@ -44,6 +65,12 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
             exact_terms = _extract_exact_terms(query)
 
         try:
+            # Normalise detail level argument early to avoid repeated lower() calls
+            detail_level = (detail_level or "full").lower().strip()
+
+            if detail_level not in {"full", "compact", "ultra"}:
+                return err("detail_level must be one of 'full', 'compact', or 'ultra'")
+
             # Use enhanced search if available
             if server.enhanced_search and not bm25_only:
                 result = await server.enhanced_search.search(
@@ -61,8 +88,25 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
                     dependency_mode=dependency_mode
                 )
 
-                items = result.get("results", [])
+                # Check if enhanced search returned an error
+                if "error" in result:
+                    return err(result["error"])
+
+                # Pick correct list of items based on requested detail level
+                if detail_level == "compact":
+                    items = result.get("results_compact", result.get("results", []))
+                elif detail_level == "ultra":
+                    items = result.get("results_ultra_compact", result.get("results", []))
+                else:
+                    items = result.get("results", [])
                 total = result.get("total_count", len(items))
+
+                # Add query_id and result_position to items if available
+                for i, item in enumerate(items):
+                    if hasattr(item, 'query_id'):
+                        item['query_id'] = getattr(item, 'query_id', None)
+                    if hasattr(item, 'result_position'):
+                        item['result_position'] = getattr(item, 'result_position', i + 1)
 
             # Fallback to basic Azure Search
             elif server.search_client:
@@ -87,6 +131,77 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
 
             took_ms = (time.time() - start_time) * 1000
 
+            # Optionally truncate multi-line code snippets inside each item to
+            # reduce token usage whilst retaining quick preview context. This
+            # only affects the "full" detail level where full snippets are
+            # present in the payload.
+            # ------------------------------------------------------------------
+            # Optional concise snippet handling for FULL detail level
+            # ------------------------------------------------------------------
+            if snippet_lines > 0 and detail_level == "full":
+                for item in items:
+                    # Helper to pick the most informative single-line snippet
+                    def _select_headline() -> str:
+                        # 1. Prefer first highlight string if present
+                        hl = None
+                        for k in ("@search.highlights", "highlights"):
+                            maybe = item.get(k)
+                            if isinstance(maybe, dict):
+                                # Use first highlight text available across any field
+                                for _field, hls in maybe.items():
+                                    if hls:
+                                        hl = hls[0]
+                                        break
+                            if hl:
+                                break
+
+                        if isinstance(hl, str) and hl.strip():
+                            return hl.strip()
+
+                        # 2. Fallback to first non-empty, non-comment line in snippet
+                        snippet_full = item.get("content") or item.get("code_snippet") or ""
+                        for ln in snippet_full.splitlines():
+                            stripped = ln.strip()
+                            if stripped and not stripped.startswith(("#", "//", "/*")):
+                                return stripped
+
+                        # 3. Ultimate fallback – first line (even if blank/comment)
+                        lines = snippet_full.splitlines()
+                        return lines[0].strip() if lines else ""
+
+                    # Build the truncated snippet respecting snippet_lines
+                    snippet_full = item.get("content") or item.get("code_snippet") or ""
+                    if not isinstance(snippet_full, str):
+                        continue
+
+                    selected_lines = []
+
+                    headline = _select_headline()
+                    if headline:
+                        selected_lines.append(headline)
+
+                    # If more lines requested, add from original snippet after headline
+                    if snippet_lines > 1:
+                        extra_needed = snippet_lines - 1
+                        for ln in snippet_full.splitlines():
+                            if ln.strip() == headline:
+                                continue  # skip duplicate
+                            if extra_needed <= 0:
+                                break
+                            selected_lines.append(ln.rstrip())
+                            extra_needed -= 1
+
+                    # Trim each line to 120 chars
+                    processed = []
+                    for ln in selected_lines:
+                        ln = ln.rstrip()
+                        if len(ln) > 120:
+                            processed.append(ln[:117] + "…")
+                        else:
+                            processed.append(ln)
+
+                    item["content"] = "\n".join(processed)
+
             response = {
                 "items": items,
                 "count": len(items),
@@ -99,6 +214,8 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
 
             if include_timings:
                 response["timings_ms"] = {"total": took_ms}
+            # Include the level so front-ends can decide how to display
+            response["detail_level"] = detail_level
 
             return ok(response)
 
@@ -259,9 +376,38 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
                 explanations = []
 
                 for result in results:
-                    explanation = await server.result_explainer.explain_ranking(
-                        result=result,
+                    # Convert dict to SearchResult for explainer
+                    from enhanced_rag.core.models import SearchResult, SearchQuery
+                    search_result = SearchResult(
+                        id=result.get('id', ''),
+                        score=result.get('relevance', 0.0),
+                        file_path=result.get('file', ''),
+                        repository=result.get('repository', ''),
+                        function_name=result.get('function_name'),
+                        class_name=result.get('class_name'),
+                        code_snippet=result.get('content', ''),
+                        language=result.get('language', ''),
+                        highlights=result.get('highlights', {}),
+                        signature=result.get('signature', ''),
+                        semantic_context=result.get('semantic_context', ''),
+                        imports=result.get('imports', []),
+                        dependencies=result.get('dependencies', [])
+                    )
+
+                    # Create a SearchQuery object
+                    from enhanced_rag.core.models import SearchIntent
+                    search_intent = SearchIntent(intent) if intent else None
+                    search_query = SearchQuery(
                         query=query,
+                        intent=search_intent,
+                        current_file=None,
+                        language=language,
+                        user_id=None
+                    )
+
+                    explanation = await server.result_explainer.explain_ranking(
+                        result=search_result,
+                        query=search_query,
                         context=None
                     )
                     explanations.append(explanation)
@@ -297,11 +443,12 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
                 detected = await server.intent_classifier.classify_intent(query)
                 response["detected_intent"] = detected.value if hasattr(detected, 'value') else str(detected)
 
-            if server.query_enhancer:
-                enhanced = await server.query_enhancer.enhance_query(
-                    query, context=None, intent=response["detected_intent"] or intent
-                )
-                response["enhancements"] = enhanced or {}
+            # Skip query enhancement if no context is available
+            # The query enhancer requires a CodeContext object
+            response["enhancements"] = {
+                "note": "Query enhancement requires file context",
+                "skipped": True
+            }
 
             if server.query_rewriter:
                 rewrites = await server.query_rewriter.rewrite_query(
@@ -336,6 +483,102 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
             return err(str(e))
 
     @mcp.tool()
+    async def track_search_click(
+        query_id: str,
+        doc_id: str,
+        rank: int,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Track user click on search result."""
+        # Try enhanced_search first if available
+        if server.enhanced_search:
+            try:
+                await server.enhanced_search.track_click(
+                    query_id=query_id,
+                    doc_id=doc_id,
+                    rank=rank,
+                    context=context
+                )
+                return ok({"tracked": True, "query_id": query_id, "doc_id": doc_id})
+            except Exception as e:
+                logger.warning(f"Enhanced search track_click failed: {e}")
+        
+        # Fall back to feedback_collector if available
+        if server.feedback_collector:
+            try:
+                # FeedbackCollector might have a different interface, so we adapt
+                if hasattr(server.feedback_collector, 'track_click'):
+                    await server.feedback_collector.track_click(
+                        query_id=query_id,
+                        doc_id=doc_id,
+                        rank=rank,
+                        context=context
+                    )
+                else:
+                    # Store as generic interaction data
+                    await server.feedback_collector.record_interaction({
+                        'type': 'search_click',
+                        'query_id': query_id,
+                        'doc_id': doc_id,
+                        'rank': rank,
+                        'context': context,
+                        'timestamp': time.time()
+                    })
+                return ok({"tracked": True, "query_id": query_id, "doc_id": doc_id})
+            except Exception as e:
+                logger.warning(f"Feedback collector track_click failed: {e}")
+        
+        return err("No tracking backend available")
+
+    @mcp.tool()
+    async def track_search_outcome(
+        query_id: str,
+        outcome: str,
+        score: Optional[float] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Track search outcome (success/failure)."""
+        # Try enhanced_search first if available
+        if server.enhanced_search:
+            try:
+                await server.enhanced_search.track_outcome(
+                    query_id=query_id,
+                    outcome=outcome,
+                    score=score,
+                    context=context
+                )
+                return ok({"tracked": True, "query_id": query_id, "outcome": outcome})
+            except Exception as e:
+                logger.warning(f"Enhanced search track_outcome failed: {e}")
+        
+        # Fall back to feedback_collector if available
+        if server.feedback_collector:
+            try:
+                # FeedbackCollector might have a different interface, so we adapt
+                if hasattr(server.feedback_collector, 'track_outcome'):
+                    await server.feedback_collector.track_outcome(
+                        query_id=query_id,
+                        outcome=outcome,
+                        score=score,
+                        context=context
+                    )
+                else:
+                    # Store as generic interaction data
+                    await server.feedback_collector.record_interaction({
+                        'type': 'search_outcome',
+                        'query_id': query_id,
+                        'outcome': outcome,
+                        'score': score,
+                        'context': context,
+                        'timestamp': time.time()
+                    })
+                return ok({"tracked": True, "query_id": query_id, "outcome": outcome})
+            except Exception as e:
+                logger.warning(f"Feedback collector track_outcome failed: {e}")
+        
+        return err("No tracking backend available")
+
+    @mcp.tool()
     async def cache_stats() -> Dict[str, Any]:
         """Get cache statistics."""
         if server.cache_manager:
@@ -365,57 +608,91 @@ def register_tools(mcp: Any, server: 'MCPServer') -> None:
                 return err(str(e))
         return err("Cache manager not available")
 
-    # Admin tools (only if admin mode enabled)
-    if Config.ADMIN_MODE:
+    # ------------------------------------------------------------------#
+    # Admin tools – now always registered but require runtime confirmation
+    # ------------------------------------------------------------------#
 
-        @mcp.tool()
-        async def index_rebuild(repository: Optional[str] = None) -> Dict[str, Any]:
-            """Rebuild index (admin only)."""
-            if not server.indexer_integration:
-                return err("Indexer integration not available")
+    @mcp.tool()
+    async def index_rebuild(
+        repository: Optional[str] = None,
+        *,
+        confirm: bool = False
+    ) -> Dict[str, Any]:
+        """Rebuild (re-run) the Azure Search indexer.
 
-            try:
-                if hasattr(server.indexer_integration, 'run_indexer_on_demand'):
-                    result = await server.indexer_integration.run_indexer_on_demand(repository)
-                elif hasattr(server.indexer_integration, 'run_indexer'):
-                    result = await server.indexer_integration.run_indexer(repository)
-                else:
-                    return err("Indexer method not found")
+        The tool is potentially destructive: it triggers a full crawl
+        of the configured data-source and may overwrite existing vector
+        data.  Therefore a confirmation step is required.
 
-                return ok({"repository": repository, "result": result})
-            except Exception as e:
-                return err(str(e))
+        Pass `confirm=true` to proceed.
+        """
 
-        @mcp.tool()
-        async def github_index_repo(
-            repo: str,
-            branch: Optional[str] = None,
-            mode: str = "full"
-        ) -> Dict[str, Any]:
-            """Index GitHub repository (admin only)."""
-            if not server.remote_indexer:
-                return err("GitHub indexing not available")
+        if not confirm:
+            return ok({
+                "confirmation_required": True,
+                "message": f"Rebuild indexer for '{repository or '[default]'}'? "
+                           "Call again with confirm=true to proceed."
+            })
 
-            try:
-                owner, repo_name = repo.split('/')
+        if not server.indexer_integration:
+            return err("Indexer integration not available")
 
-                # Run sync method in executor
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: server.remote_indexer.index_remote_repository(
-                        owner, repo_name, ref=branch
-                    )
+        try:
+            if hasattr(server.indexer_integration, 'run_indexer_on_demand'):
+                result = await server.indexer_integration.run_indexer_on_demand(repository)
+            elif hasattr(server.indexer_integration, 'run_indexer'):
+                result = await server.indexer_integration.run_indexer(repository)
+            else:
+                return err("Indexer method not found")
+
+            return ok({"repository": repository, "result": result})
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def github_index_repo(
+        repo: str,
+        branch: Optional[str] = None,
+        *,
+        mode: str = "full",
+        confirm: bool = False
+    ) -> Dict[str, Any]:
+        """Index a GitHub repository.
+
+        Requires confirmation. Call once without `confirm` to get the
+        prompt, again with `confirm=true` to execute.
+        """
+
+        if not confirm:
+            return ok({
+                "confirmation_required": True,
+                "message": f"Index GitHub repository '{repo}' (branch: {branch or '[default]'})? "
+                           "Call again with confirm=true to proceed."
+            })
+
+        if not server.remote_indexer:
+            return err("GitHub indexing not available")
+
+        try:
+            owner, repo_name = repo.split('/')
+
+            # Run sync method in executor
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: server.remote_indexer.index_remote_repository(
+                    owner, repo_name, ref=branch
                 )
+            )
 
-                return ok({
-                    "repo": repo,
-                    "branch": branch,
-                    "mode": mode,
-                    "result": result
-                })
-            except Exception as e:
-                return err(str(e))
+            return ok({
+                "repo": repo,
+                "branch": branch,
+                "mode": mode,
+                "result": result
+            })
+        except Exception as e:
+            return err(str(e))
 
 
 def _extract_exact_terms(query: str) -> List[str]:

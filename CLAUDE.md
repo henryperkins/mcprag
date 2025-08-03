@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Start: Index Your Repository
+
+```bash
+# 1. Check current index status
+python -m enhanced_rag.azure_integration.cli reindex --method status
+
+# 2. Index your repository (recommended)
+python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name your-project
+
+# 3. Verify indexing worked
+python -m enhanced_rag.azure_integration.cli reindex --method status
+
+# If you need to start fresh:
+python -m enhanced_rag.azure_integration.cli reindex --method drop-rebuild
+python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name your-project
+```
 
 ## IMPORTANT: Search Tool Priority
 
@@ -103,63 +119,37 @@ results = await client.use_mcp_tool(
 - Fallback to query enhancement if filter application fails
 - Check response fields: `applied_exact_terms`, `exact_terms_fallback_used`, `exact_terms_error`
 
-#### Hybrid Search with Scoring
-Use `search_code_hybrid` for combined BM25 + semantic search:
+#### BM25-Only Search
+For keyword-based search without semantic understanding, use the `bm25_only` parameter:
 
 ```python
-# Balanced hybrid search (default)
-results = await client.use_mcp_tool(
-    server_name="azure-code-search",
-    tool_name="search_code_hybrid",
-    arguments={
-        "query": "authentication middleware",
-        "bm25_weight": 0.5,
-        "vector_weight": 0.5
-    }
-)
-
-# Favor exact matches (higher BM25 weight)
-results = await client.use_mcp_tool(
-    server_name="azure-code-search",
-    tool_name="search_code_hybrid",
-    arguments={
-        "query": "def authenticate_user",
-        "bm25_weight": 0.8,    # Emphasize keyword matches
-        "vector_weight": 0.2    # Less emphasis on semantic similarity
-    }
-)
-
-# Each result includes individual scores:
-# - hybrid_score: Combined weighted score
-# - bm25_score: Keyword match score (normalized)
-# - semantic_score: Semantic similarity score (normalized)
-```
-
-#### Timing Diagnostics
-All search tools now include detailed timing information:
-
-```python
-# Use diagnose_query for detailed performance analysis
-diagnostics = await client.use_mcp_tool(
-    server_name="azure-code-search",
-    tool_name="diagnose_query",
-    arguments={"query": "database connection pool"}
-)
-
-# Returns detailed stages:
-# - cache_check: Time to check cache
-# - query_enhancement: Intent-based query improvement
-# - azure_search: Actual search execution
-# - filter_rank: Result filtering and ranking
-# - convert_results: Final formatting
-
-# Regular search also includes timings
+# Pure keyword search
 results = await client.use_mcp_tool(
     server_name="azure-code-search",
     tool_name="search_code",
-    arguments={"query": "parse json"}
+    arguments={
+        "query": "def authenticate_user",
+        "bm25_only": true  # Disable semantic search
+    }
 )
-# Check results["timings_ms"] and results["server_timings_ms"]
+```
+
+**Note**: Hybrid search functionality is integrated into the main `search_code` tool. Use `bm25_only: true` for pure keyword search or leave it as default for semantic search.
+
+#### Timing Diagnostics
+All search tools include timing information:
+
+```python
+# Regular search includes timings
+results = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="search_code",
+    arguments={
+        "query": "parse json",
+        "include_timings": true
+    }
+)
+# Check results["data"]["timings_ms"] for performance metrics
 ```
 
 #### Result Explanations
@@ -208,11 +198,11 @@ When MCP returns irrelevant results:
 #### Search Not Finding Expected Results
 - **Check exact term extraction**: Look for `exact_terms` in response to see what was auto-detected
 - **Verify filter application**: Check `applied_exact_terms` and `exact_terms_fallback_used` flags
-- **Try hybrid search**: Use `search_code_hybrid` with higher `bm25_weight` for literal matches
+- **Try keyword search**: Use `search_code` with `bm25_only: true` for literal matches
 
 #### Performance Issues  
 - **Check cache hit**: Look for `cache_status.hit` in results
-- **Analyze bottlenecks**: Use `diagnose_query` to see stage timings
+- **Analyze bottlenecks**: Use `search_code` with `include_timings: true` to see timing information
 - **Bypass cache**: Set `disable_cache: true` for testing
 
 #### Understanding Results
@@ -229,24 +219,69 @@ pip install -r requirements.txt
 
 # Run the SOTA MCP server
 python mcp_server_sota.py
+```
 
-# Create Azure search index
-python create_index.py
+### Index Management and Reindexing
+```bash
+# Check index status
+python -m enhanced_rag.azure_integration.cli reindex --method status
 
-# Index repository with smart chunking
-python smart_indexer.py --repo-path ./path/to/repo --repo-name project-name
+# Validate index schema
+python -m enhanced_rag.azure_integration.cli reindex --method validate
+
+# Backup current index schema
+python -m enhanced_rag.azure_integration.cli reindex --method backup --output schema_backup.json
+
+# Drop and rebuild index (CAUTION: deletes all data)
+python -m enhanced_rag.azure_integration.cli reindex --method drop-rebuild
+python -m enhanced_rag.azure_integration.cli reindex --method drop-rebuild --schema custom_schema.json
+
+# Clear documents (with optional filter)
+python -m enhanced_rag.azure_integration.cli reindex --method clear
+python -m enhanced_rag.azure_integration.cli reindex --method clear --filter "repository eq 'old-repo'"
+
+# Reindex repository
+python -m enhanced_rag.azure_integration.cli reindex --method repository --repo-path . --repo-name mcprag
+python -m enhanced_rag.azure_integration.cli reindex --method repository --repo-path . --repo-name mcprag --clear-first
+```
+
+### Repository Indexing
+```bash
+# Index local repository (recommended method)
+python -m enhanced_rag.azure_integration.cli local-repo --repo-path ./path/to/repo --repo-name project-name
+
+# Index with specific patterns
+python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name mcprag --patterns "*.py" "*.js"
+
+# Index without embeddings (faster)
+python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name mcprag --no-embed-vectors
 
 # Index only changed files (for CI/CD)
-python smart_indexer.py --files file1.py file2.js
+python -m enhanced_rag.azure_integration.cli changed-files --files file1.py file2.js --repo-name mcprag
+```
 
-# Basic indexing (legacy)
-python indexer.py
+### Azure Indexer Management
+```bash
+# Create an indexer for automated updates from blob storage
+python -m enhanced_rag.azure_integration.cli create-indexer \
+  --name my-indexer \
+  --source azureblob \
+  --conn "DefaultEndpointsProtocol=https;AccountName=..." \
+  --container my-container \
+  --index codebase-mcp-sota \
+  --schedule-minutes 120
 
-# Test setup
-python test_setup.py
+# Check indexer status
+python -m enhanced_rag.azure_integration.cli indexer-status --name my-indexer
+```
 
-# Check status
-python status.py
+### Index Creation and Validation
+```bash
+# Create enhanced index with all features
+python -m enhanced_rag.azure_integration.cli create-enhanced-index --name codebase-mcp-sota
+
+# Validate vector dimensions
+python -m enhanced_rag.azure_integration.cli validate-index --name codebase-mcp-sota --check-dimensions 3072
 ```
 
 ### JavaScript/TypeScript
@@ -268,8 +303,10 @@ This is a **state-of-the-art code search solution** that combines Azure Cognitiv
 
 ### Core Components
 
-1. **Smart Indexer (`smart_indexer.py`)** - AST-based code chunking system
-   - Extracts semantic meaning from Python functions/classes using `ast` module
+1. **Enhanced RAG Azure Integration (`enhanced_rag/azure_integration/`)** - Comprehensive indexing system
+   - **LocalRepositoryIndexer** - AST-based code chunking with semantic extraction
+   - **ReindexOperations** - Complete reindexing strategies (drop/rebuild, incremental, clear)
+   - **IndexManagement** - Index optimization, duplicate detection, statistics
    - Parses JavaScript/TypeScript via Babel AST (`parse_js.mjs`)
    - Creates rich context: function signatures, imports, function calls, docstrings
    - Supports incremental indexing of changed files
@@ -490,6 +527,58 @@ docs = await client.use_mcp_tool(
 
 For building extensions or automated workflows, see the [Claude Code SDK documentation](https://docs.anthropic.com/en/docs/claude-code/sdk).
 
+### Programmatic Reindexing API
+
+The enhanced_rag module provides a Python API for reindexing operations:
+
+```python
+from enhanced_rag.azure_integration import ReindexOperations, ReindexMethod, IndexManagement
+import asyncio
+
+async def manage_index():
+    # Initialize operations
+    reindex_ops = ReindexOperations()
+    index_mgmt = IndexManagement()
+    
+    # Get index status
+    info = await reindex_ops.get_index_info()
+    print(f"Documents: {info['document_count']}")
+    
+    # Validate schema
+    validation = await reindex_ops.validate_index_schema()
+    if not validation['valid']:
+        print(f"Schema issues: {validation['issues']}")
+    
+    # Backup schema before changes
+    await reindex_ops.backup_index_schema("backup.json")
+    
+    # Clear old documents
+    deleted = await reindex_ops.clear_documents("repository eq 'old-project'")
+    print(f"Deleted {deleted} documents")
+    
+    # Reindex repository
+    success = await reindex_ops.reindex_repository(
+        repo_path="./my-project",
+        repo_name="my-project",
+        method=ReindexMethod.INCREMENTAL
+    )
+    
+    # Get optimization recommendations
+    optimizations = await index_mgmt.optimize_index()
+    for rec in optimizations['recommendations']:
+        print(f"{rec['type']}: {rec['message']}")
+    
+    # Find duplicates
+    duplicates = await index_mgmt.find_duplicates()
+    print(f"Found {len(duplicates)} duplicate groups")
+    
+    # Export data for analysis
+    await index_mgmt.export_index_data("export.json", sample_size=100)
+
+# Run the async function
+asyncio.run(manage_index())
+```
+
 ### Advanced SDK Integration Patterns
 
 The codebase includes `mcp_server_sdk.py` as an example of SDK-based implementation with advanced features:
@@ -671,18 +760,85 @@ The codebase includes a Microsoft Docs search integration via MCP:
 - **Important**: Currently non-functional as Microsoft Learn doesn't provide a public MCP endpoint
 - The system defaults to disabled network mode and returns empty results
 
+## Troubleshooting
+
+### Common Indexing Issues
+
+1. **"The property 'file_name' does not exist" error**
+   - **Issue**: Field name mismatch between indexer and schema
+   - **Fix**: Already fixed in `enhanced_rag/azure_integration/indexer_integration.py`
+   - **If persists**: Check that you're using the latest code
+
+2. **Empty search results after indexing**
+   - **Check index status**: `python -m enhanced_rag.azure_integration.cli reindex --method status`
+   - **Validate schema**: `python -m enhanced_rag.azure_integration.cli reindex --method validate`
+   - **Verify documents exist**: Check the document count in status output
+   - **Try reindexing**: `python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name mcprag`
+
+3. **Import errors with Azure SDK**
+   - **Issue**: Missing or outdated Azure Search SDK
+   - **Fix**: `pip install --upgrade azure-search-documents==11.6.0b1`
+
+4. **Configuration errors**
+   - **Issue**: Missing environment variables
+   - **Fix**: Ensure `.env` file contains:
+     ```
+     ACS_ENDPOINT=https://your-search-service.search.windows.net
+     ACS_ADMIN_KEY=your-admin-key
+     AZURE_OPENAI_KEY=your-openai-key (optional for embeddings)
+     ```
+
+### Reindexing Best Practices
+
+1. **Before major changes**: Always backup your schema
+   ```bash
+   python -m enhanced_rag.azure_integration.cli reindex --method backup --output backup_$(date +%Y%m%d).json
+   ```
+
+2. **For schema changes**: Use drop-rebuild method
+   ```bash
+   python -m enhanced_rag.azure_integration.cli reindex --method drop-rebuild
+   python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name mcprag
+   ```
+
+3. **For content updates**: Use incremental indexing
+   ```bash
+   python -m enhanced_rag.azure_integration.cli local-repo --repo-path . --repo-name mcprag
+   ```
+
+4. **For cleanup**: Clear specific repositories
+   ```bash
+   python -m enhanced_rag.azure_integration.cli reindex --method clear --filter "repository eq 'old-repo'"
+   ```
+
 ## Known Issues and Limitations
 
-Based on testing and recent improvements, the following issues have been identified:
+Based on testing and recent improvements, the following issues have been identified and addressed:
+
+### Recently Fixed Issues
+
+1. **Field name mismatch (`file_name` vs `file_path`)** - ✅ FIXED
+   - The indexer was using `file_name` but schema expects `file_path`
+   - Fixed in `enhanced_rag/azure_integration/indexer_integration.py`
+
+2. **Missing reindexing tools** - ✅ FIXED
+   - Added comprehensive reindexing operations module
+   - Integrated with CLI for easy access
+   - Full programmatic API available
+
+3. **No index management utilities** - ✅ FIXED
+   - Added index statistics, duplicate detection, optimization recommendations
+   - Export functionality for data analysis
+   - Stale document detection
+
+### Current Status
 
 ### Tool Functionality Status
 
 #### ✅ **Fully Functional**:
 - `search_code` - Semantic search with automatic exact term filtering, timing diagnostics, and cache status
 - `search_code_raw` - Direct Azure Search results for exact code matches
-- `search_code_hybrid` - True BM25/semantic blending with configurable weights
 - `preview_query_processing` - Shows query enhancements and intent detection
-- `diagnose_query` - Detailed stage timings and cache analysis
 - `explain_ranking` - Ranking factor explanations with fallback handling
 - `cache_stats` / `cache_clear` - TTL cache management with LRU eviction
 - `index_rebuild` - Indexer operations with method existence checking
@@ -706,4 +862,4 @@ Based on testing and recent improvements, the following issues have been identif
 
 3. **Intent Usage**: Adds boost terms - `implement` boosts function/class, `debug` boosts error handling.
 
-4. **Performance**: Hybrid search runs dual queries. Use `diagnose_query` for bottleneck analysis.
+4. **Performance**: Use `include_timings: true` in search queries for performance analysis.

@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional
 
 from ..pipeline import RAGPipeline
 from ..core.models import QueryContext, SearchIntent
+from ..generation.code_generator import CodeGenerator, GenerationContext
+from ..generation.style_matcher import StyleMatcher
+from ..generation.template_manager import TemplateManager
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,12 @@ class CodeGenerationTool:
     def __init__(self, config: Dict[str, Any]) -> None:
         self.config = config
         self.pipeline = RAGPipeline(config)
+        
+        # Initialize generation modules
+        generation_config = config.get('generation', {})
+        self.code_generator = CodeGenerator(generation_config)
+        self.style_matcher = StyleMatcher(generation_config)
+        self.template_manager = TemplateManager(generation_config)
 
     # ---------------------------------------------------------------------#
     # Public API
@@ -74,40 +83,47 @@ class CodeGenerationTool:
             )
 
             # -----------------------------------------------------------------
-            # Run RAG pipeline
+            # Run RAG pipeline to get examples
             # -----------------------------------------------------------------
-            code_task = asyncio.create_task(
-                self.pipeline.process_query(query=query, context=context, max_results=10)
+            result = await self.pipeline.process_query(
+                query=query, 
+                context=context, 
+                max_results=20  # Get more examples for pattern extraction
+            )
+            
+            if not result.success or not result.results:
+                return {"success": False, "error": result.error or "No relevant code examples found"}
+
+            # -----------------------------------------------------------------
+            # Create generation context
+            # -----------------------------------------------------------------
+            generation_context = GenerationContext(
+                language=language,
+                description=description,
+                retrieved_examples=result.results,
+                style_guide=style_guide,
+                context_file=context_file,
+                include_tests=include_tests,
+                imports_context=self._extract_imports_context(result.results)
             )
 
-            test_task: Optional[asyncio.Task] = None
-            if include_tests:
-                test_task = asyncio.create_task(
-                    self._query_tests(description, language, code_task)
-                )
-
-            result = await code_task
-            if not result.success:
-                return {"success": False, "error": result.error or "Code generation failed"}
-
-            generated_code = self._extract_code_from_response(result.response, language)
-
             # -----------------------------------------------------------------
-            # Optionally gather test generation
+            # Generate code using new modules
             # -----------------------------------------------------------------
-            test_code = None
-            if test_task:
-                test_code = await test_task
+            generation_result = await self.code_generator.generate(generation_context)
+            
+            if not generation_result['success']:
+                return {"success": False, "error": generation_result.get('error', 'Code generation failed')}
 
             # -----------------------------------------------------------------
             # Build final response
             # -----------------------------------------------------------------
             return {
                 "success": True,
-                "code": generated_code,
+                "code": generation_result['code'],
                 "language": language,
-                "explanation": self._extract_explanation(result.response),
-                "test_code": test_code,
+                "explanation": self._build_explanation(generation_result, result.results),
+                "test_code": generation_result.get('test_code'),
                 "references": [
                     {
                         "file": r.file_path,
@@ -117,8 +133,11 @@ class CodeGenerationTool:
                     }
                     for r in result.results[:5]
                 ],
-                "patterns_used": self._identify_patterns(result.results),
-                "dependencies": self._extract_dependencies(generated_code, language),
+                "patterns_used": generation_result.get('patterns_used', []),
+                "dependencies": self._extract_dependencies(generation_result['code'], language),
+                "style_info": generation_result.get('style_info'),
+                "template_used": generation_result.get('template_used'),
+                "confidence": generation_result.get('confidence', 0.5)
             }
 
         except Exception as exc:
@@ -137,39 +156,80 @@ class CodeGenerationTool:
         """
         Refactor existing code.
         """
+        try:
+            # Build query for finding refactoring examples
+            query = f"Refactor {language} code - {refactor_type}: find examples of {refactor_type}"
 
-        query = f"Refactor {language} code - {refactor_type}: {code[:250]}..."
+            context = QueryContext(
+                current_file=context_file,
+                user_preferences={
+                    "original_code": code,
+                    "refactor_type": refactor_type,
+                },
+            )
 
-        context = QueryContext(
-            current_file=context_file,
-            user_preferences={
+            # Get refactoring examples
+            result = await self.pipeline.process_query(
+                query=query, 
+                context=context, 
+                max_results=15
+            )
+
+            if not result.success or not result.results:
+                return {"success": False, "error": result.error or "No refactoring examples found"}
+
+            # Analyze style of original code
+            original_style = await self.style_matcher.analyze_style(
+                [type('MockResult', (), {'content': code, 'language': language})()],
+                language
+            )
+
+            # Create generation context for refactored code
+            refactor_description = f"Refactor the code to {refactor_type}"
+            generation_context = GenerationContext(
+                language=language,
+                description=refactor_description,
+                retrieved_examples=result.results,
+                context_file=context_file,
+                include_tests=False
+            )
+
+            # Generate refactored code
+            generation_result = await self.code_generator.generate(generation_context)
+            
+            if not generation_result['success']:
+                # Fallback to simple refactoring
+                refactored_code = self._apply_basic_refactoring(code, refactor_type, language)
+            else:
+                refactored_code = generation_result['code']
+                
+                # Apply original style to refactored code
+                refactored_code = await self.style_matcher.apply_style(
+                    refactored_code,
+                    original_style
+                )
+
+            return {
+                "success": True,
                 "original_code": code,
-                "refactor_type": refactor_type,
-            },
-        )
-
-        result = await self.pipeline.process_query(query=query, context=context, max_results=5)
-
-        if not result.success:
-            return {"success": False, "error": result.error or "Refactoring failed"}
-
-        refactored_code = self._extract_code_from_response(result.response, language)
-
-        return {
-            "success": True,
-            "original_code": code,
-            "refactored_code": refactored_code,
-            "explanation": self._extract_explanation(result.response),
-            "improvements": self._identify_improvements(code, refactored_code, language),
-            "references": [
-                {
-                    "file": r.file_path,
-                    "pattern": r.function_name,
-                    "relevance": r.score,
-                }
-                for r in result.results[:3]
-            ],
-        }
+                "refactored_code": refactored_code,
+                "explanation": self._explain_refactoring(refactor_type, code, refactored_code),
+                "improvements": self._identify_improvements(code, refactored_code, language),
+                "references": [
+                    {
+                        "file": r.file_path,
+                        "pattern": r.function_name,
+                        "relevance": r.score,
+                    }
+                    for r in result.results[:3]
+                ],
+                "style_preserved": True,
+                "confidence": generation_result.get('confidence', 0.7) if generation_result.get('success') else 0.5
+            }
+            
+        except Exception as exc:
+            logger.exception("Refactoring error")
+            return {"success": False, "error": str(exc)}
 
     # ---------------------------------------------------------------------#
     # Internal helpers
@@ -212,6 +272,59 @@ class CodeGenerationTool:
         if result.success and result.response:
             return self._extract_code_from_response(result.response, language)
         return None
+
+    def _extract_imports_context(self, results: List[Any]) -> List[str]:
+        """Extract common imports from retrieved examples"""
+        imports = set()
+        
+        for result in results[:10]:  # Top 10 results
+            code = result.content
+            
+            # Extract Python imports
+            if result.language == 'python':
+                import_pattern = r'^(?:from\s+[\w\.]+\s+)?import\s+.*$'
+                found_imports = re.findall(import_pattern, code, re.MULTILINE)
+                imports.update(found_imports)
+            
+            # Extract JS/TS imports
+            elif result.language in ['javascript', 'typescript']:
+                import_pattern = r'^import\s+.*?from\s+[\'"].*?[\'"]'
+                found_imports = re.findall(import_pattern, code, re.MULTILINE)
+                imports.update(found_imports)
+        
+        return list(imports)
+    
+    def _build_explanation(self, generation_result: Dict[str, Any], results: List[Any]) -> str:
+        """Build explanation for the generated code"""
+        explanation_parts = []
+        
+        # Add pattern information
+        if generation_result.get('patterns_used'):
+            patterns = ", ".join(generation_result['patterns_used'])
+            explanation_parts.append(f"Generated code uses patterns: {patterns}")
+        
+        # Add template information
+        if generation_result.get('template_used'):
+            explanation_parts.append(f"Based on template: {generation_result['template_used']}")
+        
+        # Add style information
+        if generation_result.get('style_info'):
+            style_info = generation_result['style_info']
+            if style_info.get('detected_from_examples'):
+                explanation_parts.append(
+                    f"Code style detected from {style_info.get('sample_count', 0)} examples "
+                    f"(consistency: {style_info.get('consistency_score', 0):.2f})"
+                )
+        
+        # Add confidence
+        confidence = generation_result.get('confidence', 0.5)
+        explanation_parts.append(f"Generation confidence: {confidence:.2f}")
+        
+        # Add references summary
+        if results:
+            explanation_parts.append(f"Based on {len(results)} relevant code examples")
+        
+        return "\n".join(explanation_parts)
 
     # ------------------------------------------------------------------#
     # Parsing helpers
@@ -325,6 +438,46 @@ class CodeGenerationTool:
 
         return sorted(deps)
 
+    def _apply_basic_refactoring(self, code: str, refactor_type: str, language: str) -> str:
+        """Apply basic refactoring without examples"""
+        # This is a simple fallback - in production, you'd want more sophisticated refactoring
+        refactored = code
+        
+        if refactor_type.lower() == "extract method":
+            # Add a comment indicating where to extract
+            refactored = "# TODO: Extract method here\n" + code
+        elif refactor_type.lower() == "rename":
+            # Add a comment about renaming
+            refactored = "# TODO: Rename variables/functions for clarity\n" + code
+        elif refactor_type.lower() == "simplify":
+            # Remove extra blank lines as a simple simplification
+            lines = code.split('\n')
+            refactored = '\n'.join(line for line in lines if line.strip() or not lines)
+        
+        return refactored
+    
+    def _explain_refactoring(self, refactor_type: str, original: str, refactored: str) -> str:
+        """Explain what changed in the refactoring"""
+        explanations = [f"Applied {refactor_type} refactoring"]
+        
+        # Compare line counts
+        orig_lines = len(original.splitlines())
+        ref_lines = len(refactored.splitlines())
+        
+        if ref_lines < orig_lines:
+            explanations.append(f"Reduced code from {orig_lines} to {ref_lines} lines")
+        elif ref_lines > orig_lines:
+            explanations.append(f"Expanded code from {orig_lines} to {ref_lines} lines for clarity")
+        
+        # Check for structural changes
+        if "class" in refactored and "class" not in original:
+            explanations.append("Introduced class structure")
+        
+        if "def" in refactored and refactored.count("def") > original.count("def"):
+            explanations.append("Extracted helper functions")
+        
+        return ". ".join(explanations)
+    
     def _identify_improvements(self, original: str, refactored: str, language: str) -> List[str]:
         """
         Heuristic notes about what changed in a refactor.

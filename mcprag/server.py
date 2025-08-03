@@ -12,14 +12,27 @@ from pathlib import Path
 from .config import Config
 from .compatibility.socketpair_patch import apply_patches
 
-# Import what we need from enhanced_rag
+# Import what we need from enhanced_rag - separate try/except for each component
 try:
     from enhanced_rag.mcp_integration.enhanced_search_tool import EnhancedSearchTool
-    from enhanced_rag.mcp_integration.code_gen_tool import CodeGenerationTool
-    from enhanced_rag.mcp_integration.context_aware_tool import ContextAwareTool
-    ENHANCED_RAG_AVAILABLE = True
+    ENHANCED_SEARCH_AVAILABLE = True
 except ImportError:
-    ENHANCED_RAG_AVAILABLE = False
+    ENHANCED_SEARCH_AVAILABLE = False
+
+try:
+    from enhanced_rag.mcp_integration.code_gen_tool import CodeGenerationTool
+    CODE_GEN_AVAILABLE = True
+except ImportError:
+    CODE_GEN_AVAILABLE = False
+
+try:
+    from enhanced_rag.mcp_integration.context_aware_tool import ContextAwareTool
+    CONTEXT_AWARE_AVAILABLE = True
+except ImportError:
+    CONTEXT_AWARE_AVAILABLE = False
+
+# For backward compatibility
+ENHANCED_RAG_AVAILABLE = ENHANCED_SEARCH_AVAILABLE or CODE_GEN_AVAILABLE or CONTEXT_AWARE_AVAILABLE
 
 try:
     from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider
@@ -152,14 +165,20 @@ class MCPServer:
 
     def _init_components(self):
         """Initialize enhanced_rag components."""
-        # Initialize search tools if available
-        if ENHANCED_RAG_AVAILABLE:
+        # Initialize search tools if available - each component independently
+        if ENHANCED_SEARCH_AVAILABLE:
             self.enhanced_search = EnhancedSearchTool(self.rag_config)
-            self.code_gen = CodeGenerationTool(self.rag_config)
-            self.context_aware = ContextAwareTool(self.rag_config)
         else:
             self.enhanced_search = None
+            
+        if CODE_GEN_AVAILABLE:
+            self.code_gen = CodeGenerationTool(self.rag_config)
+        else:
             self.code_gen = None
+            
+        if CONTEXT_AWARE_AVAILABLE:
+            self.context_aware = ContextAwareTool(self.rag_config)
+        else:
             self.context_aware = None
 
         # Initialize basic Azure Search as fallback
@@ -173,8 +192,18 @@ class MCPServer:
             self.search_client = None
 
         # Initialize pipeline if available
-        # RAGPipeline expects a dict-like config; pass server.rag_config
-        self.pipeline = RAGPipeline(self.rag_config) if PIPELINE_AVAILABLE else None
+        # RAGPipeline expects a dict-like config; pass server.rag_config with model_updater
+        if PIPELINE_AVAILABLE:
+            pipeline_config = self.rag_config.copy()
+            # Wire up adaptive ranking and ModelUpdater if learning support is available
+            if LEARNING_SUPPORT:
+                # Initialize model_updater first since pipeline needs it
+                self.model_updater = ModelUpdater()
+                pipeline_config['model_updater'] = self.model_updater
+                pipeline_config['adaptive_ranking'] = True
+            self.pipeline = RAGPipeline(pipeline_config)
+        else:
+            self.pipeline = None
 
         # Initialize semantic tools
         if SEMANTIC_SUPPORT:
@@ -202,30 +231,36 @@ class MCPServer:
         if LEARNING_SUPPORT:
             self.feedback_collector = FeedbackCollector(storage_path=str(Config.FEEDBACK_DIR))
             self.usage_analyzer = UsageAnalyzer(feedback_collector=self.feedback_collector)
-            self.model_updater = ModelUpdater()
+            # model_updater initialized above for pipeline
         else:
             self.feedback_collector = None
             self.usage_analyzer = None
             self.model_updater = None
 
-        # Initialize admin components
-        if AZURE_ADMIN_SUPPORT and Config.ADMIN_MODE:
-            self.index_ops = IndexOperations(
-                endpoint=Config.ENDPOINT,
-                admin_key=Config.ADMIN_KEY
-            )
-            self.indexer_integration = IndexerIntegration()
-            self.doc_ops = DocumentOperations(
-                endpoint=Config.ENDPOINT,
-                admin_key=Config.ADMIN_KEY
-            )
+        # Initialize admin components if dependencies are available.
+        if AZURE_ADMIN_SUPPORT:
+            try:
+                self.index_ops = IndexOperations(
+                    endpoint=Config.ENDPOINT,
+                    admin_key=Config.ADMIN_KEY
+                )
+                self.indexer_integration = IndexerIntegration()
+                self.doc_ops = DocumentOperations(
+                    endpoint=Config.ENDPOINT,
+                    admin_key=Config.ADMIN_KEY
+                )
+            except Exception as e:
+                logger.warning(f"Admin components unavailable: {e}")
+                self.index_ops = None
+                self.indexer_integration = None
+                self.doc_ops = None
         else:
             self.index_ops = None
             self.indexer_integration = None
             self.doc_ops = None
 
         # Initialize GitHub integration
-        if GITHUB_SUPPORT and Config.ADMIN_MODE:
+        if GITHUB_SUPPORT:
             try:
                 self.github_client = GitHubClient()
                 self.remote_indexer = RemoteIndexer()

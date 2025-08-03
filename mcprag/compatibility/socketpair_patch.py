@@ -66,6 +66,13 @@ class _PipeSelectorEventLoop(asyncio.SelectorEventLoop):
                 except OSError:
                     pass
 
+            def send(self, data):
+                """Write data to the pipe."""
+                try:
+                    return os.write(self.fd, data)
+                except (BlockingIOError, InterruptedError):
+                    return 0
+
         self._ssock = _PipeFD(rfd)
         self._csock = _PipeFD(wfd)
 

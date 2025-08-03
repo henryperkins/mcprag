@@ -14,6 +14,7 @@ Commands:
 import argparse
 import sys
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 import logging
@@ -21,6 +22,7 @@ import logging
 from enhanced_rag.core.config import get_config
 from .enhanced_index_builder import EnhancedIndexBuilder
 from .indexer_integration import IndexerIntegration, DataSourceType, LocalRepositoryIndexer
+from .reindex_operations import ReindexOperations, ReindexMethod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -182,6 +184,107 @@ async def cmd_create_indexer(args):
     return 0
 
 
+async def cmd_reindex(args):
+    """Reindex content using various methods."""
+    logger.info(f"Starting reindex with method: {args.method}")
+    
+    reindex_ops = ReindexOperations()
+    
+    try:
+        if args.method == 'drop-rebuild':
+            # Drop and rebuild index
+            success = await reindex_ops.drop_and_rebuild(args.schema)
+            if not success:
+                return 1
+            logger.info("Index rebuilt. Use 'local-repo' command to repopulate.")
+            
+        elif args.method == 'clear':
+            # Clear documents
+            count = await reindex_ops.clear_documents(args.filter)
+            logger.info(f"Cleared {count} documents")
+            
+        elif args.method == 'repository':
+            # Reindex repository
+            method = ReindexMethod.CLEAR_AND_RELOAD if args.clear_first else ReindexMethod.INCREMENTAL
+            success = await reindex_ops.reindex_repository(
+                repo_path=args.repo_path,
+                repo_name=args.repo_name,
+                method=method,
+                clear_first=args.clear_first
+            )
+            if not success:
+                return 1
+                
+        elif args.method == 'status':
+            # Get index status
+            info = await reindex_ops.get_index_info()
+            print(f"\nIndex: {info.get('name', 'Unknown')}")
+            print(f"Fields: {info.get('fields', 0)}")
+            print(f"Documents: {info.get('document_count', 0)}")
+            print(f"Vector Search: {info.get('vector_search', False)}")
+            print(f"Semantic Search: {info.get('semantic_search', False)}")
+            
+        elif args.method == 'validate':
+            # Validate schema
+            validation = await reindex_ops.validate_index_schema()
+            print(f"\nSchema Valid: {validation['valid']}")
+            if validation.get('issues'):
+                print("Issues:")
+                for issue in validation['issues']:
+                    print(f"  - {issue}")
+            if validation.get('warnings'):
+                print("Warnings:")
+                for warning in validation['warnings']:
+                    print(f"  - {warning}")
+                    
+        elif args.method == 'backup':
+            # Backup schema
+            output_path = args.output or f"index_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            success = await reindex_ops.backup_index_schema(output_path)
+            if success:
+                logger.info(f"Schema backed up to {output_path}")
+            else:
+                return 1
+                
+    except Exception as e:
+        logger.error(f"Reindex operation failed: {e}")
+        return 1
+    
+    return 0
+
+
+async def cmd_indexer_status(args):
+    """Check indexer status."""
+    logger.info(f"Checking indexer status: {args.name}")
+    
+    reindex_ops = ReindexOperations()
+    
+    try:
+        status = await reindex_ops.get_indexer_status(args.name)
+        if status:
+            print(f"\nIndexer: {args.name}")
+            print(f"Status: {status['status']}")
+            print(f"Last Result: {status['last_result']}")
+            print(f"Execution History: {status['execution_history']} runs")
+            if status['errors']:
+                print("Errors:")
+                for error in status['errors'][:5]:  # Show first 5 errors
+                    print(f"  - {error}")
+            if status['warnings']:
+                print("Warnings:")
+                for warning in status['warnings'][:5]:  # Show first 5 warnings
+                    print(f"  - {warning}")
+        else:
+            logger.error(f"Indexer '{args.name}' not found")
+            return 1
+            
+    except Exception as e:
+        logger.error(f"Failed to get indexer status: {e}")
+        return 1
+    
+    return 0
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -337,6 +440,62 @@ def main():
         help='Include git metadata extraction'
     )
     
+    # reindex command
+    reindex_parser = subparsers.add_parser(
+        'reindex',
+        help='Reindex content using various methods'
+    )
+    reindex_parser.add_argument(
+        '--method',
+        type=str,
+        choices=['drop-rebuild', 'clear', 'repository', 'status', 'validate', 'backup'],
+        required=True,
+        help='Reindexing method'
+    )
+    reindex_parser.add_argument(
+        '--schema',
+        type=str,
+        help='Path to schema JSON file (for drop-rebuild)'
+    )
+    reindex_parser.add_argument(
+        '--filter',
+        type=str,
+        help='OData filter for clearing documents'
+    )
+    reindex_parser.add_argument(
+        '--repo-path',
+        type=str,
+        default='.',
+        help='Repository path (for repository method)'
+    )
+    reindex_parser.add_argument(
+        '--repo-name',
+        type=str,
+        help='Repository name (for repository method)'
+    )
+    reindex_parser.add_argument(
+        '--clear-first',
+        action='store_true',
+        help='Clear existing documents before reindexing'
+    )
+    reindex_parser.add_argument(
+        '--output',
+        type=str,
+        help='Output path for backup'
+    )
+    
+    # indexer-status command
+    status_parser = subparsers.add_parser(
+        'indexer-status',
+        help='Check indexer status'
+    )
+    status_parser.add_argument(
+        '--name',
+        type=str,
+        required=True,
+        help='Indexer name'
+    )
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -350,6 +509,8 @@ def main():
         'create-enhanced-index': cmd_create_enhanced_index,
         'validate-index': cmd_validate_index,
         'create-indexer': cmd_create_indexer,
+        'reindex': cmd_reindex,
+        'indexer-status': cmd_indexer_status,
     }
     
     if args.command in commands:

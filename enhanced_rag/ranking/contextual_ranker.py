@@ -25,6 +25,7 @@ class RankingFactors:
     proximity_score: float = 0.0
     recency_score: float = 0.0
     quality_score: float = 0.0
+    pattern_match: float = 0.0
 
 
 class ContextualRanker(Ranker):
@@ -95,6 +96,13 @@ class ContextualRanker(Ranker):
             # Update result with new score and explanation
             result.score = final_score
             result.ranking_explanation = self._generate_explanation(factors, weights)
+            
+            # Populate ranking factor fields in SearchResult
+            result.context_similarity = factors.semantic_similarity
+            result.import_overlap = factors.import_similarity
+            if hasattr(factors, 'pattern_match'):
+                result.pattern_match = factors.pattern_match
+            
             ranked_results.append(result)
 
         # Sort by final score
@@ -274,7 +282,8 @@ class ContextualRanker(Ranker):
             'import_similarity': factors.import_similarity,
             'proximity_score': factors.proximity_score,
             'recency_score': factors.recency_score,
-            'quality_score': factors.quality_score
+            'quality_score': factors.quality_score,
+            'pattern_match': factors.pattern_match
         }
 
         for factor_name, factor_value in factor_values.items():
@@ -303,7 +312,8 @@ class ContextualRanker(Ranker):
             'import_similarity': 'Import similarity',
             'proximity_score': 'File proximity',
             'recency_score': 'Recent modification',
-            'quality_score': 'Code quality'
+            'quality_score': 'Code quality',
+            'pattern_match': 'Pattern match'
         }
 
         factor_values = {
@@ -313,7 +323,8 @@ class ContextualRanker(Ranker):
             'import_similarity': factors.import_similarity,
             'proximity_score': factors.proximity_score,
             'recency_score': factors.recency_score,
-            'quality_score': factors.quality_score
+            'quality_score': factors.quality_score,
+            'pattern_match': factors.pattern_match
         }
 
         # Sort factors by contribution
@@ -383,7 +394,8 @@ class ContextualRanker(Ranker):
                 'import_similarity': factors.import_similarity,
                 'proximity_score': factors.proximity_score,
                 'recency_score': factors.recency_score,
-                'quality_score': factors.quality_score
+                'quality_score': factors.quality_score,
+                'pattern_match': factors.pattern_match
             },
             'weights': weights,
             'final_score': self._calculate_weighted_score(factors, weights)

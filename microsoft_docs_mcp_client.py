@@ -1,10 +1,16 @@
 """Microsoft Docs MCP Client - Integrates with Microsoft Learn documentation search"""
 
 import os
-import aiohttp
 import json
 from typing import Dict, Any, List, Optional
 import logging
+
+# Conditional import - aiohttp is optional
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +31,10 @@ class MicrosoftDocsMCPClient:
         self.disable_network = os.getenv("MSDOCS_DISABLE_NETWORK", "1") == "1"
 
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
+        if AIOHTTP_AVAILABLE:
+            self.session = aiohttp.ClientSession()
+        else:
+            self.session = None
         await self.initialize()
         return self
 
@@ -35,9 +44,12 @@ class MicrosoftDocsMCPClient:
 
     async def initialize(self):
         """Initialize connection and get available tools"""
-        # Avoid network if endpoint is known invalid or feature flag disabled
-        if self.disable_network or "learn.microsoft.com/api/mcp" in (self.base_url or ""):
-            logger.warning("Microsoft Docs MCP disabled/unavailable; using fallback")
+        # Avoid network if endpoint is known invalid or feature flag disabled or aiohttp unavailable
+        if not AIOHTTP_AVAILABLE or self.disable_network or "learn.microsoft.com/api/mcp" in (self.base_url or ""):
+            if not AIOHTTP_AVAILABLE:
+                logger.warning("aiohttp not available; Microsoft Docs MCP using fallback")
+            else:
+                logger.warning("Microsoft Docs MCP disabled/unavailable; using fallback")
             self.tools = [{"name": "microsoft_docs_search"}]
             return
 
@@ -87,8 +99,8 @@ class MicrosoftDocsMCPClient:
                 "HTTP session is not initialized. Use 'async with MicrosoftDocsMCPClient()' context manager."
             )
 
-        # Fallback: if network disabled or endpoint invalid, simulate minimal responses
-        if self.disable_network or "learn.microsoft.com/api/mcp" in (self.base_url or ""):
+        # Fallback: if network disabled or endpoint invalid or aiohttp unavailable, simulate minimal responses
+        if not AIOHTTP_AVAILABLE or self.disable_network or "learn.microsoft.com/api/mcp" in (self.base_url or ""):
             method = request.get("method")
             if method == "initialize":
                 return {

@@ -549,7 +549,7 @@ class IndexerIntegration:
                 ),
                 FieldMapping(
                     source_field_name="metadata_storage_name",
-                    target_field_name="file_path"
+                    target_field_name="file_name"
                 ),
                 FieldMapping(
                     source_field_name="metadata_storage_last_modified",
@@ -1026,7 +1026,7 @@ class LocalRepositoryIndexer:
                             "id": doc_id,
                             "repository": repo_name,
                             "file_path": str(file_path),
-                            "file_path": file_path.name,
+                            "file_name": file_path.name,
                             "language": language,
                             "last_modified": last_modified,
                             **chunk,
@@ -1125,7 +1125,7 @@ class LocalRepositoryIndexer:
                         "id": doc_id,
                         "repository": repo_name,
                         "file_path": str(file_path),
-                        "file_path": file_path.name,
+                        "file_name": file_path.name,
                         "language": language,
                         "last_modified": last_modified,
                         **chunk,
