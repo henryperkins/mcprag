@@ -21,7 +21,9 @@ class Config:
     INDEX_NAME: str = os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota")
 
     # Azure OpenAI Configuration (for vector search)
-    AZURE_OPENAI_KEY: Optional[str] = os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+    AZURE_OPENAI_KEY: Optional[str] = os.getenv("AZURE_OPENAI_KEY") or os.getenv(
+        "AZURE_OPENAI_API_KEY"
+    )
     AZURE_OPENAI_ENDPOINT: Optional[str] = os.getenv("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_DEPLOYMENT: Optional[str] = os.getenv("AZURE_OPENAI_DEPLOYMENT")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
@@ -80,11 +82,8 @@ class Config:
                 "api_key": cls.AZURE_OPENAI_KEY,
                 "endpoint": cls.AZURE_OPENAI_ENDPOINT,
                 "deployment": cls.AZURE_OPENAI_DEPLOYMENT or "text-embedding-ada-002",
-                "provider": "azure"
+                "provider": "azure",
             }
         elif cls.OPENAI_API_KEY:
-            return {
-                "api_key": cls.OPENAI_API_KEY,
-                "provider": "openai"
-            }
+            return {"api_key": cls.OPENAI_API_KEY, "provider": "openai"}
         return None

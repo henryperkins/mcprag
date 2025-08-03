@@ -10,4 +10,4 @@ from .config import Config
 
 __version__ = "3.0.0"
 
-__all__ = ['MCPServer', 'create_server', 'Config']
+__all__ = ["MCPServer", "create_server", "Config"]

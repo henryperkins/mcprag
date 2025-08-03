@@ -13,7 +13,7 @@ import sys
 from ..config import Config
 
 
-def register_resources(mcp: Any, server: 'MCPServer') -> None:
+def register_resources(mcp: Any, server: "MCPServer") -> None:
     """Register all MCP resources."""
 
     @mcp.resource("resource://repositories")
@@ -23,22 +23,20 @@ def register_resources(mcp: Any, server: 'MCPServer') -> None:
             if server.search_client:
                 # Use faceted search to get repository counts
                 results = server.search_client.search(
-                    search_text="*",
-                    facets=["repository"],
-                    top=0
+                    search_text="*", facets=["repository"], top=0
                 )
 
-                facets = results.get_facets() if hasattr(results, 'get_facets') else {}
+                facets = results.get_facets() if hasattr(results, "get_facets") else {}
                 repos = facets.get("repository", [])
 
                 repo_list = [
-                    {"name": r['value'], "documents": r['count']}
-                    for r in repos
+                    {"name": r["value"], "documents": r["count"]} for r in repos
                 ]
 
                 # Try to detect current repository
                 import os
                 from pathlib import Path
+
                 current = None
                 cwd = Path(os.getcwd())
                 for parent in [cwd] + list(cwd.parents):
@@ -46,12 +44,15 @@ def register_resources(mcp: Any, server: 'MCPServer') -> None:
                         current = parent.name
                         break
 
-                return json.dumps({
-                    "repositories": repo_list,
-                    "count": len(repo_list),
-                    "current": current,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }, indent=2)
+                return json.dumps(
+                    {
+                        "repositories": repo_list,
+                        "count": len(repo_list),
+                        "current": current,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    indent=2,
+                )
             else:
                 return json.dumps({"error": "Search client not available"})
 
@@ -74,9 +75,9 @@ def register_resources(mcp: Any, server: 'MCPServer') -> None:
                     "cache_manager": server.cache_manager is not None,
                     "learning": server.feedback_collector is not None,
                     "admin_tools": server.index_ops is not None,
-                    "github_integration": server.github_client is not None
+                    "github_integration": server.github_client is not None,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             # Add document count if available
@@ -96,18 +97,19 @@ def register_resources(mcp: Any, server: 'MCPServer') -> None:
         """Get runtime diagnostics information."""
         try:
             diag = {
-                "server": {
-                    "name": server.name,
-                    "version": server.version
-                },
+                "server": {"name": server.name, "version": server.version},
                 "config": {
-                    "endpoint_prefix": Config.ENDPOINT.split('.')[0] + "..." if Config.ENDPOINT else None,
+                    "endpoint_prefix": (
+                        Config.ENDPOINT.split(".")[0] + "..."
+                        if Config.ENDPOINT
+                        else None
+                    ),
                     "index_name": Config.INDEX_NAME,
                     "cache_ttl": Config.CACHE_TTL_SECONDS,
                     "cache_max_entries": Config.CACHE_MAX_ENTRIES,
                     "admin_mode": Config.ADMIN_MODE,
                     "debug_timings": Config.DEBUG_TIMINGS,
-                    "log_level": Config.LOG_LEVEL
+                    "log_level": Config.LOG_LEVEL,
                 },
                 "features": {
                     "enhanced_rag": server.enhanced_search is not None,
@@ -118,18 +120,18 @@ def register_resources(mcp: Any, server: 'MCPServer') -> None:
                     "cache": server.cache_manager is not None,
                     "learning": server.feedback_collector is not None,
                     "admin": server.index_ops is not None,
-                    "github": server.github_client is not None
+                    "github": server.github_client is not None,
                 },
                 "python": {
                     "version": platform.python_version(),
-                    "platform": platform.platform()
+                    "platform": platform.platform(),
                 },
                 "imports": {
                     "mcp_sdk": "mcp.server.fastmcp" in sys.modules,
                     "enhanced_rag": "enhanced_rag" in sys.modules,
-                    "azure_sdk": "azure.search.documents" in sys.modules
+                    "azure_sdk": "azure.search.documents" in sys.modules,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             # Add cache stats if available
@@ -148,19 +150,21 @@ def register_resources(mcp: Any, server: 'MCPServer') -> None:
     async def pipeline_status() -> str:
         """Get enhanced RAG pipeline status."""
         if not server.pipeline:
-            return json.dumps({
-                "available": False,
-                "reason": "Pipeline not initialized"
-            }, indent=2)
+            return json.dumps(
+                {"available": False, "reason": "Pipeline not initialized"}, indent=2
+            )
 
         try:
-            if hasattr(server.pipeline, 'get_pipeline_status'):
+            if hasattr(server.pipeline, "get_pipeline_status"):
                 status = server.pipeline.get_pipeline_status()
                 return json.dumps(status, indent=2)
             else:
-                return json.dumps({
-                    "initialized": True,
-                    "status": "Pipeline available but status method not found"
-                }, indent=2)
+                return json.dumps(
+                    {
+                        "initialized": True,
+                        "status": "Pipeline available but status method not found",
+                    },
+                    indent=2,
+                )
         except Exception as e:
             return json.dumps({"error": str(e)}, indent=2)

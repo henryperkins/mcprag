@@ -31,6 +31,7 @@ async def search_code(*args, **kwargs):
     """Compatibility wrapper for search_code."""
     # Import via package to avoid workspace-root import ambiguity
     from .mcp.mcp.tools import register_tools  # type: ignore
+
     # Build a minimal mock MCP to capture the function reference
     captured = {}
 
@@ -39,16 +40,19 @@ async def search_code(*args, **kwargs):
             def deco(func):
                 captured["search_code"] = func
                 return func
+
             return deco
 
         def resource(self):
             def deco(func):
                 return func
+
             return deco
 
         def prompt(self):
             def deco(func):
                 return func
+
             return deco
 
     mock_mcp = _MockMCP()

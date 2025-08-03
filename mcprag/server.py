@@ -15,33 +15,40 @@ from .compatibility.socketpair_patch import apply_patches
 # Import what we need from enhanced_rag - separate try/except for each component
 try:
     from enhanced_rag.mcp_integration.enhanced_search_tool import EnhancedSearchTool
+
     ENHANCED_SEARCH_AVAILABLE = True
 except ImportError:
     ENHANCED_SEARCH_AVAILABLE = False
 
 try:
     from enhanced_rag.mcp_integration.code_gen_tool import CodeGenerationTool
+
     CODE_GEN_AVAILABLE = True
 except ImportError:
     CODE_GEN_AVAILABLE = False
 
 try:
     from enhanced_rag.mcp_integration.context_aware_tool import ContextAwareTool
+
     CONTEXT_AWARE_AVAILABLE = True
 except ImportError:
     CONTEXT_AWARE_AVAILABLE = False
 
 # For backward compatibility
-ENHANCED_RAG_AVAILABLE = ENHANCED_SEARCH_AVAILABLE or CODE_GEN_AVAILABLE or CONTEXT_AWARE_AVAILABLE
+ENHANCED_RAG_AVAILABLE = (
+    ENHANCED_SEARCH_AVAILABLE or CODE_GEN_AVAILABLE or CONTEXT_AWARE_AVAILABLE
+)
 
 try:
     from enhanced_rag.azure_integration import AzureOpenAIEmbeddingProvider
+
     VECTOR_SUPPORT = True
 except ImportError:
     VECTOR_SUPPORT = False
 
 try:
     from enhanced_rag.pipeline import RAGPipeline
+
     PIPELINE_AVAILABLE = True
 except ImportError:
     PIPELINE_AVAILABLE = False
@@ -50,6 +57,7 @@ try:
     from enhanced_rag.learning.feedback_collector import FeedbackCollector
     from enhanced_rag.learning.usage_analyzer import UsageAnalyzer
     from enhanced_rag.learning.model_updater import ModelUpdater
+
     LEARNING_SUPPORT = True
 except ImportError:
     LEARNING_SUPPORT = False
@@ -58,6 +66,7 @@ try:
     from enhanced_rag.azure_integration.index_operations import IndexOperations
     from enhanced_rag.azure_integration.indexer_integration import IndexerIntegration
     from enhanced_rag.azure_integration.document_operations import DocumentOperations
+
     AZURE_ADMIN_SUPPORT = True
 except ImportError:
     AZURE_ADMIN_SUPPORT = False
@@ -67,6 +76,7 @@ except ImportError:
 try:
     from enhanced_rag.github_integration.api_client import GitHubClient  # type: ignore
     from enhanced_rag.github_integration.remote_indexer import RemoteIndexer  # type: ignore
+
     GITHUB_SUPPORT = True
 except Exception:
     GITHUB_SUPPORT = False
@@ -75,18 +85,21 @@ try:
     from enhanced_rag.semantic.intent_classifier import IntentClassifier
     from enhanced_rag.semantic.query_enhancer import ContextualQueryEnhancer
     from enhanced_rag.semantic.query_rewriter import MultiVariantQueryRewriter
+
     SEMANTIC_SUPPORT = True
 except ImportError:
     SEMANTIC_SUPPORT = False
 
 try:
     from enhanced_rag.ranking.result_explainer import ResultExplainer
+
     RANKING_SUPPORT = True
 except ImportError:
     RANKING_SUPPORT = False
 
 try:
     from enhanced_rag.utils.cache_manager import CacheManager
+
     CACHE_SUPPORT = True
 except ImportError:
     CACHE_SUPPORT = False
@@ -95,28 +108,40 @@ except ImportError:
 try:
     from azure.search.documents import SearchClient
     from azure.core.credentials import AzureKeyCredential
+
     AZURE_SDK_AVAILABLE = True
 except ImportError:
     AZURE_SDK_AVAILABLE = False
 
 # MCP SDK
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp import FastMCP as _FastMCP
+
     MCP_SDK_AVAILABLE = True
+    # Use the real FastMCP
+    FastMCP = _FastMCP
 except ImportError:
     MCP_SDK_AVAILABLE = False
+
     # Fallback for testing
-    class FastMCP:
+    class _MockFastMCP:
         def __init__(self, name: str):
             self.name = name
+
         def tool(self):
             return lambda f: f
+
         def resource(self):
             return lambda f: f
+
         def prompt(self):
             return lambda f: f
-        def run(self, transport: str = 'stdio'):
+
+        def run(self, transport: str = "stdio"):
             print(f"Mock MCP server {self.name} running")
+
+    # Use the mock FastMCP
+    FastMCP = _MockFastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +162,7 @@ class MCPServer:
         # Setup logging
         logging.basicConfig(
             level=getattr(logging, Config.LOG_LEVEL),
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
 
         # Initialize MCP
@@ -154,14 +179,17 @@ class MCPServer:
 
         # Register MCP endpoints
         from .mcp import register_tools, register_resources, register_prompts
+
         register_tools(self.mcp, self)
         register_resources(self.mcp, self)
         register_prompts(self.mcp)
 
-        logger.info(f"MCP Server initialized - Features: "
-                   f"RAG={ENHANCED_RAG_AVAILABLE}, "
-                   f"Vector={VECTOR_SUPPORT}, "
-                   f"Pipeline={PIPELINE_AVAILABLE}")
+        logger.info(
+            f"MCP Server initialized - Features: "
+            f"RAG={ENHANCED_RAG_AVAILABLE}, "
+            f"Vector={VECTOR_SUPPORT}, "
+            f"Pipeline={PIPELINE_AVAILABLE}"
+        )
 
     def _init_components(self):
         """Initialize enhanced_rag components."""
@@ -170,12 +198,12 @@ class MCPServer:
             self.enhanced_search = EnhancedSearchTool(self.rag_config)
         else:
             self.enhanced_search = None
-            
+
         if CODE_GEN_AVAILABLE:
             self.code_gen = CodeGenerationTool(self.rag_config)
         else:
             self.code_gen = None
-            
+
         if CONTEXT_AWARE_AVAILABLE:
             self.context_aware = ContextAwareTool(self.rag_config)
         else:
@@ -186,7 +214,7 @@ class MCPServer:
             self.search_client = SearchClient(
                 endpoint=Config.ENDPOINT,
                 index_name=Config.INDEX_NAME,
-                credential=AzureKeyCredential(Config.ADMIN_KEY)
+                credential=AzureKeyCredential(Config.ADMIN_KEY),
             )
         else:
             self.search_client = None
@@ -199,8 +227,8 @@ class MCPServer:
             if LEARNING_SUPPORT:
                 # Initialize model_updater first since pipeline needs it
                 self.model_updater = ModelUpdater()
-                pipeline_config['model_updater'] = self.model_updater
-                pipeline_config['adaptive_ranking'] = True
+                pipeline_config["model_updater"] = self.model_updater
+                pipeline_config["adaptive_ranking"] = True
             self.pipeline = RAGPipeline(pipeline_config)
         else:
             self.pipeline = None
@@ -221,16 +249,19 @@ class MCPServer:
         # Initialize cache manager
         if CACHE_SUPPORT:
             self.cache_manager = CacheManager(
-                ttl=Config.CACHE_TTL_SECONDS,
-                max_size=Config.CACHE_MAX_ENTRIES
+                ttl=Config.CACHE_TTL_SECONDS, max_size=Config.CACHE_MAX_ENTRIES
             )
         else:
             self.cache_manager = None
 
         # Initialize learning components
         if LEARNING_SUPPORT:
-            self.feedback_collector = FeedbackCollector(storage_path=str(Config.FEEDBACK_DIR))
-            self.usage_analyzer = UsageAnalyzer(feedback_collector=self.feedback_collector)
+            self.feedback_collector = FeedbackCollector(
+                storage_path=str(Config.FEEDBACK_DIR)
+            )
+            self.usage_analyzer = UsageAnalyzer(
+                feedback_collector=self.feedback_collector
+            )
             # model_updater initialized above for pipeline
         else:
             self.feedback_collector = None
@@ -241,13 +272,11 @@ class MCPServer:
         if AZURE_ADMIN_SUPPORT:
             try:
                 self.index_ops = IndexOperations(
-                    endpoint=Config.ENDPOINT,
-                    admin_key=Config.ADMIN_KEY
+                    endpoint=Config.ENDPOINT, admin_key=Config.ADMIN_KEY
                 )
                 self.indexer_integration = IndexerIntegration()
                 self.doc_ops = DocumentOperations(
-                    endpoint=Config.ENDPOINT,
-                    admin_key=Config.ADMIN_KEY
+                    endpoint=Config.ENDPOINT, admin_key=Config.ADMIN_KEY
                 )
             except Exception as e:
                 logger.warning(f"Admin components unavailable: {e}")
@@ -271,6 +300,7 @@ class MCPServer:
         else:
             self.github_client = None
             self.remote_indexer = None
+
     async def ensure_async_components_started(self):
         """
         Ensure async components are started. This is called lazily when needed.
@@ -291,9 +321,11 @@ class MCPServer:
                 logger.info("✅ RAGPipeline async components started")
 
             # Start feedback collector if it exists and wasn't started by pipeline
-            if (self.feedback_collector is not None and
-                hasattr(self.feedback_collector, 'is_started') and
-                not self.feedback_collector.is_started()):
+            if (
+                self.feedback_collector is not None
+                and hasattr(self.feedback_collector, "is_started")
+                and not self.feedback_collector.is_started()
+            ):
                 await self.feedback_collector.start()
                 logger.info("✅ FeedbackCollector async components started")
 
@@ -309,12 +341,13 @@ class MCPServer:
         """
         try:
             # Cleanup RAGPipeline
-            if self.pipeline is not None and hasattr(self.pipeline, 'cleanup'):
+            if self.pipeline is not None and hasattr(self.pipeline, "cleanup"):
                 await self.pipeline.cleanup()
 
             # Cleanup feedback collector if it exists separately
-            if (self.feedback_collector is not None and
-                hasattr(self.feedback_collector, 'cleanup')):
+            if self.feedback_collector is not None and hasattr(
+                self.feedback_collector, "cleanup"
+            ):
                 await self.feedback_collector.cleanup()
 
             logger.info("✅ MCP Server async components cleanup completed")
@@ -322,10 +355,9 @@ class MCPServer:
         except Exception as e:
             logger.error(f"❌ Error during MCP Server async cleanup: {e}")
 
-
-    def run(self, transport: str = 'stdio'):
+    def run(self, transport: str = "stdio"):
         """Run the MCP server."""
-        if transport == 'stdio':
+        if transport == "stdio":
             apply_patches()
 
         logger.info(f"Starting MCP server in {transport} mode")
@@ -347,7 +379,9 @@ class MCPServer:
                 loop.create_task(_startup_task())
             except RuntimeError:
                 # No event loop running yet, try to schedule for later
-                logger.warning("No event loop available yet for async component startup")
+                logger.warning(
+                    "No event loop available yet for async component startup"
+                )
 
         # Try to schedule startup immediately, or wait for event loop
         try:
