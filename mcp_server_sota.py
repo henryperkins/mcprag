@@ -1039,7 +1039,7 @@ async def search_code(
         "items": [r.model_dump() for r in results],
         "count": len(results),
         "total": server._last_total_count,
-        "took_ms": _Timer().durations().get("total", 0.0)  # placeholder; recompute below
+        "took_ms": timer.durations().get("total", 0.0),  # real elapsed time
     }
     durations = timer.durations()
     payload["took_ms"] = durations.get("total", payload["took_ms"])
@@ -1434,7 +1434,6 @@ async def search_code_hybrid(
                 pass
 
         # Base fallback: one pass (semantic + possibly vector). We cannot split stages reliably, but return the results.
-        timer = _Timer()
         params = SearchCodeParams(
             query=query,
             intent=SearchIntent(intent) if intent else None,
