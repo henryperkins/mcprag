@@ -2,34 +2,46 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
 ## IMPORTANT: Search Tool Priority
 
-**ALWAYS use the MCP-provided `mcp__azure-code-search__search_code` tool for code searches instead of built-in Grep/Glob tools.**
+**ALWAYS use the MCP-provided `mcp__azure-search__search_code` tool for code searches instead of built-in Grep/Glob tools.**
 
 When you need to search the codebase:
-1. First choice: Use `mcp__azure-code-search__search_code` - it provides semantic search with better context understanding
-2. Only use Grep/Glob if specifically looking for exact string matches or file patterns
-3. The MCP search tool offers:
-   - Intent-aware search (implement/debug/understand/refactor)
-   - Semantic understanding of code
-   - Cross-file dependency resolution
-   - Better ranking based on code context
+1. First choice: Use `mcp__azure-search__search_code` - it provides semantic search with better context understanding
+2. For exact matches: Use `mcp__azure-search__search_code_raw` when searching for specific values, variable names, or exact code snippets
+3. Only use Grep/Glob if specifically looking for exact string matches or file patterns when MCP tools are unavailable
+
+The MCP search tool offers:
+- Intent-aware search (implement/debug/understand/refactor)
+- Semantic understanding of code
+- Automatic exact term filtering for quoted phrases and numbers
+- Hybrid BM25 + semantic search with tunable weights
+- Smart caching with 60s TTL and LRU eviction
+- Detailed performance diagnostics and timing breakdowns
 
 ### Effective MCP Search Strategies
 
 #### Query Construction Guidelines
-- **USE NATURAL LANGUAGE**: Describe what the code DOES, not what text it contains
+- **For semantic search (`search_code`)**: Use natural language to describe what the code DOES
   - ✅ Good: "index schema vector field definition"
   - ✅ Good: "where are embeddings generated"
   - ✅ Good: "vector dimension configuration"
   - ❌ Bad: "vector issue problem error" (too generic)
-  - ❌ Bad: "SearchField vector_field dimensions 1536" (too literal)
+  - ❌ Bad: "SearchField vector_field dimensions 1536" (too literal - use search_code_raw instead)
+
+- **For exact matches (`search_code_raw`)**: Use specific code snippets or values
+  - ✅ Good: "dimensions = 3072"
+  - ✅ Good: "Field(default=3072)"
+  - ✅ Good: "def create_index_schema"
+  - ❌ Bad: "find the dimension setting" (too vague - use search_code instead)
 
 #### Intent Selection
 - `understand`: Best for learning how features work and finding definitions
-- `implement`: Finding code patterns to implement similar functionality
-- `debug`: Locating error handling, validation, and troubleshooting code
+- `implement`: Finding code patterns to implement similar functionality (adds boost terms)
+- `debug`: Locating error handling, validation, and troubleshooting code (adds error-related terms)
 - `refactor`: Finding code that needs improvement
+- **Note**: Intent primarily adds query boost terms but doesn't fundamentally change search behavior
 
 #### Interpreting Results
 - **Relevance Scores**: 0.02-0.04 are typical for semantic matches (not exact matches)
@@ -61,6 +73,115 @@ When you need to search the codebase:
 "pipeline stages"                        # Find processing pipelines
 ```
 
+### Enhanced Search Features
+
+#### Exact Term Filtering
+The search tools support automatic extraction and filtering of exact terms:
+
+```python
+# Automatic extraction from queries - multiple patterns supported:
+"parse 'HTTP/1.1' headers"         # Quoted phrases
+"dimension 3072 configuration"      # Numbers (including versions like 3.14.2)
+"authenticate_user()"              # Function calls (extracts 'authenticate')
+"getUserData method"               # camelCase identifiers
+"parse_json function"              # snake_case identifiers
+
+# Manual exact terms specification
+results = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="search_code",
+    arguments={
+        "query": "error handling",
+        "exact_terms": ["ValueError", "TypeError"]  # Must contain these exact strings
+    }
+)
+```
+
+**How it works**:
+- Multiple pattern detection: quotes, numbers, function calls, camelCase, snake_case
+- Enhanced validation and escaping for special characters
+- Fallback to query enhancement if filter application fails
+- Check response fields: `applied_exact_terms`, `exact_terms_fallback_used`, `exact_terms_error`
+
+#### Hybrid Search with Scoring
+Use `search_code_hybrid` for combined BM25 + semantic search:
+
+```python
+# Balanced hybrid search (default)
+results = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="search_code_hybrid",
+    arguments={
+        "query": "authentication middleware",
+        "bm25_weight": 0.5,
+        "vector_weight": 0.5
+    }
+)
+
+# Favor exact matches (higher BM25 weight)
+results = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="search_code_hybrid",
+    arguments={
+        "query": "def authenticate_user",
+        "bm25_weight": 0.8,    # Emphasize keyword matches
+        "vector_weight": 0.2    # Less emphasis on semantic similarity
+    }
+)
+
+# Each result includes individual scores:
+# - hybrid_score: Combined weighted score
+# - bm25_score: Keyword match score (normalized)
+# - semantic_score: Semantic similarity score (normalized)
+```
+
+#### Timing Diagnostics
+All search tools now include detailed timing information:
+
+```python
+# Use diagnose_query for detailed performance analysis
+diagnostics = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="diagnose_query",
+    arguments={"query": "database connection pool"}
+)
+
+# Returns detailed stages:
+# - cache_check: Time to check cache
+# - query_enhancement: Intent-based query improvement
+# - azure_search: Actual search execution
+# - filter_rank: Result filtering and ranking
+# - convert_results: Final formatting
+
+# Regular search also includes timings
+results = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="search_code",
+    arguments={"query": "parse json"}
+)
+# Check results["timings_ms"] and results["server_timings_ms"]
+```
+
+#### Result Explanations
+Use `explain_ranking` to understand why results were ranked:
+
+```python
+explanations = await client.use_mcp_tool(
+    server_name="azure-code-search",
+    tool_name="explain_ranking",
+    arguments={
+        "query": "authentication middleware",
+        "mode": "base"  # or "enhanced" if available
+    }
+)
+
+# Returns ranking factors for each result:
+# - term_overlap: Query term matches
+# - signature_match: Function name relevance
+# - base_score: Azure Search score
+# - Additional factors when enhanced mode available
+```
+
 ### Handling Poor Search Results
 
 When MCP returns irrelevant results:
@@ -81,6 +202,23 @@ When MCP returns irrelevant results:
 - **Use language parameter** when working in multi-language codebases
 - **Include repository filter** when you know the target location
 - **Combine with Grep** for verification after finding the right area
+
+### Troubleshooting Guide
+
+#### Search Not Finding Expected Results
+- **Check exact term extraction**: Look for `exact_terms` in response to see what was auto-detected
+- **Verify filter application**: Check `applied_exact_terms` and `exact_terms_fallback_used` flags
+- **Try hybrid search**: Use `search_code_hybrid` with higher `bm25_weight` for literal matches
+
+#### Performance Issues  
+- **Check cache hit**: Look for `cache_status.hit` in results
+- **Analyze bottlenecks**: Use `diagnose_query` to see stage timings
+- **Bypass cache**: Set `disable_cache: true` for testing
+
+#### Understanding Results
+- **Ranking factors**: Use `explain_ranking` to see why results were ranked
+- **Score breakdown**: In hybrid search, check `bm25_score`, `semantic_score`, and `hybrid_score`
+- **Timing details**: Check `server_timings_ms` for internal operation breakdown
 
 ## Development Commands
 
@@ -149,13 +287,15 @@ This is a **state-of-the-art code search solution** that combines Azure Cognitiv
    - Semantic configuration for better code understanding
    - Query rewrites for enhanced recall
 
-### Key Differences from Basic Implementation
+### Key Features
 
 - **AST Analysis**: Extracts actual function signatures, imports, and call graphs
 - **Semantic Context**: Rich descriptions for better retrieval accuracy  
 - **Intent Processing**: Different search strategies based on user intent
-- **Dependency Tracking**: Automatically includes related functions
-- **MCP Optimization**: Structured responses designed for Claude Code integration
+- **Smart Exact Term Filtering**: Automatic detection with fallback mechanisms
+- **Hybrid Search**: Configurable BM25/semantic blending for optimal results
+- **Performance Monitoring**: Detailed timing diagnostics for all operations
+- **Intelligent Caching**: TTL-based cache with LRU eviction
 
 ### File Processing Flow
 
@@ -277,9 +417,9 @@ python setup/uninstall.py  # WARNING: Deletes all Azure resources
    ```
 
 3. **Using in Claude Code**:
-   - The MCP tools `mcp__azure-code-search__search_code` and `mcp__azure-code-search__search_microsoft_docs` will be available
+   - The MCP tools `mcp__azure-search__search_code` and `mcp__azure-search__search_microsoft_docs` will be available
    - Example: "Search for authentication functions" will use the code search
-   - Example: "Find Microsoft docs about Azure Functions" will use the docs search
+   - **Note**: Microsoft Docs search is currently non-functional (returns empty results) as Microsoft Learn doesn't provide a public MCP endpoint
 
 ### Recommended Hooks
 
@@ -528,4 +668,42 @@ See `docs/AZURE_SEARCH_ADVANCED_FEATURES.md` for detailed implementation guide.
 The codebase includes a Microsoft Docs search integration via MCP:
 - **`microsoft_docs_mcp_client.py`** - Client for searching Microsoft documentation
 - **`debug_microsoft_docs.py`** - Debugging tool for Microsoft Docs search
-- Provides access to API documentation, guides, and technical references through the MCP protocol
+- **Important**: Currently non-functional as Microsoft Learn doesn't provide a public MCP endpoint
+- The system defaults to disabled network mode and returns empty results
+
+## Known Issues and Limitations
+
+Based on testing and recent improvements, the following issues have been identified:
+
+### Tool Functionality Status
+
+#### ✅ **Fully Functional**:
+- `search_code` - Semantic search with automatic exact term filtering, timing diagnostics, and cache status
+- `search_code_raw` - Direct Azure Search results for exact code matches
+- `search_code_hybrid` - True BM25/semantic blending with configurable weights
+- `preview_query_processing` - Shows query enhancements and intent detection
+- `diagnose_query` - Detailed stage timings and cache analysis
+- `explain_ranking` - Ranking factor explanations with fallback handling
+- `cache_stats` / `cache_clear` - TTL cache management with LRU eviction
+- `index_rebuild` - Indexer operations with method existence checking
+
+#### ⚠️ **Partially Functional**:
+- `search_microsoft_docs` - Returns structured JSON but requires Microsoft endpoint
+- `search_code_then_docs` - Code search works; docs fallback depends on availability
+- Dependency resolution - Limited to top result's 3 dependencies
+- `search_code_pipeline` - Config object compatibility issue
+
+#### ❌ **Non-Functional**:
+- Microsoft Docs endpoints - No public MCP endpoint from Microsoft Learn
+- Resource endpoints (`runtime_diagnostics`, `pipeline_status`) - Async handling issues
+- Cross-file dependency graph - Not implemented
+
+### Common Issues and Workarounds
+
+1. **Exact Match Search**: Automatic extraction handles quotes, numbers, function calls, camelCase, and snake_case. Falls back to query enhancement if filters fail.
+
+2. **Cache Behavior**: 60s TTL with 500 entry limit. Set `disable_cache: true` to bypass.
+
+3. **Intent Usage**: Adds boost terms - `implement` boosts function/class, `debug` boosts error handling.
+
+4. **Performance**: Hybrid search runs dual queries. Use `diagnose_query` for bottleneck analysis.

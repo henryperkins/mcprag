@@ -146,8 +146,7 @@ def extract_python_functions(content, file_path):
                 chunk.update({
                     "id": hashlib.md5(f"{file_path}:{chunk.get('function_name') or chunk.get('class_name')}".encode()).hexdigest(),
                     "file_path": file_path,
-                    "file_name": Path(file_path).name,
-                    "repository": "mcprag",
+                            "repository": "mcprag",
                     "language": "python",
                     "last_modified": datetime.utcnow().isoformat() + "Z",
                     "imports": [],  # Could extract these too
@@ -163,7 +162,6 @@ def extract_python_functions(content, file_path):
             "id": hashlib.md5(f"{file_path}:full".encode()).hexdigest(),
             "chunk_type": "file",
             "file_path": file_path,
-            "file_name": Path(file_path).name,
             "repository": "mcprag",
             "language": "python",
             "content": content,
@@ -187,7 +185,6 @@ def chunk_file(file_path, content):
             "id": hashlib.md5(f"{file_path}:full".encode()).hexdigest(),
             "chunk_type": "file",
             "file_path": str(file_path),
-            "file_name": Path(file_path).name,
             "repository": "mcprag",
             "language": language,
             "content": content,

@@ -171,3 +171,39 @@ def degraded_fallback(primary_fn: Callable[[], Any], fallback_fn: Callable[[], A
     except StructuredError as e:
         _log.warning("%s degraded – %s", op_name, e.code)
         return fallback_fn()
+
+
+# ------------------------------------------------------------------ #
+# 5.  ErrorHandler class for pipeline compatibility
+# ------------------------------------------------------------------ #
+
+
+class ErrorHandler:
+    """Error handler for RAG pipeline operations"""
+    
+    def __init__(self):
+        self.circuit_breaker = _CircuitBreaker()
+        self.logger = logging.getLogger(__name__)
+    
+    def handle_error(self, error: Exception, operation: str) -> None:
+        """Handle an error and update circuit breaker state"""
+        if isinstance(error, StructuredError):
+            if error.code == ErrorCode.RETRYABLE:
+                self.circuit_breaker.failure()
+            self.logger.error(f"{operation}: {error}")
+        else:
+            self.circuit_breaker.failure()
+            self.logger.error(f"{operation}: Unexpected error - {error}", exc_info=True)
+    
+    def handle_success(self, operation: str) -> None:
+        """Handle successful operation"""
+        self.circuit_breaker.success()
+        self.logger.debug(f"{operation}: Success")
+    
+    def wrap_with_retry(self, func: Callable, operation: str, **retry_kwargs):
+        """Wrap a function with retry logic"""
+        return with_retry(
+            op_name=operation,
+            circuit=self.circuit_breaker,
+            **retry_kwargs
+        )(func)

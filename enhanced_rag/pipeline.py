@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
 from .core.models import (
-    SearchQuery, SearchResult, CodeContext, EnhancedContext
+    SearchQuery, SearchResult, CodeContext, EnhancedContext, QueryContext
 )
 from .core.config import get_config
 from .context.hierarchical_context import HierarchicalContextAnalyzer
@@ -24,19 +24,6 @@ from .utils.error_handler import ErrorHandler
 logger = logging.getLogger(__name__)
 
 
-class QueryContext:
-    """Context for a search query"""
-    def __init__(
-        self,
-        current_file: Optional[str] = None,
-        workspace_root: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_preferences: Optional[Dict[str, Any]] = None
-    ):
-        self.current_file = current_file
-        self.workspace_root = workspace_root
-        self.session_id = session_id
-        self.user_preferences = user_preferences or {}
 
 
 class RAGPipelineResult:

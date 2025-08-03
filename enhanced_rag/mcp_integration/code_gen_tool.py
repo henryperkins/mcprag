@@ -9,8 +9,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from ..pipeline import RAGPipeline, QueryContext
-from ..core.models import SearchIntent  # noqa: F401  (kept in case external code still references it)
+from ..pipeline import RAGPipeline
+from ..core.models import QueryContext, SearchIntent
 
 logger = logging.getLogger(__name__)
 

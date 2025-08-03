@@ -357,6 +357,8 @@ class SearchCodeParams(BaseModel):
     # New flags for improved literal handling and caching
     exact_terms: Optional[List[str]] = Field(None, description="Terms that must appear (quoted phrases or numeric literals)")
     disable_cache: bool = Field(False, description="Disable server-side TTL cache for this call")
+    include_timings: bool = Field(False, description="Include detailed timing information in response")
+    dependency_mode: str = Field("auto", description="Dependency mode")
 
 class SearchResult(BaseModel):
     file_path: str
@@ -371,6 +373,7 @@ class SearchResult(BaseModel):
     imports: List[str] = []
     dependencies: List[str] = []
     highlights: Optional[Dict[str, List[str]]] = None
+    dependency_graph: Optional[Dict[str, Any]] = None
 
 # ============================================================================
 # Enhanced MCP Server
@@ -400,6 +403,106 @@ class EnhancedMCPServer:
         if end_line is None or end_line == start_line:
             return str(start_line)
         return f"{start_line}-{end_line}"
+
+    def _cleanup_expired_cache_entries(self):
+        """Remove expired cache entries"""
+        now = time.time()
+        expired_keys = [
+            key for key, ts in self._query_cache_ts.items()
+            if (now - ts) > self._ttl_seconds
+        ]
+        for key in expired_keys:
+            self._query_cache.pop(key, None)
+            self._query_cache_ts.pop(key, None)
+
+        if expired_keys:
+            logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+
+    def _should_cache_query(self, params: SearchCodeParams) -> bool:
+        """Determine if query should be cached"""
+        if params.disable_cache:
+            return False
+
+        # Allow caching for dependency searches if they're not too expensive
+        if params.include_dependencies:
+            # Only cache dependency searches for small result sets
+            return params.max_results <= 5
+
+        return True
+
+    def _get_cache_key(self, params: SearchCodeParams) -> str:
+        """Generate a consistent cache key for search parameters"""
+        # Include all parameters that affect search results
+        key_parts = [
+            params.query,
+            str(params.intent),
+            params.repository or "",
+            params.language or "",
+            str(params.max_results),
+            str(params.skip),
+            str(params.include_dependencies),
+            params.orderby or "",
+            str(params.highlight_code),
+            str(params.bm25_only),
+            params.query_type or "",
+            ",".join(params.exact_terms or []),
+            params.dependency_mode or "auto"
+        ]
+        return "|".join(key_parts)
+
+    def _invalidate_cache_by_pattern(self, pattern: str = None, repository: str = None, language: str = None):
+        """Invalidate cache entries matching specific patterns"""
+        keys_to_remove = []
+
+        for key in self._query_cache.keys():
+            should_remove = False
+
+            # Pattern-based invalidation
+            if pattern and pattern.lower() in key.lower():
+                should_remove = True
+
+            # Repository-based invalidation
+            if repository:
+                # Cache key format: query|intent|repository|language|...
+                key_parts = key.split("|")
+                if len(key_parts) > 2 and key_parts[2] == repository:
+                    should_remove = True
+
+            # Language-based invalidation
+            if language:
+                key_parts = key.split("|")
+                if len(key_parts) > 3 and key_parts[3] == language:
+                    should_remove = True
+
+            if should_remove:
+                keys_to_remove.append(key)
+
+        # Remove identified keys
+        for key in keys_to_remove:
+            self._query_cache.pop(key, None)
+            self._query_cache_ts.pop(key, None)
+
+        if keys_to_remove:
+            logger.info(f"Invalidated {len(keys_to_remove)} cache entries")
+
+        return len(keys_to_remove)
+
+    def _get_cache_stats(self) -> Dict[str, Any]:
+        """Get detailed cache statistics"""
+        now = time.time()
+        expired_count = sum(
+            1 for ts in self._query_cache_ts.values()
+            if (now - ts) > self._ttl_seconds
+        )
+
+        return {
+            "total_entries": len(self._query_cache),
+            "expired_entries": expired_count,
+            "active_entries": len(self._query_cache) - expired_count,
+            "max_entries": self._cache_max_entries,
+            "ttl_seconds": self._ttl_seconds,
+            "memory_usage_estimate": len(self._query_cache) * 1024  # Rough estimate
+        }
 
     def _initialize_clients(self):
         """Initialize all service clients and validate index schema"""
@@ -502,11 +605,18 @@ class EnhancedMCPServer:
 
     async def search_code(self, params: SearchCodeParams) -> List[SearchResult]:
         """Enhanced code search with intelligent filtering and ranking"""
+        # Create internal timer for diagnostics
+        timer = _Timer()
 
         # Build normalized cache key including new flags and pagination
-        cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
-        # TTL cache read (disabled if include_dependencies or disable_cache)
-        if not params.include_dependencies and not params.disable_cache:
+        cache_key = self._get_cache_key(params)
+
+        # Clean up expired entries periodically (every 50th query)
+        if len(self._query_cache) % 50 == 0:
+            self._cleanup_expired_cache_entries()
+
+        # TTL cache read (improved logic)
+        if self._should_cache_query(params):
             cached = self._query_cache.get(cache_key)
             ts = self._query_cache_ts.get(cache_key)
             now = time.time()
@@ -515,66 +625,163 @@ class EnhancedMCPServer:
                 return cached[:params.max_results]
 
         # Enhance query based on intent
+        timer.mark("cache_check")
         enhanced_query = self._enhance_query(params.query, params.intent)
+        timer.mark("query_enhanced")
 
         # Detect repository if needed
         repo = self._resolve_repository(params.repository)
 
         # Build search parameters
+        timer.mark("repo_resolved")
         search_params = self._build_search_params(enhanced_query, repo, params)
+        timer.mark("params_built")
         # Apply exact-term gating for quoted phrases or numeric literals
-        try:
-            if params.exact_terms:
+        applied_exact_terms = False
+        exact_terms_fallback_used = False
+        exact_terms_error = None
+
+        if params.exact_terms:
+            try:
                 # Build a must-have filter that ORs fields per term and ANDs across terms
                 term_filters = []
+
+                # Use FieldMapper to get available searchable fields
+                searchable_fields = ['content', 'function_name', 'class_name', 'docstring']
+                if self._field_mapper:
+                    # Map fields to what's actually available in the index
+                    available_fields = []
+                    for field in searchable_fields:
+                        mapped = self._field_mapper.reverse_map.get(field, field)
+                        if mapped in self._field_mapper.available:
+                            available_fields.append(mapped)
+                    # If no searchable fields available, fall back to content only
+                    searchable_fields = available_fields if available_fields else ['content']
+
+                # Validate and sanitize exact terms
+                valid_terms = []
                 for term in params.exact_terms:
-                    safe = str(term).replace("'", "''")
-                    term_filters.append("(" + " or ".join([
-                        f"search.ismatch('{safe}', 'content')",
-                        f"search.ismatch('{safe}', 'function_name')",
-                        f"search.ismatch('{safe}', 'class_name')",
-                        f"search.ismatch('{safe}', 'docstring')",
-                    ]) + ")")
-                exact_filter = " and ".join(term_filters)
-                if "filter" in search_params and search_params["filter"]:
-                    search_params["filter"] = f"({search_params['filter']}) and {exact_filter}"
-                else:
-                    search_params["filter"] = exact_filter
-        except Exception:
-            # If anything goes wrong, continue without exact gating
-            pass
+                    if term and len(str(term).strip()) > 0:
+                        # Enhanced escaping for OData filter syntax
+                        safe_term = str(term).strip()
+                        # Escape single quotes and other special characters
+                        safe_term = safe_term.replace("'", "''").replace('"', '""')
+                        # Validate term doesn't contain problematic characters for search.ismatch
+                        if not any(char in safe_term for char in ['(', ')', '&', '|', '!', '^']):
+                            valid_terms.append(safe_term)
+                        else:
+                            logger.warning(f"Skipping exact term with special characters: {term}")
+
+                if valid_terms:
+                    for term in valid_terms:
+                        field_conditions = []
+                        for field in searchable_fields:
+                            # Use search.ismatch with proper escaping
+                            field_conditions.append(f"search.ismatch('{term}', '{field}')")
+                        if field_conditions:
+                            term_filters.append("(" + " or ".join(field_conditions) + ")")
+
+                    if term_filters:
+                        exact_filter = " and ".join(term_filters)
+                        if "filter" in search_params and search_params["filter"]:
+                            search_params["filter"] = f"({search_params['filter']}) and {exact_filter}"
+                        else:
+                            search_params["filter"] = exact_filter
+                        applied_exact_terms = True
+                        logger.debug(f"Applied exact terms filter: {exact_filter}")
+
+            except Exception as e:
+                # Log the error and apply fallback
+                exact_terms_error = str(e)
+                logger.warning(f"Exact terms filtering failed: {e}, applying fallback")
+
+                # Fallback: Add exact terms as quoted phrases to the main query
+                try:
+                    fallback_terms = []
+                    for term in params.exact_terms:
+                        if term and len(str(term).strip()) > 0:
+                            # Add as quoted phrase to boost exact matches
+                            clean_term = str(term).strip().replace('"', '')
+                            if ' ' in clean_term:
+                                fallback_terms.append(f'"{clean_term}"')
+                            else:
+                                fallback_terms.append(clean_term)
+
+                    if fallback_terms:
+                        # Enhance the main search query with exact terms
+                        enhanced_query = search_params.get("search_text", "")
+                        enhanced_query += " " + " ".join(fallback_terms)
+                        search_params["search_text"] = enhanced_query.strip()
+                        exact_terms_fallback_used = True
+                        logger.info(f"Applied exact terms fallback to query: {enhanced_query}")
+
+                except Exception as fallback_error:
+                    logger.error(f"Exact terms fallback also failed: {fallback_error}")
+                    # Continue without exact terms processing
+
+        # Store for later reporting
+        search_params['_applied_exact_terms'] = applied_exact_terms
+        search_params['_exact_terms_fallback_used'] = exact_terms_fallback_used
+        search_params['_exact_terms_error'] = exact_terms_error
 
         # Execute search
         from enhanced_rag.utils.error_handler import with_retry
+        # Store search params for later inspection
+        self._last_search_params = search_params
+        timer.mark("exact_terms_applied")
         search_response = with_retry(op_name="acs.search")(self.search_client.search)(**search_params)
+        timer.mark("acs_search_complete")
         raw_results = list(search_response)
         # Store total count for later use
         self._last_total_count = search_response.get_count() if hasattr(search_response, 'get_count') else None
+        timer.mark("results_fetched")
 
         # Filter and rank results
         results = self._filter_and_rank_results(raw_results, params.query, repo)
+        timer.mark("filtered_ranked")
 
         # Convert to typed results
         search_results = self._convert_to_search_results(results)
+        timer.mark("results_converted")
 
-        # Resolve dependencies if requested
-        if params.include_dependencies and params.intent == SearchIntent.IMPLEMENT:
-            search_results = await self._resolve_dependencies(search_results)
+        # Resolve dependencies based on dependency_mode
+        dependency_mode = getattr(params, 'dependency_mode', 'auto')
+        should_include_deps = (
+            dependency_mode == "always" or
+            (dependency_mode == "auto" and params.intent == SearchIntent.IMPLEMENT) or
+            dependency_mode == "graph" or
+            (dependency_mode == "auto" and params.include_dependencies)
+        )
 
-        # Cache results with TTL and LRU-like cap
-        if not params.disable_cache and not params.include_dependencies:
+        if should_include_deps:
+            if dependency_mode == "graph":
+                search_results = await self._resolve_dependency_graph(search_results)
+            else:
+                search_results = await self._resolve_dependencies(search_results)
+            timer.mark("dependencies_resolved")
+
+        # Cache results with TTL and improved eviction
+        if self._should_cache_query(params):
             self._query_cache[cache_key] = search_results
             self._query_cache_ts[cache_key] = time.time()
+
             # Evict old entries if above max
             if len(self._query_cache) > self._cache_max_entries:
-                # remove the oldest by timestamp
-                oldest_key = min(self._query_cache_ts.items(), key=lambda kv: kv[1])[0]
-                self._query_cache.pop(oldest_key, None)
-                self._query_cache_ts.pop(oldest_key, None)
+                # First try to remove expired entries
+                self._cleanup_expired_cache_entries()
+
+                # If still above max, remove the oldest by timestamp
+                if len(self._query_cache) > self._cache_max_entries:
+                    oldest_key = min(self._query_cache_ts.items(), key=lambda kv: kv[1])[0]
+                    self._query_cache.pop(oldest_key, None)
+                    self._query_cache_ts.pop(oldest_key, None)
 
         # Apply skip for pagination after all processing
         if params.skip > 0:
             search_results = search_results[params.skip:]
+
+        # Store timing info for diagnostics
+        self._last_search_timings = timer.durations()
 
         return search_results[:params.max_results]
 
@@ -887,6 +1094,208 @@ class EnhancedMCPServer:
 
         return [primary] + dep_results + results[1:]
 
+    async def _resolve_dependency_graph(self, results: List[SearchResult]) -> List[SearchResult]:
+        """Resolve dependencies with graph information"""
+        if not results:
+            return results
+
+        primary = results[0]
+        dependency_graph = {"nodes": [], "edges": []}
+
+        # Add primary node
+        primary_id = f"{primary.repository}:{primary.file_path}:{primary.function_name}"
+        dependency_graph["nodes"].append({
+            "id": primary_id,
+            "type": "primary",
+            "function_name": primary.function_name,
+            "file_path": primary.file_path,
+            "repository": primary.repository
+        })
+
+        # Find dependencies up to 2 levels deep
+        seen = {primary.signature}
+        dep_results = []
+
+        for dep_name in primary.dependencies[:5]:  # Increased limit
+            if dep_name in seen:
+                continue
+
+            # Search for dependency
+            dep_params = SearchCodeParams(
+                query=f"def {dep_name}",
+                intent=None,
+                language=primary.language,
+                repository=primary.repository,
+                max_results=1,
+                include_dependencies=False
+            )
+
+            dep_search = await self.search_code(dep_params)
+            if dep_search and dep_search[0].signature not in seen:
+                dep_result = dep_search[0]
+                dep_id = f"{dep_result.repository}:{dep_result.file_path}:{dep_result.function_name}"
+
+                dependency_graph["nodes"].append({
+                    "id": dep_id,
+                    "type": "dependency",
+                    "function_name": dep_result.function_name,
+                    "file_path": dep_result.file_path,
+                    "repository": dep_result.repository,
+                    "level": 1
+                })
+
+                dependency_graph["edges"].append({
+                    "from": primary_id,
+                    "to": dep_id,
+                    "type": "calls",
+                    "dependency_name": dep_name
+                })
+
+                dep_results.append(dep_result)
+                seen.add(dep_result.signature)
+
+        # Add dependency graph to first result
+        if results:
+            # Create new SearchResult with graph info
+            primary_dict = primary.model_dump()
+            primary_dict["dependency_graph"] = dependency_graph
+            primary_with_graph = SearchResult(**primary_dict)
+            results[0] = primary_with_graph
+
+        return results[:1] + dep_results + results[1:]
+
+    async def _get_azure_ranking_explanation(self, query: str, results: List[Dict]) -> List[Dict]:
+        """Get Azure Search specific ranking explanations"""
+        explanations = []
+
+        try:
+            # Use Azure Search's scoring profile information
+            search_params = {
+                "search_text": query,
+                "include_total_count": False,
+                "top": min(len(results), 10),  # Limit for performance
+                "query_type": "full"  # Use full Lucene syntax for detailed scoring
+            }
+
+            # Add scoring profile if available
+            if hasattr(self.search_client, '_scoring_profile'):
+                search_params["scoring_profile"] = self.search_client._scoring_profile
+
+            # Re-run search with scoring details
+            detailed_response = self.search_client.search(**search_params)
+            detailed_results = list(detailed_response)
+
+            for i, (original_result, detailed_result) in enumerate(zip(results, detailed_results)):
+                explanation = {
+                    "file_path": original_result.get("file_path"),
+                    "repository": original_result.get("repository"),
+                    "score": original_result.get("score", 0.0),
+                    "factors": []
+                }
+
+                # Extract Azure Search scoring factors
+                if hasattr(detailed_result, '@search.score'):
+                    explanation["azure_score"] = detailed_result.get('@search.score')
+
+                # Add BM25 factors if available
+                if hasattr(detailed_result, '@search.features'):
+                    features = detailed_result.get('@search.features', {})
+                    for feature_name, feature_value in features.items():
+                        explanation["factors"].append({
+                            "name": feature_name,
+                            "value": feature_value,
+                            "type": "azure_feature"
+                        })
+
+                # Add semantic ranking factors if semantic search was used
+                if self._semantic_available and hasattr(detailed_result, '@search.reranker_score'):
+                    explanation["factors"].append({
+                        "name": "semantic_reranker_score",
+                        "value": detailed_result.get('@search.reranker_score'),
+                        "type": "semantic"
+                    })
+
+                # Add field-specific scoring
+                content = original_result.get("content", "")
+                query_terms = set(query.lower().split())
+
+                # Content relevance
+                content_matches = sum(1 for term in query_terms if term in content.lower())
+                if content_matches > 0:
+                    explanation["factors"].append({
+                        "name": "content_term_matches",
+                        "value": content_matches,
+                        "type": "content_analysis"
+                    })
+
+                # Function name relevance
+                func_name = original_result.get("function_name", "")
+                if func_name:
+                    func_matches = sum(1 for term in query_terms if term in func_name.lower())
+                    if func_matches > 0:
+                        explanation["factors"].append({
+                            "name": "function_name_matches",
+                            "value": func_matches,
+                            "type": "function_analysis"
+                        })
+
+                # Repository and language boost
+                if original_result.get("repository"):
+                    explanation["factors"].append({
+                        "name": "repository_boost",
+                        "value": 0.1,
+                        "type": "metadata_boost"
+                    })
+
+                if original_result.get("language"):
+                    explanation["factors"].append({
+                        "name": "language_boost",
+                        "value": 0.05,
+                        "type": "metadata_boost"
+                    })
+
+                explanation["summary"] = f"Azure Search score: {explanation.get('azure_score', 'N/A')}, Content matches: {content_matches}"
+                explanations.append(explanation)
+
+        except Exception as e:
+            logger.warning(f"Azure ranking explanation failed: {e}")
+            # Fall back to heuristic explanations
+            return self._get_heuristic_explanations(query, results)
+
+        return explanations
+
+    def _get_heuristic_explanations(self, query: str, results: List[Dict]) -> List[Dict]:
+        """Fallback heuristic explanations when Azure features unavailable"""
+        explanations = []
+        q_terms = set(query.lower().split())
+
+        for item in results:
+            content = (item.get("content") or "").lower()
+            signature = (item.get("signature") or "").lower()
+            repo = item.get("repository")
+            file_path = item.get("file_path")
+            score = item.get("score", 0.0)
+            overlap = sum(1 for t in q_terms if t in content or t in signature)
+
+            factors = []
+            if overlap:
+                factors.append({"name": "term_overlap", "weight": 0.4, "contribution": overlap * 0.1})
+            if repo:
+                factors.append({"name": "repo_presence", "weight": 0.2, "contribution": 0.1})
+            if signature:
+                factors.append({"name": "signature_match", "weight": 0.2, "contribution": 0.1})
+            factors.append({"name": "base_score", "weight": 0.2, "contribution": score * 0.1})
+
+            explanations.append({
+                "file_path": file_path,
+                "repository": repo,
+                "score": score,
+                "factors": factors,
+                "summary": f"Heuristic explanation: {overlap} query-term overlaps; base score {score:.2f}"
+            })
+
+        return explanations
+
     # ========================================================================
     # Result Formatting
     # ========================================================================
@@ -997,20 +1406,42 @@ async def search_code(
     bm25_only: bool = False,
     # New tool args
     exact_terms: Optional[List[str]] = None,
-    disable_cache: bool = False
+    disable_cache: bool = False,
+    include_timings: bool = False,
+    dependency_mode: str = "auto"
 ) -> Dict[str, Any]:
     """Search for code with advanced filtering, ranking, and optional dependency enrichment.
 
-    Returns JSON with items[], total, took_ms, cache_status.
+    Returns JSON with items[], total, took_ms, cache_status, and optionally detailed timings.
+    dependency_mode: 'auto' (deps for implement intent), 'always', 'never', 'graph'
     """
     timer = _Timer()
     import re as _re
     auto_exact = None
     if exact_terms is None and query:
+        # Enhanced auto-extraction for exact terms
         quoted = _re.findall(r'"([^"]+)"|\'([^\']+)\'', query)
         quoted_terms = [t for pair in quoted for t in pair if t]
-        numeric_terms = _re.findall(r'(?<![\w.])(\d{2,})(?![\w.])', query)
-        auto_exact = [t.strip() for t in (quoted_terms + numeric_terms) if t.strip()]
+
+        # Improved numeric detection - capture version numbers, IDs, etc.
+        numeric_terms = _re.findall(r'(?<![\w])(\d+(?:\.\d+)+|\d{2,})(?![\w.])', query)
+
+        # Detect function/method calls with parentheses
+        function_calls = _re.findall(r'(\w+)\s*\(', query)
+
+        # Detect camelCase/PascalCase identifiers
+        camel_case = _re.findall(r'\b([a-z]+[A-Z][a-zA-Z]*)\b', query)
+
+        # Detect snake_case identifiers
+        snake_case = _re.findall(r'\b([a-z]+_[a-z_]+)\b', query)
+
+        # Combine all auto-detected terms, prioritizing quoted terms
+        all_terms = quoted_terms + numeric_terms + function_calls + camel_case + snake_case
+        auto_exact = [t.strip() for t in all_terms if t.strip() and len(t.strip()) >= 2]
+
+        # Remove duplicates while preserving order
+        seen = set()
+        auto_exact = [t for t in auto_exact if not (t in seen or seen.add(t))]
     params = SearchCodeParams(
         query=query,
         intent=SearchIntent(intent) if intent else None,
@@ -1023,11 +1454,14 @@ async def search_code(
         highlight_code=highlight_code,
         bm25_only=bm25_only,
         exact_terms=exact_terms if exact_terms is not None else auto_exact,
-        disable_cache=disable_cache
+        disable_cache=disable_cache,
+        include_timings=include_timings,
+        dependency_mode=dependency_mode
     )
     # Determine cache key and hit before execution
-    cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
-    cache_hit = (cache_key in server._query_cache and cache_key in server._query_cache_ts and (time.time() - server._query_cache_ts[cache_key]) <= server._ttl_seconds) if not disable_cache and not include_dependencies else False
+    cache_key = server._get_cache_key(params)
+    cache_hit = (cache_key in server._query_cache and cache_key in server._query_cache_ts and
+                (time.time() - server._query_cache_ts[cache_key]) <= server._ttl_seconds) if server._should_cache_query(params) else False
 
     try:
         results = await server.search_code(params)
@@ -1035,20 +1469,65 @@ async def search_code(
         return _err(str(e))
     timer.mark("done")
 
+    # Check if exact terms were applied and get fallback info
+    applied_exact_terms = False
+    exact_terms_fallback_used = False
+    exact_terms_error = None
+    if hasattr(server, '_last_search_params') and server._last_search_params:
+        applied_exact_terms = server._last_search_params.get('_applied_exact_terms', False)
+        exact_terms_fallback_used = server._last_search_params.get('_exact_terms_fallback_used', False)
+        exact_terms_error = server._last_search_params.get('_exact_terms_error', None)
+
     payload = {
         "items": [r.model_dump() for r in results],
         "count": len(results),
         "total": server._last_total_count,
         "took_ms": timer.durations().get("total", 0.0),  # real elapsed time
+        "applied_exact_terms": applied_exact_terms,
+        "exact_terms": params.exact_terms,
+        "exact_terms_fallback_used": exact_terms_fallback_used,
+        "exact_terms_error": exact_terms_error
     }
     durations = timer.durations()
     payload["took_ms"] = durations.get("total", payload["took_ms"])
-    payload["timings_ms"] = durations
+
+    # Include detailed timings if requested or in debug mode
+    if include_timings or os.getenv("MCP_DEBUG_TIMINGS", "").lower() in {"1", "true"}:
+        payload["timings_ms"] = durations
+
+        # Add server-side timings if available
+        if hasattr(server, '_last_search_timings') and server._last_search_timings:
+            payload["server_timings_ms"] = server._last_search_timings
+
+            # Add stage breakdown
+            server_timings = server._last_search_timings
+            payload["stages"] = [
+                {"stage": "cache_check", "duration_ms": server_timings.get("start→cache_check", 0.0)},
+                {"stage": "query_enhancement", "duration_ms": server_timings.get("cache_check→query_enhanced", 0.0)},
+                {"stage": "repo_resolution", "duration_ms": server_timings.get("query_enhanced→repo_resolved", 0.0)},
+                {"stage": "param_building", "duration_ms": server_timings.get("repo_resolved→params_built", 0.0)},
+                {"stage": "exact_term_filtering", "duration_ms": server_timings.get("params_built→exact_terms_applied", 0.0)},
+                {"stage": "azure_search", "duration_ms": server_timings.get("exact_terms_applied→acs_search_complete", 0.0)},
+                {"stage": "result_fetch", "duration_ms": server_timings.get("acs_search_complete→results_fetched", 0.0)},
+                {"stage": "filter_rank", "duration_ms": server_timings.get("results_fetched→filtered_ranked", 0.0)},
+                {"stage": "convert_results", "duration_ms": server_timings.get("filtered_ranked→results_converted", 0.0)}
+            ]
+
+            # Add dependency resolution timing if it occurred
+            if "dependencies_resolved" in server_timings:
+                payload["stages"].append({
+                    "stage": "dependency_resolution",
+                    "duration_ms": server_timings.get("results_converted→dependencies_resolved", 0.0)
+                })
+    else:
+        # Always include basic timings for backwards compatibility
+        payload["timings_ms"] = durations
+
     payload["cache_status"] = {
         "hit": cache_hit,
         "ttl_seconds": server._ttl_seconds,
         "max_entries": server._cache_max_entries,
-        "key": cache_key
+        "key": cache_key if include_timings else None  # Only expose cache key in debug mode
     }
     return _ok(payload)
 
@@ -1094,27 +1573,47 @@ async def search_code_raw(
     })
 
 @mcp.tool()
-async def search_microsoft_docs(query: str, max_results: int = 10) -> str:
+async def search_microsoft_docs(query: str, max_results: int = 10) -> Dict[str, Any]:
     """Search Microsoft Learn documentation"""
     if not DOCS_SUPPORT or not MicrosoftDocsMCPClient:
-        return "Microsoft Docs search is not available. Please install microsoft_docs_mcp_client."
+        return _err("docs_unavailable", code="enhanced_unavailable")
 
     try:
         async with MicrosoftDocsMCPClient() as client:
             results = await client.search_docs(query=query, max_results=max_results)
 
         if not results:
-            return f"No Microsoft documentation found for '{query}'."
+            return _ok({
+                "query": query,
+                "count": 0,
+                "results": [],
+                "formatted": f"No Microsoft documentation found for '{query}'."
+            })
 
-        formatted = [f"📚 Found {len(results)} Microsoft Docs:\n"]
+        formatted_results = []
+        formatted_lines = [f"📚 Found {len(results)} Microsoft Docs:\n"]
+
         for i, doc in enumerate(results, 1):
             title = doc.get("title") or "Untitled"
             url = doc.get("url") or ""
             snippet = (doc.get("content") or "")[:300]
-            formatted.append(f"{i}. {title}\n   {url}\n   {snippet}...\n")
-        return "\n".join(formatted)
+
+            formatted_results.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet
+            })
+
+            formatted_lines.append(f"{i}. {title}\n   {url}\n   {snippet}...\n")
+
+        return _ok({
+            "query": query,
+            "count": len(results),
+            "results": formatted_results,
+            "formatted": "\n".join(formatted_lines)
+        })
     except Exception as e:
-        return f"Error searching Microsoft Docs: {str(e)}"
+        return _err(f"Error searching Microsoft Docs: {str(e)}")
 
 @mcp.tool()
 async def search_microsoft_docs_raw(query: str, max_results: int = 10) -> Dict[str, Any]:
@@ -1138,12 +1637,15 @@ async def explain_ranking(
     repository: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Explain ranking factors for results. Uses Enhanced RAG explainer when available,
-    otherwise provides a heuristic explanation from base ACS metadata.
+    Explain ranking factors for results.
+    Modes: 'enhanced' (RAG explainer), 'azure' (Azure Search features), 'base' (heuristic)
     """
+    timer = _Timer()
+
     # Get results from chosen mode
-    if mode == "enhanced" and ENHANCED_RAG_SUPPORT and ENHANCED_RAG_SUPPORT and 'enhanced_search_tool' in globals():
+    if mode == "enhanced" and ENHANCED_RAG_SUPPORT and 'enhanced_search_tool' in globals() and enhanced_search_tool is not None:
         try:
+            timer.mark("enhanced_start")
             # Reuse EnhancedSearchTool if already instantiated (see existing code)
             result = await enhanced_search_tool.search(
                 query=query,
@@ -1154,11 +1656,17 @@ async def explain_ranking(
                 include_dependencies=False,
                 generate_response=False,
             )
+            timer.mark("enhanced_complete")
             raw_items = result.get("results", []) or result.get("final_results", []) or []
         except Exception as e:
+            logger.warning(f"Enhanced search failed in explain_ranking: {e}")
             raw_items = []
+            # Fall back to base mode
+            mode = "base"
     else:
         # Base ACS path
+        if mode != "base":
+            timer.mark("base_start")
         params = SearchCodeParams(
             query=query,
             intent=SearchIntent(intent) if intent else None,
@@ -1168,6 +1676,7 @@ async def explain_ranking(
             include_dependencies=False
         )
         base_results = await server.search_code(params)
+        timer.mark("search_complete")
         raw_items = [r.model_dump() for r in base_results]
 
     # Try proper explainer
@@ -1213,32 +1722,29 @@ async def explain_ranking(
         except Exception:
             pass
 
-    # Fallback heuristic explanation
-    explanations = []
-    q_terms = set((query or "").lower().split())
-    for item in raw_items:
-        content = (item.get("content") or "").lower()
-        signature = (item.get("signature") or "").lower()
-        repo = item.get("repository")
-        file_path = item.get("file_path")
-        score = item.get("score", 0.0)
-        overlap = sum(1 for t in q_terms if t in content or t in signature)
-        factors = []
-        if overlap:
-            factors.append({"name": "term_overlap", "weight": 0.4, "contribution": overlap * 0.1})
-        if repo:
-            factors.append({"name": "repo_presence", "weight": 0.2, "contribution": 0.1})
-        if signature:
-            factors.append({"name": "signature_match", "weight": 0.2, "contribution": 0.1})
-        factors.append({"name": "base_score", "weight": 0.2, "contribution": score * 0.1})
-        explanations.append({
-            "file_path": file_path,
-            "repository": repo,
-            "score": score,
-            "factors": factors,
-            "summary": f"Heuristic explanation: {overlap} query-term overlaps; base score {score:.2f}"
-        })
-    return _ok({"mode": "base" if mode != "enhanced" or not ENHANCED_RAG_SUPPORT else "enhanced", "query": query, "explanations": explanations})
+    # Try Azure-based explanations first, then fallback to heuristic
+    try:
+        if mode == "base" or mode == "azure":
+            # Use Azure Search specific explanations
+            explanations = await server._get_azure_ranking_explanation(query, raw_items)
+            explanation_mode = "azure"
+        else:
+            # Fall back to heuristic explanations
+            explanations = server._get_heuristic_explanations(query, raw_items)
+            explanation_mode = "heuristic"
+    except Exception as e:
+        logger.warning(f"Azure ranking explanation failed: {e}")
+        # Final fallback to heuristic explanations
+        explanations = server._get_heuristic_explanations(query, raw_items)
+        explanation_mode = "heuristic"
+
+    return _ok({
+        "mode": mode,
+        "explanation_mode": explanation_mode,
+        "query": query,
+        "explanations": explanations,
+        "timings_ms": timer.durations()
+    })
 
 @mcp.tool()
 async def diagnose_query(
@@ -1291,14 +1797,46 @@ async def diagnose_query(
             cache_key = f"{params.query}|{params.intent}|{params.repository}|{params.language}|{params.max_results}|{params.skip}|{bool(params.include_dependencies)}|{params.orderby}|{params.highlight_code}|{params.bm25_only}|{params.query_type}|{','.join(params.exact_terms or [])}"
             ts = server._query_cache_ts.get(cache_key)
             cache_hit = (cache_key in server._query_cache and ts is not None and (time.time() - ts) <= server._ttl_seconds)
+            timer.mark("cache_check")
+
             res = await server.search_code(params)
             timer.mark("base_search")
+
+            # Get detailed server timings if available
+            server_timings = getattr(server, '_last_search_timings', {})
+
+            # Build detailed stages from server timings
+            stages = []
+            if server_timings:
+                stages.extend([
+                    {"stage": "cache_check", "duration_ms": server_timings.get("start→cache_check", 0.0)},
+                    {"stage": "query_enhancement", "duration_ms": server_timings.get("cache_check→query_enhanced", 0.0)},
+                    {"stage": "repo_resolution", "duration_ms": server_timings.get("query_enhanced→repo_resolved", 0.0)},
+                    {"stage": "param_building", "duration_ms": server_timings.get("repo_resolved→params_built", 0.0)},
+                    {"stage": "exact_term_filtering", "duration_ms": server_timings.get("params_built→exact_terms_applied", 0.0)},
+                    {"stage": "azure_search", "duration_ms": server_timings.get("exact_terms_applied→acs_search_complete", 0.0)},
+                    {"stage": "result_fetch", "duration_ms": server_timings.get("acs_search_complete→results_fetched", 0.0)},
+                    {"stage": "filter_rank", "duration_ms": server_timings.get("results_fetched→filtered_ranked", 0.0)},
+                    {"stage": "convert_results", "duration_ms": server_timings.get("filtered_ranked→results_converted", 0.0)}
+                ])
+            else:
+                stages.append({"stage": "base_search", "count": len(res), "duration_ms": timer.durations().get("start→base_search", 0.0)})
+
+            # Check if exact terms were applied
+            applied_exact_terms = False
+            if hasattr(server, '_last_search_params') and server._last_search_params:
+                applied_exact_terms = server._last_search_params.get('_applied_exact_terms', False)
+
             out = {
                 "mode": "base",
                 "query": query,
                 "timings_ms": timer.durations(),
-                "stages": [{"stage": "base_search", "count": len(res), "duration_ms": timer.durations().get("start→base_search", 0.0)}],
-                "cache": {"hit": cache_hit, "cache_key": cache_key if cache_hit else None}
+                "server_timings_ms": server_timings,
+                "stages": stages,
+                "cache": {"hit": cache_hit, "cache_key": cache_key if cache_hit else None},
+                "applied_exact_terms": applied_exact_terms,
+                "exact_terms": params.exact_terms,
+                "result_count": len(res)
             }
             return _ok(out)
     except Exception as e:
@@ -1376,23 +1914,90 @@ async def preview_query_processing(
 async def search_code_then_docs(
     query: str,
     max_code_results: int = 5,
-    max_doc_results: int = 5
+    max_doc_results: int = 5,
+    docs_threshold: float = 0.5,
+    retry_docs: bool = True,
+    fallback_to_web: bool = False,
+    timeout_seconds: int = 30
 ) -> Dict[str, Any]:
-    """Search code first; if few results, supplement with Microsoft Docs."""
+    """Search code first; if few results, supplement with Microsoft Docs with fault tolerance."""
+    import asyncio
+
     try:
         params = SearchCodeParams(query=query, max_results=max(max_code_results, 1))
         code_results = await server.search_code(params)
+
         data = {
             "query": query,
             "code_results": [r.model_dump() for r in code_results],
+            "docs_attempted": False,
+            "docs_success": False,
+            "retry_attempts": 0,
+            "fallback_used": False
         }
-        if len(code_results) < max_code_results // 2 and DOCS_SUPPORT and MicrosoftDocsMCPClient:
-            try:
-                async with MicrosoftDocsMCPClient() as client:
-                    docs = await client.search_docs(query=query, max_results=max_doc_results)
-                data["docs_results"] = docs or []
-            except Exception as e:
-                data["docs_error"] = str(e)
+
+        # Use configurable threshold
+        threshold = int(max_code_results * docs_threshold)
+        should_search_docs = len(code_results) < threshold
+
+        if should_search_docs and DOCS_SUPPORT and MicrosoftDocsMCPClient:
+            data["docs_attempted"] = True
+            docs_results = None
+            last_error = None
+
+            # Retry logic for docs search
+            max_retries = 3 if retry_docs else 1
+            for attempt in range(max_retries):
+                data["retry_attempts"] = attempt + 1
+                try:
+                    # Use timeout for docs search
+                    async with asyncio.timeout(timeout_seconds):
+                        async with MicrosoftDocsMCPClient() as client:
+                            docs_results = await client.search_docs(query=query, max_results=max_doc_results)
+
+                    if docs_results:
+                        data["docs_results"] = docs_results
+                        data["docs_success"] = True
+                        break
+
+                except asyncio.TimeoutError:
+                    last_error = f"Timeout after {timeout_seconds} seconds"
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+
+            if not data["docs_success"]:
+                data["docs_error"] = f"Failed after {max_retries} attempts: {last_error}"
+
+                # Fallback to web search if enabled
+                if fallback_to_web:
+                    try:
+                        data["fallback_attempted"] = True
+                        # Placeholder for web search fallback
+                        # This would require implementing web search functionality
+                        data["fallback_note"] = "Web search fallback not yet implemented"
+                    except Exception as web_error:
+                        data["fallback_error"] = str(web_error)
+
+        # Add recommendations for improving results
+        if len(code_results) < max_code_results // 2:
+            data["recommendations"] = [
+                "Try broader search terms",
+                "Search across all repositories with repository='*'",
+                "Use different intent (implement/debug/understand/refactor)",
+                f"Current threshold: {threshold} results (adjust with docs_threshold parameter)"
+            ]
+
+        # Add performance metrics
+        data["performance"] = {
+            "code_results_count": len(code_results),
+            "docs_threshold_used": threshold,
+            "docs_threshold_met": len(code_results) >= threshold
+        }
+
         return _ok(data)
     except Exception as e:
         return _err(str(e))
@@ -1433,29 +2038,108 @@ async def search_code_hybrid(
             except Exception:
                 pass
 
-        # Base fallback: one pass (semantic + possibly vector). We cannot split stages reliably, but return the results.
-        params = SearchCodeParams(
+        # Base fallback: Run two searches - one BM25, one semantic (if available)
+        timer = _Timer()
+
+        # Run BM25 search
+        bm25_params = SearchCodeParams(
             query=query,
             intent=SearchIntent(intent) if intent else None,
             language=language,
             repository=repository,
-            max_results=max_results,
-            include_dependencies=False
+            max_results=max_results * 2,  # Get more for merging
+            include_dependencies=False,
+            bm25_only=True
         )
-        results = await server.search_code(params)
-        # Measure timing for base fallback path
-        durations = {"start→base_search": 0.0, "total": 0.0}
-        try:
-            # If diagnose_query already created a timer, we don't have access here.
-            # Compute a simple elapsed using perf_counter deltas around the awaited call if needed.
-            # For now, we omit precise timing and just include count.
-            pass
-        except Exception:
-            pass
+        timer.mark("bm25_start")
+        bm25_results = await server.search_code(bm25_params)
+        timer.mark("bm25_complete")
+
+        # Run semantic/vector search if available
+        semantic_results = []
+        if server._semantic_available:
+            semantic_params = SearchCodeParams(
+                query=query,
+                intent=SearchIntent(intent) if intent else None,
+                language=language,
+                repository=repository,
+                max_results=max_results * 2,
+                include_dependencies=False,
+                bm25_only=False,
+                query_type="semantic"
+            )
+            timer.mark("semantic_start")
+            semantic_results = await server.search_code(semantic_params)
+            timer.mark("semantic_complete")
+
+        # Merge and re-rank using weights
+        merged_results = {}
+
+        # Normalize scores to 0-1 range for each result set
+        bm25_max_score = max([r.score for r in bm25_results], default=1.0)
+        semantic_max_score = max([r.score for r in semantic_results], default=1.0)
+
+        # Add BM25 results with weighted scores
+        for r in bm25_results:
+            key = f"{r.file_path}:{r.line_range or ''}"
+            normalized_score = (r.score / bm25_max_score) if bm25_max_score > 0 else 0
+            merged_results[key] = {
+                "result": r,
+                "bm25_score": normalized_score,
+                "semantic_score": 0.0,
+                "hybrid_score": normalized_score * bm25_weight
+            }
+
+        # Add/update with semantic results
+        for r in semantic_results:
+            key = f"{r.file_path}:{r.line_range or ''}"
+            normalized_score = (r.score / semantic_max_score) if semantic_max_score > 0 else 0
+            if key in merged_results:
+                merged_results[key]["semantic_score"] = normalized_score
+                merged_results[key]["hybrid_score"] = (
+                    merged_results[key]["bm25_score"] * bm25_weight +
+                    normalized_score * vector_weight
+                )
+            else:
+                merged_results[key] = {
+                    "result": r,
+                    "bm25_score": 0.0,
+                    "semantic_score": normalized_score,
+                    "hybrid_score": normalized_score * vector_weight
+                }
+
+        # Sort by hybrid score and take top results
+        sorted_results = sorted(
+            merged_results.values(),
+            key=lambda x: x["hybrid_score"],
+            reverse=True
+        )[:max_results]
+
+        # Extract final results
+        final_results = []
+        for item in sorted_results:
+            result = item["result"].model_dump()
+            result["hybrid_score"] = item["hybrid_score"]
+            result["bm25_score"] = item["bm25_score"]
+            result["semantic_score"] = item["semantic_score"]
+            final_results.append(result)
+
+        timer.mark("merge_complete")
+
+        stages = []
+        if include_stage_results:
+            durations = timer.durations()
+            stages = [
+                {"stage": "bm25_search", "count": len(bm25_results), "duration_ms": durations.get("bm25_start→bm25_complete", 0.0)},
+                {"stage": "semantic_search", "count": len(semantic_results), "duration_ms": durations.get("semantic_start→semantic_complete", 0.0)},
+                {"stage": "merge_rerank", "count": len(final_results), "duration_ms": durations.get("semantic_complete→merge_complete", 0.0)}
+            ]
+
         out = {
             "weights": {"bm25": bm25_weight, "vector": vector_weight},
-            "final_results": [r.model_dump() for r in results],
-            "stages": [{"stage": "base_hybrid", "count": len(results), "duration_ms": durations.get("start→base_search", 0.0)}] if include_stage_results else None
+            "final_results": final_results,
+            "stages": stages if include_stage_results else None,
+            "timings_ms": timer.durations()
         }
         return _ok(out)
     except Exception as e:
@@ -1819,10 +2503,22 @@ async def index_rebuild(repository: Optional[str] = None) -> Dict[str, Any]:
         return _err("azure_admin_unavailable", code="enhanced_unavailable")
     try:
         idx = IndexerIntegration()
-        result = await idx.run_indexer_on_demand(repository)
-        return _ok({"repository": repository, "result": result})
+
+        # Check if the method exists
+        if hasattr(idx, 'run_indexer_on_demand'):
+            result = await idx.run_indexer_on_demand(repository)
+            return _ok({"repository": repository, "result": result})
+        elif hasattr(idx, 'run_indexer'):
+            # Try alternative method names
+            result = await idx.run_indexer(repository)
+            return _ok({"repository": repository, "result": result})
+        elif hasattr(idx, 'start_indexer'):
+            result = await idx.start_indexer(repository)
+            return _ok({"repository": repository, "result": result})
+        else:
+            return _err("IndexerIntegration does not support run_indexer_on_demand or equivalent method", code="not_supported_by_integration")
     except Exception as e:
-        return _err(str(e))
+        return _err(f"Failed to rebuild index: {str(e)}")
 
 @mcp.tool()
 async def document_upsert(document: Dict[str, Any]) -> Dict[str, Any]:
@@ -1895,13 +2591,21 @@ async def github_index_status(repo: str) -> Dict[str, Any]:
 
 @mcp.tool()
 async def cache_stats() -> Dict[str, Any]:
+    """Get detailed cache statistics including expiration info"""
     try:
+        # Get detailed query cache stats
+        query_cache_stats = server._get_cache_stats()
+
         rag_cache = None
         if ENHANCED_RAG_SUPPORT and RAG_CACHE_SUPPORT and CacheManager:
             rag_cache = _err("not_implemented", code="not_implemented")
+
         data = {
-            "server_query_cache": len(server._query_cache),
-            "repo_cache": len(server._repo_cache),
+            "query_cache": query_cache_stats,
+            "repo_cache": {
+                "total_entries": len(server._repo_cache),
+                "memory_usage_estimate": len(server._repo_cache) * 256  # Rough estimate
+            },
             "rag_cache": rag_cache
         }
         return _ok(data)
@@ -1909,22 +2613,47 @@ async def cache_stats() -> Dict[str, Any]:
         return _err(str(e))
 
 @mcp.tool()
-async def cache_clear(scope: str = "all") -> Dict[str, Any]:
+async def cache_clear(
+    scope: str = "all",
+    pattern: Optional[str] = None,
+    repository: Optional[str] = None,
+    language: Optional[str] = None
+) -> Dict[str, Any]:
+    """Clear caches with optional pattern-based filtering"""
     try:
         cleared = []
+        invalidated_count = 0
+
         if scope in ("all", "queries"):
-            server._query_cache.clear()
-            cleared.append("queries")
+            if pattern or repository or language:
+                # Pattern-based invalidation
+                invalidated_count = server._invalidate_cache_by_pattern(
+                    pattern=pattern,
+                    repository=repository,
+                    language=language
+                )
+                cleared.append(f"queries (pattern-based: {invalidated_count} entries)")
+            else:
+                # Clear all queries
+                server._query_cache.clear()
+                server._query_cache_ts.clear()
+                cleared.append("queries (all)")
+
         if scope in ("all", "repos"):
             server._repo_cache.clear()
             cleared.append("repos")
+
         if scope in ("all", "rag") and ENHANCED_RAG_SUPPORT and RAG_CACHE_SUPPORT and CacheManager:
             cleared.append("rag")
-        remaining = {
-            "server_query_cache": len(server._query_cache),
-            "repo_cache": len(server._repo_cache),
-        }
-        return _ok({"cleared": cleared, "remaining": remaining})
+
+        # Get updated cache stats
+        cache_stats = server._get_cache_stats()
+
+        return _ok({
+            "cleared": cleared,
+            "invalidated_count": invalidated_count,
+            "cache_stats": cache_stats
+        })
     except Exception as e:
         return _err(str(e))
 

@@ -178,3 +178,13 @@ class GeneratedResponse(BaseModel):
     intent: SearchIntent
     confidence: float
     metadata: Dict[str, Any]
+
+
+class QueryContext(BaseModel):
+    """Context for a search query."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    current_file: Optional[str] = None
+    workspace_root: Optional[str] = None
+    session_id: Optional[str] = None
+    user_preferences: Dict[str, Any] = Field(default_factory=dict)
