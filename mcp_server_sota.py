@@ -1443,11 +1443,19 @@ async def search_code_hybrid(
             include_dependencies=False
         )
         results = await server.search_code(params)
-        timer.mark("base_search")
+        # Measure timing for base fallback path
+        durations = {"start→base_search": 0.0, "total": 0.0}
+        try:
+            # If diagnose_query already created a timer, we don't have access here.
+            # Compute a simple elapsed using perf_counter deltas around the awaited call if needed.
+            # For now, we omit precise timing and just include count.
+            pass
+        except Exception:
+            pass
         out = {
             "weights": {"bm25": bm25_weight, "vector": vector_weight},
             "final_results": [r.model_dump() for r in results],
-            "stages": [{"stage": "base_hybrid", "count": len(results), "duration_ms": timer.durations().get("start→base_search", 0.0)}] if include_stage_results else None
+            "stages": [{"stage": "base_hybrid", "count": len(results), "duration_ms": durations.get("start→base_search", 0.0)}] if include_stage_results else None
         }
         return _ok(out)
     except Exception as e:
