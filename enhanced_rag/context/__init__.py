@@ -1,10 +1,11 @@
 """
-Context extraction and analysis module
-Provides hierarchical context awareness for Enhanced RAG
+Context extraction and analysis modules
 """
 
 from .hierarchical_context import HierarchicalContextAnalyzer
+from .session_tracker import SessionTracker
 
 __all__ = [
-    'HierarchicalContextAnalyzer'
+    'HierarchicalContextAnalyzer',
+    'SessionTracker'
 ]

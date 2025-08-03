@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+ATTENTION: THIS FILE IS NOT A PART OF THE APPLICATION ANYMORE, DO NOT USE IT.
+
+
 Unified Azure Code Search MCP Server - Best of All Implementations
 Combines the strongest features from all versions while staying under 900 lines
 """

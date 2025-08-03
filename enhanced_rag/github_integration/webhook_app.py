@@ -27,12 +27,9 @@ from .remote_indexer import RemoteIndexer
 
 load_dotenv()
 
-# Set up logging
-logging.basicConfig(
-    level=os.getenv("WEBHOOK_LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Set up logging using centralized configuration
+from enhanced_rag.core.logging_config import get_logger
+logger = get_logger(__name__)
 
 # Set up rate limiting
 limiter = Limiter(key_func=get_remote_address)

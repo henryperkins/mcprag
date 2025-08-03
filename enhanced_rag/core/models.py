@@ -30,7 +30,7 @@ class ContextLevel(str, Enum):
 class SearchQuery(BaseModel):
     """Enhanced search query with context"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     query: str
     intent: Optional[SearchIntent] = None
     current_file: Optional[str] = None
@@ -46,7 +46,7 @@ class SearchQuery(BaseModel):
 class CodeContext(BaseModel):
     """Context information for current coding session"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     current_file: str
     file_content: Optional[str] = None
     imports: List[str] = Field(default_factory=list)
@@ -74,7 +74,7 @@ class EnhancedContext(CodeContext):
 class SearchResult(BaseModel):
     """Enhanced search result with metadata"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     id: str
     score: float
     file_path: str
@@ -85,23 +85,23 @@ class SearchResult(BaseModel):
     language: str
     start_line: Optional[int] = None
     end_line: Optional[int] = None
-    
+
     # Relevance information
     relevance_explanation: Optional[str] = None
     context_similarity: Optional[float] = None
     import_overlap: Optional[float] = None
     pattern_match: Optional[float] = None
-    
+
     # Additional metadata
     last_modified: Optional[datetime] = None
     complexity_score: Optional[float] = None
     test_coverage: Optional[float] = None
     dependencies: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
-    
+
     # Highlighting
     highlights: Dict[str, List[str]] = Field(default_factory=dict)
-    
+
     # Semantic search results
     caption: Optional[str] = None
     answer: Optional[str] = None
@@ -121,7 +121,7 @@ class RankingMetrics(BaseModel):
 class UserPreferences(BaseModel):
     """Learned user preferences"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     user_id: str
     preferred_languages: List[str] = Field(default_factory=list)
     preferred_frameworks: List[str] = Field(default_factory=list)
@@ -148,7 +148,7 @@ class GeneratedCode(BaseModel):
 class FeedbackRecord(BaseModel):
     """User feedback record for learning"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     query: SearchQuery
     results_shown: List[SearchResult]
     results_selected: List[str]  # IDs of selected results
@@ -188,3 +188,54 @@ class QueryContext(BaseModel):
     workspace_root: Optional[str] = None
     session_id: Optional[str] = None
     user_preferences: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FileContext(BaseModel):
+    """Context information for a specific file"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    file_path: str
+    language: str
+    imports: List[str] = Field(default_factory=list)
+    functions: List[Dict[str, Any]] = Field(default_factory=list)
+    classes: List[Dict[str, Any]] = Field(default_factory=list)
+    variables: List[str] = Field(default_factory=list)
+    file_type: Optional[str] = None  # 'source', 'test', 'config', etc.
+    complexity_score: Optional[float] = None
+    last_modified: Optional[datetime] = None
+    size_bytes: Optional[int] = None
+    encoding: str = "utf-8"
+
+
+class ModuleContext(BaseModel):
+    """Context information for a module/package"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    module_name: str
+    module_path: str
+    files: List[str] = Field(default_factory=list)
+    submodules: List[str] = Field(default_factory=list)
+    exported_symbols: List[str] = Field(default_factory=list)
+    module_type: Optional[str] = None  # 'package', 'module', 'namespace'
+    init_file: Optional[str] = None
+    total_lines: Optional[int] = None
+    dependencies: List[str] = Field(default_factory=list)
+
+
+class ProjectContext(BaseModel):
+    """Context information for an entire project"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    name: str
+    root_path: str
+    project_type: Optional[str] = None  # 'python', 'javascript', 'mixed'
+    main_language: Optional[str] = None
+    frameworks: List[str] = Field(default_factory=list)
+    dependencies: Dict[str, str] = Field(default_factory=dict)  # package: version
+    modules: List[str] = Field(default_factory=list)
+    config_files: List[str] = Field(default_factory=list)
+    test_framework: Optional[str] = None
+    build_system: Optional[str] = None
+    vcs_type: Optional[str] = None  # 'git', 'svn', etc.
+    total_files: Optional[int] = None
+    total_lines: Optional[int] = None

@@ -3,14 +3,20 @@ Remote Repository Indexer
 Indexes GitHub repositories without local checkout using the GitHub API
 """
 
+import os
 import hashlib
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 
-from azure.search.documents import SearchClient
-from azure.core.credentials import AzureKeyCredential
+try:
+    from azure.search.documents import SearchClient
+    from azure.core.credentials import AzureKeyCredential
+except ImportError:
+    raise ImportError("azure-search-documents package required for remote indexing. "
+                      "Install with: pip install azure-search-documents")
 
 from enhanced_rag.core.config import get_config
 from enhanced_rag.azure_integration.embedding_provider import AzureOpenAIEmbeddingProvider
@@ -18,6 +24,25 @@ from enhanced_rag.code_understanding import CodeChunker
 from .api_client import GitHubClient
 
 logger = logging.getLogger(__name__)
+
+
+def get_document_byte_size(doc: Dict[str, Any]) -> int:
+    """Calculate the byte size of a document when serialized to JSON.
+    
+    Args:
+        doc: Document dictionary to check
+        
+    Returns:
+        Size in bytes of the JSON serialized document
+    """
+    try:
+        # Serialize to JSON to get actual payload size
+        json_str = json.dumps(doc, ensure_ascii=False)
+        return len(json_str.encode('utf-8'))
+    except Exception:
+        # Fallback to character count if serialization fails
+        content = doc.get("content", "")
+        return len(str(content)) if content else 0
 
 
 class RemoteIndexer:
@@ -32,17 +57,25 @@ class RemoteIndexer:
         if config is None:
             config = get_config()
             
+        # Check for network disabled environment
+        self.network_disabled = os.getenv("CODEX_SANDBOX_NETWORK_DISABLED") == "1"
+        
         # Get Azure Search configuration
         self.endpoint = config.azure.endpoint
         self.admin_key = config.azure.admin_key
         self.index_name = config.azure.index_name or "codebase-mcp-sota"
         
         # Create search client
-        self.search_client = SearchClient(
-            endpoint=self.endpoint,
-            index_name=self.index_name,
-            credential=AzureKeyCredential(self.admin_key)
-        )
+        if self.network_disabled:
+            logger.warning("Network is disabled (CODEX_SANDBOX_NETWORK_DISABLED=1). "
+                          "Azure Search operations will be stubbed.")
+            self.search_client = None  # Will be checked in methods
+        else:
+            self.search_client = SearchClient(
+                endpoint=self.endpoint,
+                index_name=self.index_name,
+                credential=AzureKeyCredential(self.admin_key)
+            )
         
         # Initialize embedding provider based on config
         self.provider = None
@@ -156,9 +189,17 @@ class RemoteIndexer:
                                 f"Failed to generate embedding for {file_info['path']}"
                             )
                     
-                    # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
-                    if len(doc.get("content", "")) > 20000:
-                        doc["content"] = doc["content"][:20000] + "\n..."
+                    # Safety check: Azure Search has 16MB payload limit per batch
+                    # Keep individual documents well below this (use 1MB as safe limit)
+                    doc_size = get_document_byte_size(doc)
+                    if doc_size > 1024 * 1024:  # 1MB in bytes
+                        # Truncate content to fit within size limit
+                        content = doc.get("content", "")
+                        if content:
+                            # Estimate how much to truncate (rough approximation)
+                            truncate_ratio = (1024 * 1024 * 0.8) / doc_size  # Target 80% of 1MB
+                            truncate_chars = int(len(content) * truncate_ratio)
+                            doc["content"] = content[:truncate_chars] + "\n... (truncated for size)"
                         
                     documents.append(doc)
                     
@@ -262,9 +303,17 @@ class RemoteIndexer:
                         if embedding:
                             doc["content_vector"] = embedding
                     
-                    # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
-                    if len(doc.get("content", "")) > 20000:
-                        doc["content"] = doc["content"][:20000] + "\n..."
+                    # Safety check: Azure Search has 16MB payload limit per batch
+                    # Keep individual documents well below this (use 1MB as safe limit)
+                    doc_size = get_document_byte_size(doc)
+                    if doc_size > 1024 * 1024:  # 1MB in bytes
+                        # Truncate content to fit within size limit
+                        content = doc.get("content", "")
+                        if content:
+                            # Estimate how much to truncate (rough approximation)
+                            truncate_ratio = (1024 * 1024 * 0.8) / doc_size  # Target 80% of 1MB
+                            truncate_chars = int(len(content) * truncate_ratio)
+                            doc["content"] = content[:truncate_chars] + "\n... (truncated for size)"
                         
                     documents.append(doc)
                     

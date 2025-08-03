@@ -8,7 +8,11 @@ import time
 import base64
 import logging
 from typing import List, Dict, Optional, Any
-import requests
+try:
+    import requests
+except ImportError:
+    raise ImportError("requests package required for GitHub API access. "
+                      "Install with: pip install requests")
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,6 +32,14 @@ class GitHubClient:
         Args:
             token: GitHub personal access token (optional, uses GITHUB_TOKEN env var if not provided)
         """
+        # Check for network disabled environment
+        if os.getenv("CODEX_SANDBOX_NETWORK_DISABLED") == "1":
+            logger.warning("Network is disabled (CODEX_SANDBOX_NETWORK_DISABLED=1). "
+                          "GitHub API calls will be stubbed.")
+            self.network_disabled = True
+        else:
+            self.network_disabled = False
+            
         self.github_token = token or os.getenv("GITHUB_TOKEN")
         self.headers = {"Accept": "application/vnd.github.v3+json"}
         
@@ -62,6 +74,16 @@ class GitHubClient:
         Raises:
             requests.exceptions.RequestException: On final failure
         """
+        # Return stub response if network is disabled
+        if self.network_disabled:
+            logger.info(f"Network disabled: stubbing GET request to {url}")
+            # Create a minimal stub response
+            stub_response = requests.Response()
+            stub_response.status_code = 200
+            stub_response._content = b'{"message": "Network disabled - returning stub data"}'
+            stub_response.headers = {"content-type": "application/json"}
+            return stub_response
+            
         for attempt in range(1, max_retries + 1):
             try:
                 resp = requests.get(

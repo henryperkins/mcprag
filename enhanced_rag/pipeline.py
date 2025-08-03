@@ -89,27 +89,27 @@ class RAGPipeline:
             self.query_enhancer = ContextualQueryEnhancer(retrieval_config)
             self.intent_classifier = IntentClassifier(retrieval_config)
             self.retriever = MultiStageRetriever(retrieval_config)
-            
+
             # Initialize ranking with optional adaptive ranker
             base_ranker = ContextualRanker(ranking_config)
             learning_config = self.config.get('learning', {})
-            
+
             if learning_config.get('enable_adaptive_ranking', False):
                 try:
                     from .ranking.adaptive_ranker import AdaptiveRanker
                     from .learning.feedback_collector import FeedbackCollector
                     from .learning.model_updater import ModelUpdater
-                    
+
                     # Initialize feedback collector first
                     self.feedback_collector = FeedbackCollector(
                         storage_path=learning_config.get('feedback_storage_path')
                     )
-                    
+
                     # Initialize model updater
                     model_updater = ModelUpdater(
                         update_frequency=learning_config.get('update_frequency', 'daily')
                     )
-                    
+
                     # Wrap base ranker with adaptive ranker
                     self.ranker = AdaptiveRanker(
                         base_ranker=base_ranker,
@@ -133,7 +133,7 @@ class RAGPipeline:
                 except ImportError:
                     logger.warning("Learning module not available - feedback collection disabled")
                     self.feedback_collector = None
-            
+
             self.result_explainer = ResultExplainer(ranking_config)
             self.response_generator = ResponseGenerator(
                 self.config.get('generation', {})
@@ -144,6 +144,37 @@ class RAGPipeline:
         except Exception as e:
             logger.error(f"❌ Failed to initialize RAG Pipeline: {e}")
             raise
+    async def start(self):
+        """
+        Start async components of the pipeline.
+        This should be called when an event loop is available.
+        """
+        try:
+            # Start feedback collector if available
+            if hasattr(self, 'feedback_collector') and self.feedback_collector is not None:
+                if not self.feedback_collector.is_started():
+                    await self.feedback_collector.start()
+                    logger.info("✅ RAG Pipeline async components started")
+                else:
+                    logger.debug("RAG Pipeline async components already started")
+            else:
+                logger.debug("No async components to start in RAG Pipeline")
+        except Exception as e:
+            logger.error(f"❌ Failed to start RAG Pipeline async components: {e}")
+            raise
+
+    async def cleanup(self):
+        """
+        Clean up pipeline resources.
+        """
+        try:
+            # Cleanup feedback collector if available
+            if hasattr(self, 'feedback_collector') and self.feedback_collector is not None:
+                await self.feedback_collector.cleanup()
+                logger.info("✅ RAG Pipeline cleanup completed")
+        except Exception as e:
+            logger.error(f"❌ Error during RAG Pipeline cleanup: {e}")
+
 
     async def process_query(
         self,
@@ -199,7 +230,7 @@ class RAGPipeline:
             try:
                 raw_results = await self.retriever.retrieve(search_query)
                 logger.debug(f"Retrieved {len(raw_results)} results from multi-stage retrieval")
-                
+
                 # Normalize dict results to SearchResult instances
                 if raw_results and isinstance(raw_results[0], dict):
                     from .core.models import SearchResult as CoreSearchResult
@@ -223,7 +254,7 @@ class RAGPipeline:
                             highlights=r.get('@search.highlights') or r.get('highlights', {})
                         ))
                     raw_results = normalized
-                    
+
             except Exception as e:
                 logger.error(f"Multi-stage retrieval failed: {e}")
                 # Fallback to HybridSearcher if available
@@ -400,12 +431,12 @@ class RAGPipeline:
             interaction_id = await self.feedback_collector.record_search_interaction(
                 query, results, context
             )
-            
+
             # Store interaction ID for potential later feedback
             if hasattr(query, 'user_id') and query.user_id:
                 self._session_contexts.setdefault(query.user_id, {})
                 self._session_contexts[query.user_id]['last_interaction_id'] = interaction_id
-            
+
         except Exception as e:
             logger.warning(f"⚠️ Failed to record interaction: {e}")
 

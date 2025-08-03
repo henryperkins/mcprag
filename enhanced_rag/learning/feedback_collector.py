@@ -35,12 +35,32 @@ class FeedbackCollector:
         self.max_records = max_records
         self.feedback_queue = deque(maxlen=max_records)
         self.session_data = {}
+        self.persist_task = None
+        self._started = False
 
         # Load existing feedback data
         self._load_feedback_data()
+    async def start(self):
+        """
+        Start the feedback collector async tasks.
+        This should be called when an event loop is available.
+        """
+        if self._started:
+            return
 
-        # Start background persistence task
-        self.persist_task = asyncio.create_task(self._periodic_persist())
+        try:
+            # Start background persistence task
+            self.persist_task = asyncio.create_task(self._periodic_persist())
+            self._started = True
+            logger.info("FeedbackCollector background tasks started")
+        except Exception as e:
+            logger.error(f"Error starting FeedbackCollector: {e}")
+            raise
+
+    def is_started(self) -> bool:
+        """Check if the feedback collector has been started"""
+        return self._started
+
 
     def _load_feedback_data(self):
         """Load existing feedback data from storage"""
@@ -304,9 +324,14 @@ class FeedbackCollector:
 
     async def cleanup(self):
         """Clean up resources"""
-        # Cancel background task
-        if hasattr(self, 'persist_task'):
+        # Cancel background task if it was started
+        if hasattr(self, 'persist_task') and self.persist_task is not None:
             self.persist_task.cancel()
+            try:
+                await self.persist_task
+            except asyncio.CancelledError:
+                pass
 
         # Final persist
         await self.persist_feedback()
+        self._started = False

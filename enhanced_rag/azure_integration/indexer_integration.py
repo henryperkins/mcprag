@@ -5,6 +5,7 @@ Leverages Azure indexers for automated data ingestion and enrichment
 
 import os
 import logging
+import json
 from typing import Dict, List, Any, Optional, Sequence
 from datetime import timedelta, datetime
 import asyncio
@@ -41,6 +42,25 @@ from .embedding_provider import IEmbeddingProvider, AzureOpenAIEmbeddingProvider
 from enhanced_rag.code_understanding import CodeChunker
 
 logger = logging.getLogger(__name__)
+
+
+def get_document_byte_size(doc: Dict[str, Any]) -> int:
+    """Calculate the byte size of a document when serialized to JSON.
+    
+    Args:
+        doc: Document dictionary to check
+        
+    Returns:
+        Size in bytes of the JSON serialized document
+    """
+    try:
+        # Serialize to JSON to get actual payload size
+        json_str = json.dumps(doc, ensure_ascii=False)
+        return len(json_str.encode('utf-8'))
+    except Exception:
+        # Fallback to character count if serialization fails
+        content = doc.get("content", "")
+        return len(str(content)) if content else 0
 
 
 class DataSourceType(str, Enum):
@@ -738,6 +758,11 @@ class IndexerIntegration:
             logger.error(f"Error running indexer '{indexer_name}': {e}")
             return False
     
+    # Alias for compatibility with different calling conventions
+    async def run_indexer(self, indexer_name: str) -> bool:
+        """Alias for run_indexer_on_demand for compatibility."""
+        return await self.run_indexer_on_demand(indexer_name)
+    
     async def reset_indexer(
         self,
         indexer_name: str,
@@ -1019,9 +1044,17 @@ class LocalRepositoryIndexer:
                                     f"Failed to generate embedding for {file_path}"
                                 )
                                 
-                        # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
-                        if len(doc.get("content", "")) > 20000:
-                            doc["content"] = doc["content"][:20000] + "\n..."
+                        # Safety check: Azure Search has 16MB payload limit per batch
+                        # Keep individual documents well below this (use 1MB as safe limit)
+                        doc_size = get_document_byte_size(doc)
+                        if doc_size > 1024 * 1024:  # 1MB in bytes
+                            # Truncate content to fit within size limit
+                            content = doc.get("content", "")
+                            if content:
+                                # Estimate how much to truncate (rough approximation)
+                                truncate_ratio = (1024 * 1024 * 0.8) / doc_size  # Target 80% of 1MB
+                                truncate_chars = int(len(content) * truncate_ratio)
+                                doc["content"] = content[:truncate_chars] + "\n... (truncated for size)"
                             
                         documents.append(doc)
                         

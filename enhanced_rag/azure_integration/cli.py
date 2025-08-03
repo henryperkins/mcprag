@@ -55,7 +55,9 @@ async def cmd_local_repo(args):
         embed_vectors = False
     # else: None = auto-detect based on provider
     
-    indexer.index_repository(
+    # Run synchronous indexing in a thread pool to avoid blocking the event loop
+    await asyncio.to_thread(
+        indexer.index_repository,
         repo_path=args.repo_path,
         repo_name=args.repo_name,
         patterns=patterns,
@@ -70,7 +72,9 @@ async def cmd_changed_files(args):
     logger.info(f"Indexing {len(args.files)} changed files")
     
     indexer = LocalRepositoryIndexer()
-    indexer.index_changed_files(
+    # Run synchronous indexing in a thread pool to avoid blocking the event loop
+    await asyncio.to_thread(
+        indexer.index_changed_files,
         file_paths=args.files,
         repo_name=args.repo_name
     )
@@ -120,22 +124,35 @@ async def cmd_validate_index(args):
             expected=args.check_dimensions
         )
         
-        if result['ok']:
-            logger.info(f"✓ Vector dimensions match: {result['actual']}")
+        # Output JSON details if requested
+        if args.json:
+            import json
+            print(json.dumps(result, indent=2))
         else:
-            logger.error(
-                f"✗ Vector dimension mismatch: "
-                f"expected {result['expected']}, actual {result['actual']}"
-            )
-            return 1
-            
-        logger.info(result['message'])
+            if result['ok']:
+                logger.info(f"✓ Vector dimensions match: {result['actual']}")
+            else:
+                logger.error(
+                    f"✗ Vector dimension mismatch: "
+                    f"expected {result['expected']}, actual {result['actual']}"
+                )
+            logger.info(result['message'])
+        
+        # Return appropriate exit code
+        return 0 if result['ok'] else 1
         
     except Exception as e:
-        logger.error(f"Validation failed: {e}")
+        if args.json:
+            import json
+            error_result = {
+                'ok': False,
+                'error': str(e),
+                'message': f'Validation failed: {e}'
+            }
+            print(json.dumps(error_result, indent=2))
+        else:
+            logger.error(f"Validation failed: {e}")
         return 1
-    
-    return 0
 
 
 async def cmd_create_indexer(args):
@@ -265,6 +282,11 @@ def main():
         type=int,
         required=True,
         help='Expected vector dimensions'
+    )
+    validate_parser.add_argument(
+        '--json',
+        action='store_true',
+        help='Output results as JSON'
     )
     
     # create-indexer command

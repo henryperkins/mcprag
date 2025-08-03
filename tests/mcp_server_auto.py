@@ -94,17 +94,25 @@ def index_workspace(workspace_path, workspace_name):
 
 def main():
     """Main entry point"""
+    # Check if auto-indexing is enabled
+    auto_index = os.environ.get('AUTO_INDEX_WORKSPACE', 'false').lower() == 'true'
+    
     # Get workspace info
     workspace_path, workspace_name = get_workspace_info()
     
     print(f"🚀 Starting MCP Server with Auto-Indexing")
     print(f"📂 Workspace: {workspace_name} ({workspace_path})")
     
-    # Check if indexing is needed
-    if should_index(workspace_path, workspace_name):
-        index_workspace(workspace_path, workspace_name)
+    # Only index if AUTO_INDEX_WORKSPACE is true
+    if auto_index:
+        print("🔧 AUTO_INDEX_WORKSPACE is enabled")
+        # Check if indexing is needed
+        if should_index(workspace_path, workspace_name):
+            index_workspace(workspace_path, workspace_name)
+        else:
+            print("✅ Workspace already indexed and up to date")
     else:
-        print("✅ Workspace already indexed and up to date")
+        print("⏭️  AUTO_INDEX_WORKSPACE is disabled, skipping indexing")
     
     # Now run the original MCP server with command line args
     print("\n🔧 Starting MCP server...")

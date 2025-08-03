@@ -44,6 +44,14 @@ cp .env.example .env
 # Edit .env with your Azure details
 # ACS_ENDPOINT=https://mcprag-search.search.windows.net
 # ACS_ADMIN_KEY=your-admin-key-from-above
+
+# For GitHub webhook integration (optional):
+# Generate secure tokens
+python -c "import secrets; print('GITHUB_WEBHOOK_SECRET='+secrets.token_hex(32)); print('WEBHOOK_ADMIN_TOKEN='+secrets.token_urlsafe(48))"
+
+# Add these to .env:
+# GITHUB_WEBHOOK_SECRET=<generated-secret>
+# WEBHOOK_ADMIN_TOKEN=<generated-token>
 ```
 
 ### 3. Install Dependencies

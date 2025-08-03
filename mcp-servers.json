@@ -1,18 +1,16 @@
 {
-    "mcpServers": {
-        "azure-code-search": {
-            "command": "/home/azureuser/mcprag/venv/bin/python",
-            "args": [
-                "/home/azureuser/mcprag/mcp_server_sota.py",
-                "--rpc"
-            ],
-            "env": {
-                "PYTHONPATH": "/home/azureuser/mcprag"
-            }
-        },
-        "microsoft-docs": {
-            "type": "http",
-            "url": "https://learn.microsoft.com/api/mcp"
-        }
+  "mcpServers": {
+    "azure-code-search": {
+      "command": "python",
+      "args": [
+        "-m",
+        "mcprag"
+      ],
+      "env": {
+        "ACS_ENDPOINT": "${ACS_ENDPOINT}",
+        "ACS_ADMIN_KEY": "${ACS_ADMIN_KEY}",
+        "ACS_INDEX_NAME": "${ACS_INDEX_NAME:-codebase-mcp-sota}"
+      }
     }
+  }
 }
