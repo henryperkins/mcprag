@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
-from ..utils.performance_monitor import PerformanceMonitor
+# from ..utils.performance_monitor import PerformanceMonitor  # currently unused
 
 from azure.search.documents import SearchClient
 from azure.search.documents.models import QueryType
@@ -52,8 +52,8 @@ class MultiStageRetriever(Retriever):
         try:
             if hasattr(self.config, 'azure'):
                 # Config object
-                endpoint = self.config.azure.endpoint
-                admin_key = self.config.azure.admin_key
+                endpoint = getattr(self.config.azure, "endpoint", None)
+                admin_key = getattr(self.config.azure, "admin_key", None)
             else:
                 # Dictionary config - fallback to get_config()
                 full_config = get_config()
@@ -71,7 +71,7 @@ class MultiStageRetriever(Retriever):
 
         # Initialize clients for different indexes
         index_names = {
-            'main': self.config.azure.index_name or 'codebase-mcp-sota',
+            'main': (getattr(self.config.azure, "index_name", None) if hasattr(self.config, "azure") else None) or 'codebase-mcp-sota',
             'patterns': 'codebase-patterns',
             'dependencies': 'codebase-dependencies'
         }
@@ -84,7 +84,11 @@ class MultiStageRetriever(Retriever):
                     credential=credential
                 )
             except Exception as e:
-                logger.warning(f"Failed to initialize client for {index_name}: {e}")
+                logger.warning(
+                    "Failed to initialize client for %s: %s",
+                    index_name,
+                    e,
+                )
 
         return clients
 
@@ -220,7 +224,7 @@ class MultiStageRetriever(Retriever):
         return [(d.file_id, d.relevance_score) for d in deps]
 
     def _build_filter(self, query: SearchQuery) -> Optional[str]:
-        """Build Azure Search filter expression"""
+        """Build Azure Search filter expression with support for exact numeric/phrase fallback gating and excludes"""
         filters = []
 
         if query.language:
@@ -228,13 +232,33 @@ class MultiStageRetriever(Retriever):
 
         if query.framework:
             filters.append(f"framework eq '{query.framework}'")
-            
+
+        # Honor repository/path filters if present on query
+        if hasattr(query, "repository") and getattr(query, "repository", None):
+            filters.append(f"repository eq '{query.repository}'")
+
         # Add exclusion filters for exclude_terms
         if hasattr(query, 'exclude_terms') and query.exclude_terms:
             for term in query.exclude_terms:
-                # Exclude documents containing these terms in content or tags
-                filters.append(f"not search.ismatch('{term}', 'content')")
-                filters.append(f"not search.ismatch('{term}', 'tags')")
+                safe = str(term).replace("'", "''")
+                filters.append(f"not search.ismatch('{safe}', 'content')")
+                filters.append(f"not search.ismatch('{safe}', 'tags')")
+
+        # Add optional exact-term must-have gating if provided via query.exact_terms
+        # This allows MCP layer to pass numeric or quoted phrases explicitly.
+        exact_terms = getattr(query, "exact_terms", None) or []
+        if exact_terms:
+            term_filters = []
+            for t in exact_terms:
+                safe = str(t).replace("'", "''")
+                term_filters.append("(" + " or ".join([
+                    f"search.ismatch('{safe}', 'content')",
+                    f"search.ismatch('{safe}', 'function_name')",
+                    f"search.ismatch('{safe}', 'class_name')",
+                    f"search.ismatch('{safe}', 'docstring')",
+                ]) + ")")
+            if term_filters:
+                filters.append(" and ".join(term_filters))
 
         return " and ".join(filters) if filters else None
 

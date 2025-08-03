@@ -86,9 +86,16 @@ class HybridSearcher:
     def _initialize_client(self):
         """Initialize Azure Search client"""
         try:
-            endpoint = self.config.azure.endpoint
-            admin_key = self.config.azure.admin_key
-            index_name = self.config.azure.index_name or 'codebase-mcp-sota'
+            # Support both Config object and dict-like config
+            if hasattr(self.config, "azure"):
+                endpoint = getattr(self.config.azure, "endpoint", None)
+                admin_key = getattr(self.config.azure, "admin_key", None)
+                index_name = getattr(self.config.azure, "index_name", None) or "codebase-mcp-sota"
+            else:
+                fallback = get_config()
+                endpoint = getattr(fallback.azure, "endpoint", None)
+                admin_key = getattr(fallback.azure, "admin_key", None)
+                index_name = getattr(fallback.azure, "index_name", None) or "codebase-mcp-sota"
 
             credential = AzureKeyCredential(admin_key)
             self.search_client = SearchClient(
@@ -130,15 +137,24 @@ class HybridSearcher:
         semantic_weight: float = 0.4,
         keyword_weight: float = 0.2,
         deadline_ms: Optional[int] = None,
+        exact_boost: float = 0.35,
     ) -> List[HybridSearchResult]:
         """
         Full hybrid search (semantic + keyword + vector) with
         deterministic pagination and weighted score fusion.
+
+        Adds exact-term fallback boosting for numeric tokens and quoted phrases.
         """
+        # Detect exact-match tokens: quoted phrases and numeric literals
+        import re as _re
+        quoted = _re.findall(r'"([^"]+)"|\'([^\']+)\'', query)
+        quoted_terms = [q for pair in quoted for q in pair if q]
+        numeric_terms = _re.findall(r'(?<![\w.])(\d{2,})(?![\w.])', query)
+        exact_terms = [t.strip() for t in (quoted_terms + numeric_terms) if t.strip()]
+
         # ------------------------------------------------------------------
         # 1.  Build keyword/semantic request
         # ------------------------------------------------------------------
-
         kw_sem_results: List[HybridSearchResult] = []
         try:
             kw_sem_kwargs = self._sanitize_search_kwargs({
@@ -159,9 +175,41 @@ class HybridSearcher:
             logger.warning("Keyword/Semantic path failed – %s", e)
 
         # ------------------------------------------------------------------
+        # 1b. Exact lexical fallback pass (if exact_terms present)
+        # ------------------------------------------------------------------
+        exact_results: List[HybridSearchResult] = []
+        if exact_terms:
+            try:
+                # Build a strict filter using search.ismatch for each term over key text fields
+                # We OR the fields for a term and AND across terms to enforce presence of all exact terms.
+                def _term_filter(term: str) -> str:
+                    safe = term.replace("'", "''")
+                    return "(" + " or ".join([
+                        f"search.ismatch('{safe}', 'content')",
+                        f"search.ismatch('{safe}', 'function_name')",
+                        f"search.ismatch('{safe}', 'class_name')",
+                        f"search.ismatch('{safe}', 'docstring')",
+                    ]) + ")"
+                combined_exact = " and ".join([_term_filter(t) for t in exact_terms])
+                combined_filter = combined_exact if not filter_expr else f"({filter_expr}) and {combined_exact}"
+
+                exact_kwargs = self._sanitize_search_kwargs({
+                    "search_text": "",  # rely on filter to force must-have terms
+                    "query_type": QueryType.SIMPLE,
+                    "filter": combined_filter,
+                    "top": top_k * 2,
+                    "include_total_count": False,
+                    "disable_randomization": True,
+                    "timeout": (deadline_ms / 1000) if deadline_ms else None,
+                })
+                ex = self.search_client.search(**exact_kwargs)
+                exact_results = self._process_results(ex)
+            except Exception as e:
+                logger.warning("Exact-match fallback pass failed – %s", e)
+
+        # ------------------------------------------------------------------
         # 2.  Build vector request  (server-side TextVectorization if possible)
         # ------------------------------------------------------------------
-
         vec_results: List[HybridSearchResult] = []
         try:
             vq = VectorizedQuery(
@@ -185,9 +233,8 @@ class HybridSearcher:
             logger.warning("Vector path failed – %s", e)
 
         # ------------------------------------------------------------------
-        # 3.  Fuse scores  (linear-weighted)
+        # 3.  Fuse scores  (linear-weighted) + exact boost
         # ------------------------------------------------------------------
-
         by_id: Dict[str, HybridSearchResult] = {}
 
         def _update(result: HybridSearchResult, weight: float):
@@ -205,6 +252,19 @@ class HybridSearcher:
             _update(r, semantic_weight if "@search.rerankerScore" in r.metadata else keyword_weight)
         for r in vec_results:
             _update(r, vector_weight)
+        # Apply exact boost as an additive weight to already seen ids; if new, create with small base
+        if exact_results:
+            for r in exact_results:
+                if r.id in by_id:
+                    by_id[r.id].score += max(r.score, 1.0) * exact_boost
+                else:
+                    # Seed unseen exact hits so they can surface
+                    by_id[r.id] = HybridSearchResult(
+                        id=r.id,
+                        score=max(r.score, 1.0) * exact_boost,
+                        content=r.content,
+                        metadata=r.metadata,
+                    )
 
         fused = sorted(by_id.values(), key=lambda x: x.score, reverse=True)[:top_k]
         return fused
