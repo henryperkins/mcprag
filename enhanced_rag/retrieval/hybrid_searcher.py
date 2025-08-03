@@ -169,7 +169,7 @@ class HybridSearcher:
                 "disable_randomization": True,  # deterministic
                 "timeout": (deadline_ms / 1000) if deadline_ms else None,
             })
-            kw_sem = self.search_client.search(**kw_sem_kwargs)
+            kw_sem = with_retry(op_name="acs.semantic")(self.search_client.search)(**kw_sem_kwargs)
             kw_sem_results = self._process_results(kw_sem)
         except Exception as e:
             logger.warning("Keyword/Semantic path failed – %s", e)
@@ -202,7 +202,7 @@ class HybridSearcher:
                     "disable_randomization": True,
                     "timeout": (deadline_ms / 1000) if deadline_ms else None,
                 })
-                ex = self.search_client.search(**exact_kwargs)
+                ex = with_retry(op_name="acs.exact")(self.search_client.search)(**exact_kwargs)
                 exact_results = self._process_results(ex)
             except Exception as e:
                 logger.warning("Exact-match fallback pass failed – %s", e)
@@ -212,22 +212,22 @@ class HybridSearcher:
         # ------------------------------------------------------------------
         vec_results: List[HybridSearchResult] = []
         try:
-            vq = VectorizedQuery(
-                vector=self.embedder.generate_embedding(query)
-                if self.embedder
-                else None,
-                k_nearest_neighbors=top_k * 2,
-                fields="content_vector",
-            )
+            emb = None
+            if self.embedder:
+                try:
+                    emb = self.embedder.generate_embedding(query)
+                except Exception:
+                    emb = None
+            vq = VectorizedQuery(vector=emb, k_nearest_neighbors=top_k * 2, fields="content_vector") if emb else None
             vec_kwargs = self._sanitize_search_kwargs({
                 "search_text": "",
-                "vector_queries": [vq],
+                "vector_queries": [vq] if vq else None,
                 "filter": filter_expr,
                 "top": top_k * 2,
                 "include_total_count": False,
                 "timeout": (deadline_ms / 1000) if deadline_ms else None,
             })
-            vec = self.search_client.search(**vec_kwargs)
+            vec = with_retry(op_name="acs.vector")(self.search_client.search)(**vec_kwargs)
             vec_results = self._process_results(vec)
         except Exception as e:
             logger.warning("Vector path failed – %s", e)
@@ -295,8 +295,7 @@ class HybridSearcher:
 
         try:
             # Execute vector search with retries
-            results = with_retry(
-                self.search_client.search,
+            results = with_retry(op_name="acs.vector")(self.search_client.search)(
                 search_text=None,
                 vector_queries=[vector_query],
                 filter=filter_expr,
@@ -346,7 +345,7 @@ class HybridSearcher:
                 "top": top_k,
                 "search_fields": ["content", "function_name", "class_name", "docstring"],
             })
-            results = with_retry(self.search_client.search, **kw_kwargs)
+            results = with_retry(op_name="acs.keyword")(self.search_client.search)(**kw_kwargs)
             return self._process_results(results)
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")

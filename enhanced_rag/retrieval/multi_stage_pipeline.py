@@ -189,8 +189,7 @@ class MultiStageRetriever(Retriever):
             return []
 
         # Enrich semantic search with facets, captions/answers, highlights, total count, search_fields and retries
-        results = with_retry(
-            self.search_clients["main"].search,
+        results = with_retry(op_name="acs.semantic")(self.search_clients["main"].search)(
             search_text=query.query,
             query_type=QueryType.SEMANTIC,
             semantic_configuration_name="semantic-config",
@@ -446,7 +445,7 @@ class MultiStageRetriever(Retriever):
                 return self._cache[doc_id]
 
             # Fetch from Azure Search
-            doc = with_retry(self.search_clients['main'].get_document, key=doc_id)
+            doc = with_retry(op_name="acs.get_document")(self.search_clients['main'].get_document)(key=doc_id)
 
             # Convert to SearchResult
             result = SearchResult(

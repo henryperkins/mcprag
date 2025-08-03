@@ -1009,7 +1009,7 @@ async def search_code(
     if exact_terms is None and query:
         quoted = _re.findall(r'"([^"]+)"|\'([^\']+)\'', query)
         quoted_terms = [t for pair in quoted for t in pair if t]
-        numeric_terms = _re.findall(r'(?<![\w.])(\\d{2,})(?![\w.])', query)
+        numeric_terms = _re.findall(r'(?<![\w.])(\d{2,})(?![\w.])', query)
         auto_exact = [t.strip() for t in (quoted_terms + numeric_terms) if t.strip()]
     params = SearchCodeParams(
         query=query,
