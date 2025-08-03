@@ -11,8 +11,12 @@ Context-aware result ranking with:
 - Performance monitoring
 """
 
-from .contextual_ranker import ContextualRanker, RankingFactors
-from .contextual_ranker_improved import ImprovedContextualRanker, ValidatedFactor
+from .contextual_ranker_improved import (
+    ImprovedContextualRanker,
+    ImprovedContextualRanker as ContextualRanker,  # Alias for compatibility
+    RankingFactors,
+    ValidatedFactor
+)
 from .ranking_monitor import RankingMonitor, RankingDecision, RankingMetricsSnapshot
 
 __all__ = [

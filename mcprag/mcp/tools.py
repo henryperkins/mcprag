@@ -622,7 +622,9 @@ def _add_tracking_info(items: List[Any]) -> None:
         if isinstance(item, dict):
             # For dictionaries, add keys directly
             item["query_id"] = None
-            item["result_position"] = i + 1
+            # Only set result_position if not already set
+            if "result_position" not in item or item["result_position"] is None:
+                item["result_position"] = i + 1
         else:
             # For objects (like Pydantic models), only add if the field exists
             if hasattr(item, "query_id"):
@@ -633,7 +635,10 @@ def _add_tracking_info(items: List[Any]) -> None:
                     pass
             if hasattr(item, "result_position"):
                 try:
-                    setattr(item, "result_position", i + 1)
+                    # Only set if not already set
+                    current_value = getattr(item, "result_position", None)
+                    if current_value is None:
+                        setattr(item, "result_position", i + 1)
                 except (AttributeError, TypeError):
                     # Field exists but is not settable
                     pass

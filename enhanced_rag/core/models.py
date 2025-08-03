@@ -4,7 +4,7 @@ Provides type-safe data structures used throughout the system
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -39,7 +39,7 @@ class SearchQuery(BaseModel):
     framework: Optional[str] = None
     task_context: Optional[str] = None
     user_id: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     exclude_terms: List[str] = Field(default_factory=list)  # Terms to exclude from search results
 
 
@@ -88,6 +88,7 @@ class SearchResult(BaseModel):
 
     # Relevance information
     relevance_explanation: Optional[str] = None
+    ranking_explanation: Optional[str] = None
     context_similarity: Optional[float] = None
     import_overlap: Optional[float] = None
     pattern_match: Optional[float] = None
@@ -103,6 +104,7 @@ class SearchResult(BaseModel):
     test_coverage: Optional[float] = None
     dependencies: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
+    result_position: Optional[int] = None
 
     # Highlighting
     highlights: Dict[str, List[str]] = Field(default_factory=dict)
@@ -110,7 +112,7 @@ class SearchResult(BaseModel):
     # Semantic search results
     caption: Optional[str] = None
     answer: Optional[str] = None
-    
+
     # MCP tracking
     query_id: Optional[str] = None
 
@@ -137,7 +139,7 @@ class UserPreferences(BaseModel):
     common_patterns: List[str] = Field(default_factory=list)
     search_history: List[Dict[str, Any]] = Field(default_factory=list)
     success_patterns: List[Dict[str, Any]] = Field(default_factory=list)
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class GeneratedCode(BaseModel):
@@ -164,7 +166,7 @@ class FeedbackRecord(BaseModel):
     outcome: str  # success/failure/partial
     time_to_selection_ms: Optional[float] = None
     user_satisfaction: Optional[int] = None  # 1-5 scale
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class IndexingRequest(BaseModel):

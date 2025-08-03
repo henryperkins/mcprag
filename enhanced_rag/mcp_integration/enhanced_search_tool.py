@@ -55,7 +55,9 @@ class EnhancedSearchTool:
                 for i, res in enumerate(result.results):
                     if hasattr(res, '__dict__'):
                         res.query_id = query_id
-                        res.result_position = i + 1
+                        # Only set result_position if not already set
+                        if not hasattr(res, 'result_position') or res.result_position is None:
+                            res.result_position = i + 1
 
         # Format for MCP
         return self._format_mcp_response(result)

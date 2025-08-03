@@ -6,8 +6,6 @@ Coordinates all enhanced RAG components for optimal code search
 import logging
 from typing import Dict, List, Any, Optional, Union, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .ranking.adaptive_ranker import AdaptiveRanker
 from datetime import datetime, timezone
 
 from .core.models import (
@@ -18,7 +16,7 @@ from .context.hierarchical_context import HierarchicalContextAnalyzer
 from .semantic.query_enhancer import ContextualQueryEnhancer
 from .semantic.intent_classifier import IntentClassifier
 from .retrieval.multi_stage_pipeline import MultiStageRetriever
-from .ranking.contextual_ranker_improved import ImprovedContextualRanker as ContextualRanker
+from .ranking.contextual_ranker_improved import ImprovedContextualRanker
 from .ranking.result_explainer import ResultExplainer
 from .generation.response_generator import ResponseGenerator
 from .utils.performance_monitor import PerformanceMonitor
@@ -92,8 +90,8 @@ class RAGPipeline:
         self._context_cache: Dict[str, CodeContext] = {}
         self._session_contexts: Dict[str, Dict[str, Any]] = {}
 
-        # Type annotation for ranker
-        self.ranker: Union[ContextualRanker, 'AdaptiveRanker']
+        # Type annotation for ranker: either the improved ranker or the adaptive wrapper
+        self.ranker: Union[ImprovedContextualRanker, 'AdaptiveRanker']
 
     def _initialize_components(self):
         """Initialize all RAG pipeline components"""
@@ -111,7 +109,7 @@ class RAGPipeline:
             # Initialize ranking with optional adaptive ranker and monitoring
             # Check if monitoring is enabled in config
             enable_monitoring = ranking_config.get('enable_monitoring', True)
-            
+
             # Initialize improved ranker with monitoring support
             if enable_monitoring:
                 from .ranking.ranking_monitor import RankingMonitor
@@ -119,8 +117,12 @@ class RAGPipeline:
                 logger.info("✅ Ranking monitoring enabled")
             else:
                 self.ranking_monitor = None
-                
-            base_ranker = ContextualRanker(ranking_config)
+
+            # Create improved ranker at runtime; annotate as base interface for type checking
+            base_ranker = ImprovedContextualRanker(ranking_config)
+            # Help type checkers understand compatibility
+            if TYPE_CHECKING:
+                base_ranker_typed: 'ImprovedContextualRanker' = base_ranker  # type: ignore[assignment]
             learning_config = self.config.learning
 
             # Import AdaptiveRanker at module level for type checking
@@ -145,8 +147,10 @@ class RAGPipeline:
                     )
 
                     # Wrap base ranker with adaptive ranker
+                    # Pylance: cast to base interface type for constructor compatibility
+                    from typing import cast
                     self.ranker = AdaptiveRanker(
-                        base_ranker=base_ranker,
+                        base_ranker=cast('ImprovedContextualRanker', base_ranker),
                         model_updater=model_updater,
                         feedback_collector=self.feedback_collector,
                         config=learning_config.model_dump()
@@ -168,6 +172,10 @@ class RAGPipeline:
                     logger.warning("Learning module not available - feedback collection disabled")
                     self.feedback_collector = None
 
+                # Ensure ranker attribute is recognized as compatible base type by type checkers
+                if TYPE_CHECKING:
+                    _ranker_check: Union['ImprovedContextualRanker', 'AdaptiveRanker'] = self.ranker  # type: ignore[assignment]
+
             self.result_explainer = ResultExplainer(ranking_config)
             self.response_generator = ResponseGenerator({})
 
@@ -187,11 +195,18 @@ class RAGPipeline:
             if hasattr(self, 'feedback_collector') and self.feedback_collector is not None:
                 if not self.feedback_collector.is_started():
                     await self.feedback_collector.start()
-                    logger.info("✅ RAG Pipeline async components started")
+                    logger.info("✅ FeedbackCollector started")
                 else:
-                    logger.debug("RAG Pipeline async components already started")
-            else:
-                logger.debug("No async components to start in RAG Pipeline")
+                    logger.debug("FeedbackCollector already started")
+
+            # Start ranking monitor if available
+            if hasattr(self, 'ranking_monitor') and self.ranking_monitor is not None:
+                if hasattr(self.ranking_monitor, 'ensure_started'):
+                    await self.ranking_monitor.ensure_started()
+                    logger.info("✅ RankingMonitor started")
+
+            logger.info("✅ RAG Pipeline async components started")
+
         except Exception as e:
             logger.error(f"❌ Failed to start RAG Pipeline async components: {e}")
             raise
@@ -266,7 +281,7 @@ class RAGPipeline:
                 # Normalize dict results to SearchResult instances
                 if raw_results and isinstance(raw_results[0], dict):
                     normalized = []
-                    for r in raw_results:
+                    for i, r in enumerate(raw_results):
                         if not isinstance(r, dict):
                             continue
                         normalized.append(SearchResult(
@@ -284,7 +299,8 @@ class RAGPipeline:
                             dependencies=r.get('dependencies') or [],
                             start_line=r.get('start_line'),
                             end_line=r.get('end_line'),
-                            highlights=r.get('@search.highlights') or r.get('highlights', {})
+                            highlights=r.get('@search.highlights') or r.get('highlights', {}),
+                            result_position=i + 1
                         ))
                     raw_results = normalized
 
@@ -300,7 +316,7 @@ class RAGPipeline:
                         )
                         # Convert HybridSearchResult to SearchResult
                         raw_results = []
-                        for hr in hybrid_results:
+                        for i, hr in enumerate(hybrid_results):
                             search_result = SearchResult(
                                 id=hr.id,
                                 score=hr.score,
@@ -314,7 +330,8 @@ class RAGPipeline:
                                 signature=hr.metadata.get('signature', ''),  # add
                                 semantic_context=hr.metadata.get('semantic_context', ''),  # add
                                 imports=hr.metadata.get('imports') or [],  # add
-                                dependencies=hr.metadata.get('dependencies') or []  # add
+                                dependencies=hr.metadata.get('dependencies') or [],  # add
+                                result_position=i + 1
                             )
                             raw_results.append(search_result)
                         logger.info(f"HybridSearcher fallback returned {len(raw_results)} results")
@@ -350,46 +367,49 @@ class RAGPipeline:
                     # Track ranking start time for monitoring
                     import time
                     ranking_start_time = time.time()
-                    
+
                     # Call appropriate ranking method based on available method
                     # Try AdaptiveRanker's rank method first
                     if hasattr(self.ranker, 'rank'):
-                        ranked_results = await self.ranker.rank(
+                        # type: ignore[attr-defined] — dispatched at runtime based on actual implementation
+                        ranked_results = await self.ranker.rank(  # type: ignore[attr-defined]
                             raw_results, query, enhanced_context, intent
                         )
                     elif hasattr(self.ranker, 'rank_results'):
                         # ContextualRanker's rank_results method
-                        ranked_results = await self.ranker.rank_results(
+                        # type: ignore[attr-defined]
+                        ranked_results = await self.ranker.rank_results(  # type: ignore[attr-defined]
                             raw_results, enhanced_context, intent
                         )
                     else:
                         raise AttributeError(f"Ranker {type(self.ranker).__name__} has no rank or rank_results method")
-                    
+
                     # Calculate processing time
                     ranking_time_ms = (time.time() - ranking_start_time) * 1000
-                    
+
                     # Log ranking decision to monitor if available
                     if self.ranking_monitor and hasattr(enhanced_context, 'query'):
                         # Extract factors from results (if improved ranker added them)
                         factors = []
                         for result in ranked_results:
                             if hasattr(result, '_ranking_factors'):
-                                factors.append(result._ranking_factors)
-                        
+                                # type: ignore[attr-defined]
+                                factors.append(getattr(result, '_ranking_factors'))  # type: ignore[attr-defined]
+
                         # Create query object for monitoring
                         monitoring_query = SearchQuery(
-                            query=enhanced_context.query if hasattr(enhanced_context, 'query') else query,
+                            query=getattr(enhanced_context, 'query', query),
                             intent=intent,
                             current_file=enhanced_context.current_file,
                             language=enhanced_context.language,
                             framework=enhanced_context.framework,
                             user_id=context.session_id
                         )
-                        
+
                         await self.ranking_monitor.log_ranking_decision(
                             monitoring_query, ranked_results, factors, ranking_time_ms
                         )
-                    
+
                     logger.debug(f"Ranked {len(ranked_results)} results in {ranking_time_ms:.1f}ms")
                 except Exception as e:
                     logger.error(f"Ranking failed: {e}")
@@ -532,7 +552,7 @@ class RAGPipeline:
             'active_sessions': len(self._session_contexts),
             'performance_metrics': self.performance_monitor.get_metrics()
         }
-        
+
         # Add ranking monitor status if available
         if hasattr(self, 'ranking_monitor') and self.ranking_monitor:
             status['ranking_monitor'] = {
@@ -541,14 +561,14 @@ class RAGPipeline:
             }
         else:
             status['ranking_monitor'] = {'enabled': False}
-            
+
         return status
-    
+
     async def get_ranking_performance_report(self, time_window_hours: int = 24) -> Dict[str, Any]:
         """Get ranking performance report from monitor"""
         if not hasattr(self, 'ranking_monitor') or not self.ranking_monitor:
             return {'error': 'Ranking monitoring not enabled'}
-        
+
         from datetime import timedelta
         return await self.ranking_monitor.get_performance_report(
             timedelta(hours=time_window_hours)

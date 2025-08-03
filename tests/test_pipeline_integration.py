@@ -211,9 +211,9 @@ class RAGPipelineTester:
         logger.info("Testing Pattern Matching")
         logger.info(f"{'='*60}")
         
-        from enhanced_rag.retrieval.pattern_matcher import PatternMatcher
+        from enhanced_rag.pattern_registry import get_pattern_registry
         
-        matcher = PatternMatcher()
+        pattern_registry = get_pattern_registry()
         
         test_queries = [
             "vector dimension mismatch error handling",
@@ -225,14 +225,14 @@ class RAGPipelineTester:
         for query in test_queries:
             logger.info(f"\nQuery: '{query}'")
             
-            patterns = await matcher.find_patterns(query)
+            patterns = pattern_registry.recognize_patterns(query)
             
             if patterns:
                 logger.info(f"Found {len(patterns)} patterns:")
                 for pattern in patterns[:3]:
                     logger.info(f"  - {pattern.pattern_type.value}: {pattern.pattern_name}")
                     logger.info(f"    Confidence: {pattern.confidence:.2f}")
-                    logger.info(f"    Matched keywords: {pattern.context.get('matched_keywords', [])}")
+                    logger.info(f"    Matched keywords: {pattern.matched_keywords}")
             else:
                 logger.info("  No patterns found")
 

@@ -18,7 +18,7 @@ from ..core.models import SearchQuery, SearchResult, SearchIntent, CodeContext
 from ..core.config import get_config
 from .hybrid_searcher import HybridSearcher
 from .dependency_resolver import DependencyResolver
-from .pattern_matcher import PatternMatcher
+from ..pattern_registry import get_pattern_registry
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class MultiStageRetriever(Retriever):
         self.search_clients = self._initialize_clients()
         self.hybrid_searcher = HybridSearcher(config)
         self.dependency_resolver = DependencyResolver(config)
-        self.pattern_matcher = PatternMatcher(config)
+        self.pattern_registry = get_pattern_registry()
         self._cache = {}
 
     def _initialize_clients(self) -> Dict[str, SearchClient]:
@@ -208,11 +208,13 @@ class MultiStageRetriever(Retriever):
 
     async def _execute_pattern_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute architectural pattern search"""
-        patterns = await self.pattern_matcher.find_patterns(
+        patterns = self.pattern_registry.recognize_patterns(
             query.query,
-            context=query.task_context
+            context={'task_context': query.task_context}
         )
-        return [(p.file_id, p.confidence) for p in patterns]
+        # Convert patterns to file_id, confidence pairs
+        # For now, use pattern type + name as file_id (simplified)
+        return [(f"{p.pattern_type.value}_{p.pattern_name}", p.confidence) for p in patterns]
 
     async def _execute_dependency_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute dependency-aware search"""

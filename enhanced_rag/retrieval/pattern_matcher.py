@@ -1,5 +1,6 @@
 """
-Pattern matching for architectural and design patterns in code
+DEPRECATED: Use enhanced_rag.pattern_registry instead
+Pattern matching for architectural and design patterns in code - Legacy file
 """
 
 import logging
