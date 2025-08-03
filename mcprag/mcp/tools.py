@@ -568,8 +568,8 @@ async def _search_code_impl(
             items = _get_items_by_detail_level(result, detail_level)
             total = result.get("total_count", len(items))
 
-            # Add query_id and result_position to items if available
-            _add_tracking_info(items)
+            # Skip tracking info for now to avoid Pydantic model issues
+            # _add_tracking_info(items)
 
         # Fallback to basic Azure Search
         elif server.search_client:
@@ -618,10 +618,25 @@ def _get_items_by_detail_level(result: Dict[str, Any], detail_level: str) -> Lis
 def _add_tracking_info(items: List[Any]) -> None:
     """Add tracking information to items."""
     for i, item in enumerate(items):
-        if hasattr(item, "query_id"):
-            item["query_id"] = getattr(item, "query_id", None)
-        if hasattr(item, "result_position"):
-            item["result_position"] = getattr(item, "result_position", i + 1)
+        # Handle both dict and object types
+        if isinstance(item, dict):
+            # For dictionaries, add keys directly
+            item["query_id"] = None
+            item["result_position"] = i + 1
+        else:
+            # For objects (like Pydantic models), only add if the field exists
+            if hasattr(item, "query_id"):
+                try:
+                    setattr(item, "query_id", None)
+                except (AttributeError, TypeError):
+                    # Field exists but is not settable (e.g., Pydantic model)
+                    pass
+            if hasattr(item, "result_position"):
+                try:
+                    setattr(item, "result_position", i + 1)
+                except (AttributeError, TypeError):
+                    # Field exists but is not settable
+                    pass
 
 
 async def _basic_search(

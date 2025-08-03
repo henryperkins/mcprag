@@ -3,7 +3,7 @@ Pydantic models for Enhanced RAG system
 Provides type-safe data structures used throughout the system
 """
 
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
@@ -92,6 +92,11 @@ class SearchResult(BaseModel):
     import_overlap: Optional[float] = None
     pattern_match: Optional[float] = None
 
+    # Code structure information
+    signature: Optional[str] = None
+    semantic_context: Optional[str] = None
+    imports: List[str] = Field(default_factory=list)
+
     # Additional metadata
     last_modified: Optional[datetime] = None
     complexity_score: Optional[float] = None
@@ -105,6 +110,9 @@ class SearchResult(BaseModel):
     # Semantic search results
     caption: Optional[str] = None
     answer: Optional[str] = None
+    
+    # MCP tracking
+    query_id: Optional[str] = None
 
 
 class RankingMetrics(BaseModel):

@@ -229,6 +229,12 @@ class MCPServer:
                 self.model_updater = ModelUpdater()
                 pipeline_config["model_updater"] = self.model_updater
                 pipeline_config["adaptive_ranking"] = True
+            
+            # Enable ranking monitoring for the improved ranker
+            if "ranking" not in pipeline_config:
+                pipeline_config["ranking"] = {}
+            pipeline_config["ranking"]["enable_monitoring"] = True
+            
             self.pipeline = RAGPipeline(pipeline_config)
         else:
             self.pipeline = None
@@ -391,6 +397,13 @@ class MCPServer:
             logger.debug("Will start async components on first tool usage")
 
         self.mcp.run(transport=transport)
+    
+    async def get_ranking_metrics(self, time_window_hours: int = 24) -> Dict[str, Any]:
+        """Get ranking performance metrics from the pipeline."""
+        if self.pipeline and hasattr(self.pipeline, 'get_ranking_performance_report'):
+            return await self.pipeline.get_ranking_performance_report(time_window_hours)
+        else:
+            return {"error": "Ranking metrics not available"}
 
 
 def create_server() -> MCPServer:

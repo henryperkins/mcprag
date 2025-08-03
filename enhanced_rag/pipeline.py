@@ -4,26 +4,27 @@ Coordinates all enhanced RAG components for optimal code search
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .ranking.adaptive_ranker import AdaptiveRanker
 from datetime import datetime, timezone
 
 from .core.models import (
     SearchQuery, SearchResult, CodeContext, EnhancedContext, QueryContext
 )
-from .core.config import get_config
+from .core.config import get_config, Config
 from .context.hierarchical_context import HierarchicalContextAnalyzer
 from .semantic.query_enhancer import ContextualQueryEnhancer
 from .semantic.intent_classifier import IntentClassifier
 from .retrieval.multi_stage_pipeline import MultiStageRetriever
-from .ranking.contextual_ranker import ContextualRanker
+from .ranking.contextual_ranker_improved import ImprovedContextualRanker as ContextualRanker
 from .ranking.result_explainer import ResultExplainer
 from .generation.response_generator import ResponseGenerator
 from .utils.performance_monitor import PerformanceMonitor
 from .utils.error_handler import ErrorHandler
 
 logger = logging.getLogger(__name__)
-
-
 
 
 class RAGPipelineResult:
@@ -56,8 +57,22 @@ class RAGPipeline:
     6. Learning and feedback collection
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self.config = config or get_config()
+    def __init__(self, config: Optional[Union[Config, Dict[str, Any]]] = None):
+        # Handle both Config object and dict
+        if config is None:
+            self.config = get_config()
+        elif isinstance(config, dict):
+            # If dict is passed, use default Config and update Azure settings
+            self.config = get_config()
+            if 'azure_endpoint' in config:
+                self.config.azure.endpoint = config['azure_endpoint']
+            if 'azure_key' in config:
+                self.config.azure.admin_key = config['azure_key']
+            if 'index_name' in config:
+                self.config.azure.index_name = config['index_name']
+        else:
+            # Already a Config object
+            self.config = config
         self.performance_monitor = PerformanceMonitor()
         self.error_handler = ErrorHandler()
 
@@ -65,10 +80,10 @@ class RAGPipeline:
         self._initialize_components()
 
         # Initialize vector search if enabled
-        if self.config.get('retrieval', {}).get('enable_vector_search', True):
+        if self.config.retrieval.enable_vector_search:
             try:
                 from .retrieval.hybrid_searcher import HybridSearcher
-                self.hybrid_searcher = HybridSearcher(self.config)
+                self.hybrid_searcher = HybridSearcher(self.config.model_dump())
                 logger.info("✅ Vector search enabled in pipeline")
             except Exception as e:
                 logger.warning(f"Vector search initialization failed: {e}")
@@ -77,37 +92,56 @@ class RAGPipeline:
         self._context_cache: Dict[str, CodeContext] = {}
         self._session_contexts: Dict[str, Dict[str, Any]] = {}
 
+        # Type annotation for ranker
+        self.ranker: Union[ContextualRanker, 'AdaptiveRanker']
+
     def _initialize_components(self):
         """Initialize all RAG pipeline components"""
         try:
             # Core components
-            context_config = self.config.get('context', {})
-            retrieval_config = self.config.get('retrieval', {})
-            ranking_config = self.config.get('ranking', {})
+            context_config = self.config.context.model_dump()
+            retrieval_config = self.config.retrieval.model_dump()
+            ranking_config = self.config.ranking.model_dump()
 
             self.context_analyzer = HierarchicalContextAnalyzer(context_config)
             self.query_enhancer = ContextualQueryEnhancer(retrieval_config)
             self.intent_classifier = IntentClassifier(retrieval_config)
             self.retriever = MultiStageRetriever(retrieval_config)
 
-            # Initialize ranking with optional adaptive ranker
+            # Initialize ranking with optional adaptive ranker and monitoring
+            # Check if monitoring is enabled in config
+            enable_monitoring = ranking_config.get('enable_monitoring', True)
+            
+            # Initialize improved ranker with monitoring support
+            if enable_monitoring:
+                from .ranking.ranking_monitor import RankingMonitor
+                self.ranking_monitor = RankingMonitor()
+                logger.info("✅ Ranking monitoring enabled")
+            else:
+                self.ranking_monitor = None
+                
             base_ranker = ContextualRanker(ranking_config)
-            learning_config = self.config.get('learning', {})
+            learning_config = self.config.learning
 
-            if learning_config.get('enable_adaptive_ranking', False):
+            # Import AdaptiveRanker at module level for type checking
+            try:
+                from .ranking.adaptive_ranker import AdaptiveRanker
+            except ImportError:
+                AdaptiveRanker = None
+
+            if getattr(learning_config, 'enable_adaptive_ranking', False) and AdaptiveRanker:
                 try:
-                    from .ranking.adaptive_ranker import AdaptiveRanker
                     from .learning.feedback_collector import FeedbackCollector
                     from .learning.model_updater import ModelUpdater
 
                     # Initialize feedback collector first
                     self.feedback_collector = FeedbackCollector(
-                        storage_path=learning_config.get('feedback_storage_path')
+                        storage_path=getattr(learning_config, 'feedback_storage_path', None)
                     )
 
                     # Initialize model updater
                     model_updater = ModelUpdater(
-                        update_frequency=learning_config.get('update_frequency', 'daily')
+                        update_frequency=getattr(learning_config, 'update_frequency', 'daily')
                     )
 
                     # Wrap base ranker with adaptive ranker
@@ -115,7 +149,7 @@ class RAGPipeline:
                         base_ranker=base_ranker,
                         model_updater=model_updater,
                         feedback_collector=self.feedback_collector,
-                        config=learning_config
+                        config=learning_config.model_dump()
                     )
                     logger.info("✅ Adaptive ranking enabled")
                 except ImportError as e:
@@ -128,22 +162,21 @@ class RAGPipeline:
                 try:
                     from .learning.feedback_collector import FeedbackCollector
                     self.feedback_collector = FeedbackCollector(
-                        storage_path=learning_config.get('feedback_storage_path')
+                        storage_path=getattr(learning_config, 'feedback_storage_path', None)
                     )
                 except ImportError:
                     logger.warning("Learning module not available - feedback collection disabled")
                     self.feedback_collector = None
 
             self.result_explainer = ResultExplainer(ranking_config)
-            self.response_generator = ResponseGenerator(
-                self.config.get('generation', {})
-            )
+            self.response_generator = ResponseGenerator({})
 
             logger.info("✅ RAG Pipeline components initialized successfully")
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize RAG Pipeline: {e}")
             raise
+
     async def start(self):
         """
         Start async components of the pipeline.
@@ -174,7 +207,6 @@ class RAGPipeline:
                 logger.info("✅ RAG Pipeline cleanup completed")
         except Exception as e:
             logger.error(f"❌ Error during RAG Pipeline cleanup: {e}")
-
 
     async def process_query(
         self,
@@ -233,10 +265,11 @@ class RAGPipeline:
 
                 # Normalize dict results to SearchResult instances
                 if raw_results and isinstance(raw_results[0], dict):
-                    from .core.models import SearchResult as CoreSearchResult
                     normalized = []
                     for r in raw_results:
-                        normalized.append(CoreSearchResult(
+                        if not isinstance(r, dict):
+                            continue
+                        normalized.append(SearchResult(
                             id=r.get('id') or r.get('@search.documentId') or '',
                             score=r.get('score') or r.get('@search.score', 0.0),
                             file_path=r.get('file_path', ''),
@@ -314,10 +347,50 @@ class RAGPipeline:
                         session_id=code_context.session_id
                     )
 
-                    ranked_results = await self.ranker.rank_results(
-                        raw_results, enhanced_context, intent
-                    )
-                    logger.debug(f"Ranked {len(ranked_results)} results")
+                    # Track ranking start time for monitoring
+                    import time
+                    ranking_start_time = time.time()
+                    
+                    # Call appropriate ranking method based on available method
+                    # Try AdaptiveRanker's rank method first
+                    if hasattr(self.ranker, 'rank'):
+                        ranked_results = await self.ranker.rank(
+                            raw_results, query, enhanced_context, intent
+                        )
+                    elif hasattr(self.ranker, 'rank_results'):
+                        # ContextualRanker's rank_results method
+                        ranked_results = await self.ranker.rank_results(
+                            raw_results, enhanced_context, intent
+                        )
+                    else:
+                        raise AttributeError(f"Ranker {type(self.ranker).__name__} has no rank or rank_results method")
+                    
+                    # Calculate processing time
+                    ranking_time_ms = (time.time() - ranking_start_time) * 1000
+                    
+                    # Log ranking decision to monitor if available
+                    if self.ranking_monitor and hasattr(enhanced_context, 'query'):
+                        # Extract factors from results (if improved ranker added them)
+                        factors = []
+                        for result in ranked_results:
+                            if hasattr(result, '_ranking_factors'):
+                                factors.append(result._ranking_factors)
+                        
+                        # Create query object for monitoring
+                        monitoring_query = SearchQuery(
+                            query=enhanced_context.query if hasattr(enhanced_context, 'query') else query,
+                            intent=intent,
+                            current_file=enhanced_context.current_file,
+                            language=enhanced_context.language,
+                            framework=enhanced_context.framework,
+                            user_id=context.session_id
+                        )
+                        
+                        await self.ranking_monitor.log_ranking_decision(
+                            monitoring_query, ranked_results, factors, ranking_time_ms
+                        )
+                    
+                    logger.debug(f"Ranked {len(ranked_results)} results in {ranking_time_ms:.1f}ms")
                 except Exception as e:
                     logger.error(f"Ranking failed: {e}")
                     # Fallback to original results
@@ -362,13 +435,9 @@ class RAGPipeline:
             )
 
         except Exception as e:
-            error_msg = await self.error_handler.handle_error(e, {
-                'query': query,
-                'context': context.__dict__,
-                'pipeline_stage': 'process_query'
-            })
-
-            logger.error(f"❌ RAG Pipeline error: {error_msg}")
+            # Log the error
+            logger.error(f"❌ RAG Pipeline error: {str(e)}", exc_info=True)
+            error_msg = f"Pipeline processing failed: {str(e)}"
 
             return RAGPipelineResult(
                 success=False,
@@ -423,7 +492,7 @@ class RAGPipeline:
         context: Optional[CodeContext]
     ):
         """Record interaction for learning purposes"""
-        if not self.feedback_collector:
+        if not self.feedback_collector or not context:
             return
 
         try:
@@ -457,9 +526,30 @@ class RAGPipeline:
 
     def get_pipeline_status(self) -> Dict[str, Any]:
         """Get current pipeline status and health"""
-        return {
+        status = {
             'components_initialized': True,
             'cache_size': len(self._context_cache),
             'active_sessions': len(self._session_contexts),
             'performance_metrics': self.performance_monitor.get_metrics()
         }
+        
+        # Add ranking monitor status if available
+        if hasattr(self, 'ranking_monitor') and self.ranking_monitor:
+            status['ranking_monitor'] = {
+                'enabled': True,
+                'buffer_size': len(self.ranking_monitor.decision_buffer)
+            }
+        else:
+            status['ranking_monitor'] = {'enabled': False}
+            
+        return status
+    
+    async def get_ranking_performance_report(self, time_window_hours: int = 24) -> Dict[str, Any]:
+        """Get ranking performance report from monitor"""
+        if not hasattr(self, 'ranking_monitor') or not self.ranking_monitor:
+            return {'error': 'Ranking monitoring not enabled'}
+        
+        from datetime import timedelta
+        return await self.ranking_monitor.get_performance_report(
+            timedelta(hours=time_window_hours)
+        )
