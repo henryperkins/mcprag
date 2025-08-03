@@ -520,12 +520,11 @@ function generatedFunction(): void {{
             pass
 
         # Apply quote style (simplified)
-        if quote_style == 'double':
-            # Convert single quotes to double quotes (very simplified)
-            adapted_code = adapted_code.replace("'", '"')
-        elif quote_style == 'single':
-            # Convert double quotes to single quotes (very simplified)
-            adapted_code = adapted_code.replace('"', "'")
+        # Replace simple global quote replacement with a conservative approach:
+        if quote_style in {'single', 'double'}:
+            # Very conservative: do not alter quotes inside triple-quoted blocks (Python) or block comments
+            # This is a placeholder for a more robust transformer; for now, skip quote conversion to avoid breakage
+            logger.debug("Skipping global quote conversion to avoid breaking code semantics")
 
         # Add style metadata as comment
         style_comment = f"# Code adapted to style: indent={indent_size}, tabs={use_tabs}, quotes={quote_style}"

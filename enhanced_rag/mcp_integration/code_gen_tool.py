@@ -128,7 +128,10 @@ class CodeGenerationTool:
                     {
                         "file": r.file_path,
                         "function": r.function_name,
-                        "snippet": (r.content[:200] + "...") if len(r.content) > 200 else r.content,
+                        "snippet": (
+                            (getattr(r, "code_snippet", None) or getattr(r, "content", "") or "")[:200]
+                            + ("..." if len((getattr(r, "code_snippet", None) or getattr(r, "content", "") or "")) > 200 else "")
+                        ),
                         "relevance": r.score,
                     }
                     for r in result.results[:5]

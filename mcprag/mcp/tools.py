@@ -477,6 +477,61 @@ def register_tools(mcp: Any, server: "MCPServer") -> None:
 
 
 # Helper functions to reduce duplication and improve organization
+import re as _re
+_TAG_RE = _re.compile(r"<[^>]+>")
+
+def _sanitize_text(s: str) -> str:
+    return _TAG_RE.sub("", (s or "")).replace("\xa0", " ").strip()
+
+def _sanitize_highlights(hl: Any) -> Dict[str, List[str]]:
+    if not isinstance(hl, dict):
+        return {}
+    return {
+        k: [
+            _sanitize_text(x)[:200]
+            for x in (v or [])
+            if isinstance(x, str) and x.strip()
+        ]
+        for k, v in hl.items()
+    }
+
+def _normalize_items(items: List[Any]) -> List[Dict[str, Any]]:
+    normalized = []
+    for it in items:
+        d = it if isinstance(it, dict) else getattr(it, "__dict__", {}) or {}
+        file_path = d.get("file") or d.get("file_path") or d.get("path") or ""
+        content = d.get("content") or d.get("code_snippet") or d.get("snippet") or ""
+        normalized.append({
+            "id": d.get("id") or d.get("@search.documentId") or f"{file_path}:{d.get('start_line') or ''}",
+            "file": file_path,
+            "repository": d.get("repository") or "",
+            "language": d.get("language") or "",
+            "content": content,
+            "highlights": _sanitize_highlights(d.get("highlights") or d.get("@search.highlights") or {}),
+            "relevance": d.get("relevance") or d.get("score") or d.get("@search.score") or 0.0,
+            "start_line": d.get("start_line"),
+            "end_line": d.get("end_line"),
+            "function_name": d.get("function_name"),
+            "class_name": d.get("class_name"),
+        })
+    return normalized
+
+def _first_highlight(entry: Dict[str, Any]) -> Optional[str]:
+    hl = entry.get("highlights") or {}
+    for _, lst in hl.items():
+        if lst:
+            return lst[0]
+    return None
+
+def _headline_from_content(content: str) -> str:
+    if not content:
+        return "No content"
+    for ln in content.splitlines():
+        t = _sanitize_text(ln)
+        if t and not t.startswith(("#", "//", "/*", "*", "*/", "<!--")) and not t.endswith("-->"):
+            return t[:120] + ("…" if len(t) > 120 else "")
+    return _sanitize_text(content.splitlines()[0])[:120]
+
 
 
 def _check_component(component: Any, name: str) -> bool:
@@ -581,12 +636,51 @@ async def _search_code_impl(
 
         took_ms = (time.time() - start_time) * 1000
 
-        # Handle snippet truncation for full detail level
+        backend = "enhanced" if server.enhanced_search and not bm25_only else "basic"
+
+        # Normalize to a stable schema for presentation
+        items = _normalize_items(items)
+
+        # Optional dedupe by (file, start_line)
+        _seen = {}
+        deduped = []
+        for e in items:
+            key = (e["file"], e.get("start_line"))
+            if key not in _seen or e.get("relevance", 0) > _seen[key].get("relevance", 0):
+                _seen[key] = e
+        deduped = list(_seen.values())
+        items = deduped
+
+        # Apply snippet truncation only for full
         if snippet_lines > 0 and detail_level == "full":
             _truncate_snippets(items, snippet_lines)
 
+        # Build compact and ultra lists
+        def _build_compact(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            out = []
+            for e in entries:
+                line_ref = f":{e['start_line']}" if e.get('start_line') else ""
+                out.append({
+                    "file": f"{e['file']}{line_ref}",
+                    "match": e.get("function_name") or e.get("class_name") or _first_highlight(e) or "Code match",
+                    "context_type": "implementation" if "def " in (e.get("content","")) or "class " in (e.get("content","")) else "general",
+                })
+            return out
+
+        def _build_ultra(entries: List[Dict[str, Any]]) -> List[str]:
+            out = []
+            for e in entries:
+                line_ref = f":{e['start_line']}" if e.get('start_line') else ""
+                why = _first_highlight(e) or "Match"
+                head = _headline_from_content(e.get("content", ""))
+                out.append(f"{e['file']}{line_ref} | {why} | {head}")
+            return out
+
+        results_compact = _build_compact(items)
+        results_ultra = _build_ultra(items)
+
         response = {
-            "items": items,
+            "items": items if detail_level == "full" else (results_compact if detail_level == "compact" else results_ultra),
             "count": len(items),
             "total": total,
             "took_ms": took_ms,
@@ -594,11 +688,12 @@ async def _search_code_impl(
             "applied_exact_terms": bool(exact_terms),
             "exact_terms": exact_terms,
             "detail_level": detail_level,
+            "backend": backend,
         }
-
         if include_timings:
-            response["timings_ms"] = {"total": took_ms}
-
+            response["timings_ms"] = {
+                "total": took_ms
+            }
         return ok(response)
 
     except Exception as e:
@@ -659,53 +754,51 @@ async def _basic_search(
         "skip": skip,
         "include_total_count": True,
     }
-
     if language:
         search_params["filter"] = f"language eq '{language}'"
     if orderby:
         search_params["orderby"] = orderby
 
-    response = search_client.search(**search_params)
-    items = list(response)
+    loop = asyncio.get_running_loop()
+    response = await loop.run_in_executor(None, lambda: search_client.search(**search_params))
+    items = await loop.run_in_executor(None, lambda: list(response))
     total = response.get_count() if hasattr(response, "get_count") else len(items)
-
     return items, total
 
 
 def _truncate_snippets(items: List[Dict[str, Any]], snippet_lines: int) -> None:
-    """Truncate code snippets in items."""
     for item in items:
-        snippet_full = item.get("content") or item.get("code_snippet") or ""
+        snippet_full = item.get("content") or ""
         if not isinstance(snippet_full, str):
             continue
 
-        selected_lines = []
-        headline = _select_headline(item, snippet_full)
+        # Headline: prefer sanitized highlight if present
+        hl = _first_highlight(item)
+        headline = _sanitize_text(hl) if hl else _select_headline(item, snippet_full)
 
+        selected = []
         if headline:
-            selected_lines.append(headline)
+            selected.append(headline)
 
-        # Add more lines if requested
         if snippet_lines > 1:
+            lines = [ln.rstrip() for ln in snippet_full.splitlines()]
+            # If we have a headline, find its position; else use first line index
+            try:
+                idx = next(i for i, ln in enumerate(lines) if _sanitize_text(ln).strip() == headline.strip())
+            except StopIteration:
+                idx = 0
+            # Add subsequent lines, skipping blanks/comments
             extra_needed = snippet_lines - 1
-            for ln in snippet_full.splitlines():
-                if ln.strip() == headline:
+            for ln in lines[idx+1:]:
+                t = _sanitize_text(ln)
+                if not t or t.startswith(("#", "//", "/*", "*", "*/", "<!--")):
                     continue
+                selected.append(t if len(t) <= 120 else t[:117] + "…")
+                extra_needed -= 1
                 if extra_needed <= 0:
                     break
-                selected_lines.append(ln.rstrip())
-                extra_needed -= 1
 
-        # Trim lines to 120 chars
-        processed = []
-        for ln in selected_lines:
-            ln = ln.rstrip()
-            if len(ln) > 120:
-                processed.append(ln[:117] + "…")
-            else:
-                processed.append(ln)
-
-        item["content"] = "\n".join(processed)
+        item["content"] = "\n".join(selected)
 
 
 def _select_headline(item: Dict[str, Any], snippet_full: str) -> str:

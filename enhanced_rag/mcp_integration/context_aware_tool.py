@@ -49,13 +49,16 @@ class ContextAwareTool:
             Comprehensive context analysis
         """
         try:
-            # Get hierarchical context
-            context = await self.context_analyzer.analyze(
-                file_path=file_path,
-                depth=depth
-            )
-            
-            # Build response
+            # Kick off main context analysis
+            context_task = self.context_analyzer.analyze(file_path=file_path, depth=depth)
+
+            # Optionals in parallel
+            dep_task = self.dep_builder.build_graph(file_path) if include_dependencies else None
+            # AST only needed for imports and related analysis
+            ast_task = self.ast_analyzer.analyze_file(file_path) if include_imports else None
+
+            context = await context_task
+
             result = {
                 'file': file_path,
                 'language': context.file_context.language,
@@ -68,40 +71,37 @@ class ContextAwareTool:
                 'context_depth': depth,
                 'timestamp': context.timestamp.isoformat()
             }
-            
-            # Add imports if requested
+
+            # Resolve parallel optionals
+            dep_graph = await dep_task if dep_task else None
+            ast_info = await ast_task if ast_task else None
+
             if include_imports:
+                indirect = await self._get_indirect_imports(context)
                 result['imports'] = {
                     'direct': context.file_context.imports,
-                    'indirect': await self._get_indirect_imports(context)
+                    'indirect': indirect
                 }
-            
-            # Add dependencies if requested
-            if include_dependencies:
-                dep_graph = await self.dep_builder.build_graph(file_path)
+
+            if include_dependencies and dep_graph:
                 result['dependencies'] = {
                     'internal': dep_graph.get_internal_dependencies(file_path),
                     'external': dep_graph.get_external_dependencies(file_path),
                     'graph_size': len(dep_graph.nodes)
                 }
-            
-            # Add git history if requested
-            if include_git_history:
-                result['git_history'] = await self._get_git_history(file_path)
-            
-            # Add related files
+
             result['related_files'] = await self._find_related_files(context)
-            
-            # Add context summary
             result['summary'] = self._generate_context_summary(context, result)
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Context analysis error: {e}")
+            # Return partial structure when possible
             return {
                 'error': str(e),
-                'file': file_path
+                'file': file_path,
+                'partial': True
             }
     
     async def suggest_improvements(
@@ -320,12 +320,20 @@ class ContextAwareTool:
             }
     
     async def _get_indirect_imports(self, context: Any) -> List[str]:
-        """Get indirect imports through dependencies"""
-        indirect = set()
-        for imp in context.file_context.imports:
-            dep_context = await self.context_analyzer.analyze(imp, depth=1)
-            indirect.update(dep_context.file_context.imports)
-        return list(indirect - set(context.file_context.imports))
+        """Get indirect imports through dependencies (batched)"""
+        async def analyze_one(p: str):
+            try:
+                return await self.context_analyzer.analyze(p, depth=1)
+            except Exception:
+                return None
+
+        imports = list(set(context.file_context.imports))
+        results = await asyncio.gather(*(analyze_one(imp) for imp in imports))
+        out: Set[str] = set()
+        for r in results:
+            if r:
+                out.update(r.file_context.imports or [])
+        return sorted(list(out - set(imports)))
     
     async def _get_git_history(self, file_path: str) -> Dict[str, Any]:
         """Get recent git history for file"""
