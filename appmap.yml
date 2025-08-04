@@ -1,0 +1,7 @@
+appmap_dir: tmp\appmap
+language: python
+name: mcprag
+packages:
+- path: mcprag
+- path: enhanced_rag
+record_test_cases: false
