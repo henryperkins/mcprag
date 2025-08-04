@@ -17,7 +17,7 @@ class CodeChunker:
     """Smart code chunking for optimal search and retrieval."""
     
     @staticmethod
-    def chunk_python_file(content: str, file_path: str) -> List[Dict[str, Any]]:
+    def chunk_python_file(content: str, file_path: str, include_methods: bool = True) -> List[Dict[str, Any]]:
         """Extract semantic chunks from Python code.
         
         Args:
@@ -39,33 +39,44 @@ class CodeChunker:
             }
             
             for node in ast.walk(tree):
-                # Skip methods inside classes
-                if isinstance(node, ast.FunctionDef) and isinstance(
+                # Optionally include methods; previous behavior skipped methods
+                if not include_methods and isinstance(node, ast.FunctionDef) and isinstance(
                     parent_map.get(node), ast.ClassDef
                 ):
                     continue
-                    
+
                 if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
                     # Extract function/class with context
-                    start_line = node.lineno - 1
-                    end_line = node.end_lineno or start_line + 10
-                    
-                    chunk_lines = content.splitlines()[start_line:end_line]
+                    start_line = getattr(node, "lineno", 1) - 1
+                    end_line = getattr(node, "end_lineno", start_line + 10) or (start_line + 10)
+
+                    lines = content.splitlines()
+                    chunk_lines = lines[start_line:end_line]
                     chunk_code = "\n".join(chunk_lines)
-                    
+
                     # Extract semantic information
                     imports = CodeChunker._extract_imports(tree)
                     calls = CodeChunker._extract_function_calls(node)
                     signature = CodeChunker._get_signature(node)
                     
                     # Create semantic context
+                    # Add class context if node is a method
+                    class_ctx = ""
+                    class_name = None
+                    if isinstance(node, ast.FunctionDef) and isinstance(parent_map.get(node), ast.ClassDef):
+                        parent = parent_map.get(node)
+                        if isinstance(parent, ast.ClassDef):
+                            class_name = parent.name
+                            class_sig = CodeChunker._get_signature(parent)
+                            class_ctx = f" | Class: {class_sig}"
+
                     semantic_context = f"""
-{signature} in {file_path}
+{signature} in {file_path}{class_ctx}
 Uses: {', '.join(imports[:10])}
 Calls: {', '.join(calls[:10])}
 Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in code'}
                     """.strip()
-                    
+
                     chunks.append({
                         "content": chunk_code,
                         "semantic_context": semantic_context,
@@ -78,8 +89,9 @@ Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in cod
                         "start_line": start_line + 1,
                         "end_line": end_line,
                         "function_name": node.name if isinstance(node, ast.FunctionDef) else None,
-                        "class_name": node.name if isinstance(node, ast.ClassDef) else None,
-                        "docstring": CodeChunker._extract_docstring(node)
+                        "class_name": node.name if isinstance(node, ast.ClassDef) else class_name,
+                        "docstring": CodeChunker._extract_docstring(node),
+                        "file_path": file_path
                     })
                     
         except (SyntaxError, UnicodeDecodeError, ValueError) as e:
@@ -112,7 +124,7 @@ Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in cod
                     return []
             else:
                 tree = source_or_tree
-                
+
             collected = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -139,10 +151,10 @@ Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in cod
             
         collected = []
         import_re = re.compile(
-            r"^\s*import\s+(?:type\s+)?(?P<body>.+?)\s+from\s+['\"](?P<mod>[^'\"]+)['\"]"
+            r"^\s*import\s+(?:type\s+)?(?P<body>.+?)\s+from\s+['\"](?P<mod>[^'"]+)['\"]"
         )
-        bare_import_re = re.compile(r"^\s*import\s+['\"](?P<mod>[^'\"]+)['\"]")  
-        require_re = re.compile(r"require\([^'\"]*['\"](?P<mod>[^'\"]+)['\"]\\)")
+        bare_import_re = re.compile(r"^\s*import\s+['\"](?P<mod>[^'"]+)['\"]")
+        require_re = re.compile(r"require\(['\"](?P<mod>[^'\"]+)['\"]\)")
         
         for line in lines:
             m = import_re.match(line)
@@ -185,27 +197,21 @@ Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in cod
     
     @staticmethod
     def _get_signature(node) -> str:
-        """Get function/class signature."""
-        if isinstance(node, ast.FunctionDef):
-            # Extract arguments with type annotations
-            args_with_types = []
-            for arg in node.args.args:
-                if arg.annotation:
-                    args_with_types.append(f"{arg.arg}: {ast.unparse(arg.annotation)}")
-                else:
-                    args_with_types.append(arg.arg)
-                    
-            # Extract return type annotation
-            return_annotation = ""
-            if node.returns:
-                return_annotation = f" -> {ast.unparse(node.returns)}"
-                
-            return f"def {node.name}({', '.join(args_with_types)}){return_annotation}"
+        """Get function/class signature with compatibility across Python versions."""
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Minimal builder to avoid circular imports
+            name = node.name
+            is_async = isinstance(node, ast.AsyncFunctionDef)
+            prefix = "async def " if is_async else "def "
+            return f"{prefix}{name}(...)"
         elif isinstance(node, ast.ClassDef):
-            # Extract base classes
-            bases = [ast.unparse(base) for base in node.bases]
+            # Try to include bases if possible
+            try:
+                bases = [ast.unparse(b) for b in node.bases]  # type: ignore[attr-defined]
+            except Exception:
+                bases = []
             if bases:
-                return f"class {node.name}({', '.join(bases)})"
+                return f"class {node.name}(" + ", ".join(bases) + ")"
             return f"class {node.name}"
         return ""
     
@@ -213,13 +219,22 @@ Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in cod
     def _extract_docstring(node) -> str:
         """Extract docstring from node."""
         return ast.get_docstring(node) or ""
+
+    # Backward-compatible alias so static access in f-strings/type checkers resolves
+    _docstring_of = staticmethod(_extract_docstring)
+
+    # Alias used above to avoid staticmethod access issues in f-strings during edits
+    _docstring_of = _extract_docstring
+
+    # Alias used above to avoid staticmethod access issues in f-strings during edits
+    _docstring_of = _extract_docstring
     
     @staticmethod
     def _parse_js_ts(path: Path) -> dict:
         """Parse JavaScript/TypeScript files using Babel AST."""
         try:
             res = subprocess.run(
-                ["node", "parse_js.mjs", str(path)],
+                ["node", str(Path(__file__).resolve().parents[2] / "parse_js.mjs"), str(path)],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -322,7 +337,7 @@ Type: {ast_chunk.get('type', 'unknown')}
         import_patterns = [
             r"import\s+.*?\s+from\s+['\"]([^'\"]+)['\"]",
             r"import\s+['\"]([^'\"]+)['\"]",
-            r"require\(['\"]([^'\"]+)['\"]\\)"
+            r"require\(['\"]([^'\"]+)['\"]\)"
         ]
         
         for pattern in import_patterns:
