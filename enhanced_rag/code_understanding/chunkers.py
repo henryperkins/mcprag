@@ -219,15 +219,9 @@ Purpose: {CodeChunker._extract_docstring(node) or 'Implementation details in cod
     def _extract_docstring(node) -> str:
         """Extract docstring from node."""
         return ast.get_docstring(node) or ""
-
+ 
     # Backward-compatible alias so static access in f-strings/type checkers resolves
     _docstring_of = staticmethod(_extract_docstring)
-
-    # Alias used above to avoid staticmethod access issues in f-strings during edits
-    _docstring_of = _extract_docstring
-
-    # Alias used above to avoid staticmethod access issues in f-strings during edits
-    _docstring_of = _extract_docstring
     
     @staticmethod
     def _parse_js_ts(path: Path) -> dict:
