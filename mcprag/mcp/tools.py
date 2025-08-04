@@ -397,23 +397,24 @@ def register_tools(mcp: Any, server: "MCPServer") -> None:
                 }
             )
 
-        if not _check_component(server.indexer_integration, "Indexer integration"):
-            return err("Indexer integration not available")
+        if not _check_component(server.indexer_automation, "Indexer automation"):
+            return err("Indexer automation not available")
 
         # Explicit null check for type checker
-        if server.indexer_integration is None:
-            return err("Indexer integration component is not initialized")
+        if server.indexer_automation is None:
+            return err("Indexer automation component is not initialized")
 
         # Ensure repository is not None for the API calls
         repo_name = repository or "default"
 
         try:
-            if hasattr(server.indexer_integration, "run_indexer_on_demand"):
-                result = await server.indexer_integration.run_indexer_on_demand(
-                    repo_name
+            if hasattr(server.indexer_automation, "reset_and_run_indexer"):
+                result = await server.indexer_automation.reset_and_run_indexer(
+                    repo_name, wait_for_completion=False
                 )
-            elif hasattr(server.indexer_integration, "run_indexer"):
-                result = await server.indexer_integration.run_indexer(repo_name)
+            elif hasattr(server.indexer_automation, "ops") and hasattr(server.indexer_automation.ops, "run_indexer"):
+                await server.indexer_automation.ops.run_indexer(repo_name)
+                result = {"status": "started", "indexer_name": repo_name}
             else:
                 return err("Indexer method not found")
 
@@ -481,8 +482,10 @@ def register_tools(mcp: Any, server: "MCPServer") -> None:
 import re as _re
 _TAG_RE = _re.compile(r"<[^>]+>")
 
+
 def _sanitize_text(s: str) -> str:
     return _TAG_RE.sub("", (s or "")).replace("\xa0", " ").strip()
+
 
 def _sanitize_highlights(hl: Any) -> Dict[str, List[str]]:
     if not isinstance(hl, dict):
@@ -495,6 +498,7 @@ def _sanitize_highlights(hl: Any) -> Dict[str, List[str]]:
         ]
         for k, v in hl.items()
     }
+
 
 def _normalize_items(items: List[Any]) -> List[Dict[str, Any]]:
     normalized = []
@@ -517,12 +521,14 @@ def _normalize_items(items: List[Any]) -> List[Dict[str, Any]]:
         })
     return normalized
 
+
 def _first_highlight(entry: Dict[str, Any]) -> Optional[str]:
     hl = entry.get("highlights") or {}
     for _, lst in hl.items():
         if lst:
             return lst[0]
     return None
+
 
 def _headline_from_content(content: str) -> str:
     if not content:
@@ -532,7 +538,6 @@ def _headline_from_content(content: str) -> str:
         if t and not t.startswith(("#", "//", "/*", "*", "*/", "<!--")) and not t.endswith("-->"):
             return t[:120] + ("…" if len(t) > 120 else "")
     return _sanitize_text(content.splitlines()[0])[:120]
-
 
 
 def _check_component(component: Any, name: str) -> bool:
@@ -690,7 +695,7 @@ async def _search_code_impl(
                     "context_type": "implementation" if "def " in (e.get("content","")) or "class " in (e.get("content","")) else "general",
                     "headline": _headline_from_content(e.get("content", ""))
                 }
-                
+
                 # Add highlight information if available
                 if e.get("highlights"):
                     for field, hls in e.get("highlights", {}).items():
@@ -703,7 +708,7 @@ async def _search_code_impl(
                     first_hl = _first_highlight(e)
                     if first_hl:
                         compact_entry["why"] = first_hl[:120]
-                        
+
                 out.append(compact_entry)
             return out
 
@@ -804,13 +809,13 @@ async def _basic_search(
         search_params["orderby"] = orderby
 
     loop = asyncio.get_running_loop()
-    
+
     def _exec_search(sc, sp):
         resp = sc.search(**sp)
         items = list(resp)
         total = resp.get_count() if hasattr(resp, "get_count") else len(items)
         return items, total
-    
+
     items, total = await loop.run_in_executor(None, lambda: _exec_search(search_client, search_params))
     return items, total
 
@@ -832,6 +837,7 @@ def _truncate_snippets(items: List[Dict[str, Any]], snippet_lines: int) -> None:
         if snippet_lines > 1:
             lines = [ln.rstrip() for ln in snippet_full.splitlines()]
             # If we have a headline, find its position with fuzzy matching
+
             def _find_index(lines, headline):
                 norm = lambda s: _sanitize_text(s).lower()
                 h = norm(headline)
@@ -844,7 +850,7 @@ def _truncate_snippets(items: List[Dict[str, Any]], snippet_lines: int) -> None:
                     if difflib.SequenceMatcher(None, norm(ln), h).ratio() >= 0.6:
                         return i
                 return 0
-            
+
             idx = _find_index(lines, headline) if headline else 0
             # Add subsequent lines, skipping blanks/comments
             extra_needed = snippet_lines - 1
@@ -1114,9 +1120,9 @@ async def _track_interaction(
             logger.warning(f"Feedback collector tracking failed: {e}")
 
     return err("No tracking backend available")
-    
+
     # ========== Azure AI Search Management Tools ==========
-    
+
     @mcp.tool()
     async def manage_index(
         action: str,
@@ -1126,7 +1132,7 @@ async def _track_interaction(
         backup_documents: bool = False
     ) -> Dict[str, Any]:
         """Manage Azure AI Search indexes.
-        
+
         Actions:
         - create: Create or update an index (requires index_definition)
         - ensure: Ensure index exists with correct schema (requires index_definition)
@@ -1138,10 +1144,10 @@ async def _track_interaction(
         """
         if not _check_component(server.index_automation, "Index automation"):
             return err("Index automation not available")
-        
+
         if not Config.ADMIN_MODE and action in ["create", "recreate", "delete"]:
             return err("Admin mode required for destructive operations")
-            
+
         try:
             if action == "create" or action == "ensure":
                 if not index_definition:
@@ -1150,7 +1156,7 @@ async def _track_interaction(
                     index_definition, update_if_different
                 )
                 return ok(result)
-                
+
             elif action == "recreate":
                 if not index_definition:
                     return err("index_definition required for recreate")
@@ -1158,19 +1164,19 @@ async def _track_interaction(
                     index_definition, backup_documents
                 )
                 return ok(result)
-                
+
             elif action == "delete":
                 if not index_name:
                     return err("index_name required for delete")
                 await server.rest_ops.delete_index(index_name)
                 return ok({"deleted": True, "index": index_name})
-                
+
             elif action == "optimize":
                 if not index_name:
                     return err("index_name required for optimize")
                 result = await server.index_automation.optimize_index(index_name)
                 return ok(result)
-                
+
             elif action == "validate":
                 if not index_name:
                     return err("index_name required for validate")
@@ -1178,17 +1184,17 @@ async def _track_interaction(
                     index_name, index_definition
                 )
                 return ok(result)
-                
+
             elif action == "list":
                 result = await server.index_automation.list_indexes_with_stats()
                 return ok({"indexes": result})
-                
+
             else:
                 return err(f"Invalid action: {action}")
-                
+
         except Exception as e:
             return err(str(e))
-    
+
     @mcp.tool()
     async def manage_documents(
         action: str,
@@ -1203,7 +1209,7 @@ async def _track_interaction(
         dry_run: bool = False
     ) -> Dict[str, Any]:
         """Manage documents in Azure AI Search.
-        
+
         Actions:
         - upload: Upload documents (requires documents)
         - delete: Delete documents by key (requires document_keys)
@@ -1213,31 +1219,31 @@ async def _track_interaction(
         """
         if not _check_component(server.data_automation, "Data automation"):
             return err("Data automation not available")
-            
+
         if not Config.ADMIN_MODE and action in ["upload", "delete", "cleanup"]:
             return err("Admin mode required for document modifications")
-            
+
         try:
             if action == "upload":
                 if not documents:
                     return err("documents required for upload")
-                
+
                 # Convert list to async generator
                 async def doc_generator():
                     for doc in documents:
                         yield doc
-                
+
                 result = await server.data_automation.bulk_upload(
                     index_name, doc_generator(), batch_size, merge
                 )
                 return ok(result)
-                
+
             elif action == "delete":
                 if not document_keys:
                     return err("document_keys required for delete")
                 result = await server.rest_ops.delete_documents(index_name, document_keys)
                 return ok({"deleted": len(document_keys), "index": index_name})
-                
+
             elif action == "cleanup":
                 if not days_old or not date_field:
                     return err("days_old and date_field required for cleanup")
@@ -1245,23 +1251,23 @@ async def _track_interaction(
                     index_name, date_field, days_old, batch_size, dry_run
                 )
                 return ok(result)
-                
+
             elif action == "count":
                 count = await server.rest_ops.count_documents(index_name)
                 return ok({"count": count, "index": index_name})
-                
+
             elif action == "verify":
                 result = await server.data_automation.verify_documents(
                     index_name, sample_size=100
                 )
                 return ok(result)
-                
+
             else:
                 return err(f"Invalid action: {action}")
-                
+
         except Exception as e:
             return err(str(e))
-    
+
     @mcp.tool()
     async def manage_indexer(
         action: str,
@@ -1273,7 +1279,7 @@ async def _track_interaction(
         lookback_hours: int = 24
     ) -> Dict[str, Any]:
         """Manage Azure AI Search indexers.
-        
+
         Actions:
         - create: Create indexer (requires indexer_definition)
         - delete: Delete indexer (requires indexer_name)
@@ -1285,32 +1291,32 @@ async def _track_interaction(
         """
         if not _check_component(server.indexer_automation, "Indexer automation"):
             return err("Indexer automation not available")
-            
+
         if not Config.ADMIN_MODE and action in ["create", "delete", "reset"]:
             return err("Admin mode required for indexer modifications")
-            
+
         try:
             if action == "create":
                 if not indexer_definition:
                     return err("indexer_definition required for create")
-                    
+
                 # Create datasource if provided
                 if datasource_definition:
                     await server.rest_ops.create_datasource(datasource_definition)
-                    
+
                 # Create skillset if provided
                 if skillset_definition:
                     await server.rest_ops.create_skillset(skillset_definition)
-                    
+
                 result = await server.rest_ops.create_indexer(indexer_definition)
                 return ok({"created": True, "indexer": result})
-                
+
             elif action == "delete":
                 if not indexer_name:
                     return err("indexer_name required for delete")
                 await server.rest_ops.delete_indexer(indexer_name)
                 return ok({"deleted": True, "indexer": indexer_name})
-                
+
             elif action == "run":
                 if not indexer_name:
                     return err("indexer_name required for run")
@@ -1318,19 +1324,19 @@ async def _track_interaction(
                     indexer_name, wait_for_completion
                 )
                 return ok(result)
-                
+
             elif action == "reset":
                 if not indexer_name:
                     return err("indexer_name required for reset")
                 await server.rest_ops.reset_indexer(indexer_name)
                 return ok({"reset": True, "indexer": indexer_name})
-                
+
             elif action == "status":
                 if not indexer_name:
                     return err("indexer_name required for status")
                 result = await server.rest_ops.get_indexer_status(indexer_name)
                 return ok(result)
-                
+
             elif action == "health":
                 if not indexer_name:
                     return err("indexer_name required for health")
@@ -1338,29 +1344,29 @@ async def _track_interaction(
                     indexer_name, lookback_hours
                 )
                 return ok(result)
-                
+
             elif action == "list":
                 result = await server.rest_ops.list_indexers()
                 return ok({"indexers": result})
-                
+
             else:
                 return err(f"Invalid action: {action}")
-                
+
         except Exception as e:
             return err(str(e))
-    
+
     @mcp.tool()
     async def health_check() -> Dict[str, Any]:
         """Get comprehensive health status of Azure AI Search service."""
         if not _check_component(server.health_monitor, "Health monitor"):
             return err("Health monitor not available")
-            
+
         try:
             result = await server.health_monitor.get_full_health_report()
             return ok(result)
         except Exception as e:
             return err(str(e))
-    
+
     @mcp.tool()
     async def create_datasource(
         datasource_type: str,
@@ -1372,7 +1378,7 @@ async def _track_interaction(
         delete_detection_column: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a data source for indexers.
-        
+
         Args:
             datasource_type: Type of datasource (azureblob, azuresql, cosmosdb)
             name: Data source name
@@ -1384,16 +1390,16 @@ async def _track_interaction(
         """
         if not _check_component(server.rest_ops, "REST operations"):
             return err("REST operations not available")
-            
+
         if not Config.ADMIN_MODE:
             return err("Admin mode required for datasource creation")
-            
+
         try:
             from enhanced_rag.azure_integration.rest.models import (
                 create_blob_datasource,
                 create_sql_datasource
             )
-            
+
             if datasource_type == "azureblob":
                 datasource = create_blob_datasource(
                     name=name,
@@ -1418,12 +1424,12 @@ async def _track_interaction(
                 )
             else:
                 return err(f"Unsupported datasource type: {datasource_type}")
-                
+
             result = await server.rest_ops.create_datasource(datasource)
             return ok({"created": True, "datasource": result})
         except Exception as e:
             return err(str(e))
-    
+
     @mcp.tool()
     async def create_skillset(
         name: str,
@@ -1431,7 +1437,7 @@ async def _track_interaction(
         cognitive_services_key: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a skillset for cognitive enrichment.
-        
+
         Args:
             name: Skillset name
             skills: List of skill definitions
@@ -1439,22 +1445,22 @@ async def _track_interaction(
         """
         if not _check_component(server.rest_ops, "REST operations"):
             return err("REST operations not available")
-            
+
         if not Config.ADMIN_MODE:
             return err("Admin mode required for skillset creation")
-            
+
         try:
             skillset_def = {
                 "name": name,
                 "skills": skills
             }
-            
+
             if cognitive_services_key:
                 skillset_def["cognitiveServices"] = {
                     "@odata.type": "#Microsoft.Azure.Search.CognitiveServicesByKey",
                     "key": cognitive_services_key
                 }
-                
+
             result = await server.rest_ops.create_skillset(skillset_def)
             return ok({"created": True, "skillset": result})
         except Exception as e:
