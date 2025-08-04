@@ -36,3 +36,5 @@ flake8==6.1.0
 mypy==1.7.1
 bandit==1.7.5
 safety==2.3.5
+
+argon2-cffi==25.1.0
