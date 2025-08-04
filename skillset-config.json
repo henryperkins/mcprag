@@ -1,0 +1,190 @@
+{
+  "name": "codebase-skillset",
+  "description": "Code enrichment skillset with AST analysis, git metadata extraction, and vector embeddings",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "CodeSplitter",
+      "description": "Split code files into semantic chunks",
+      "context": "/document",
+      "textSplitMode": "pages",
+      "maximumPageLength": 2000,
+      "pageOverlapLength": 200,
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/content"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "textItems",
+          "targetName": "pages"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.LanguageDetectionSkill",
+      "name": "LanguageDetector",
+      "description": "Detect programming language from file content",
+      "context": "/document",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/content"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "languageCode",
+          "targetName": "language"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "CodeEmbedding",
+      "description": "Generate embeddings for code chunks using Azure OpenAI text-embedding-3-large",
+      "context": "/document/pages/*",
+      "resourceUri": "https://oairesourcehp.openai.azure.com/",
+      "deploymentId": "text-embedding-3-large",
+      "dimensions": 3072,
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/pages/*"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "vector"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.KeyPhraseExtractionSkill",
+      "name": "KeyPhraseExtractor",
+      "description": "Extract key phrases from code comments and docstrings",
+      "context": "/document/pages/*",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/pages/*"
+        },
+        {
+          "name": "languageCode",
+          "source": "/document/language"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "keyPhrases",
+          "targetName": "keyPhrases"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
+      "name": "CodeAnalyzer",
+      "description": "Custom skill for AST parsing and code structure analysis",
+      "uri": "https://your-function-app.azurewebsites.net/api/analyze-code",
+      "httpMethod": "POST",
+      "timeout": "PT30S",
+      "context": "/document",
+      "inputs": [
+        {
+          "name": "code",
+          "source": "/document/content"
+        },
+        {
+          "name": "filePath",
+          "source": "/document/metadata_storage_path"
+        },
+        {
+          "name": "language",
+          "source": "/document/language"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "functions",
+          "targetName": "codeAnalysis/functions"
+        },
+        {
+          "name": "classes",
+          "targetName": "codeAnalysis/classes"
+        },
+        {
+          "name": "imports",
+          "targetName": "codeAnalysis/imports"
+        },
+        {
+          "name": "dependencies",
+          "targetName": "codeAnalysis/dependencies"
+        },
+        {
+          "name": "docstring",
+          "targetName": "codeAnalysis/docstring"
+        },
+        {
+          "name": "signature",
+          "targetName": "codeAnalysis/signature"
+        },
+        {
+          "name": "comments",
+          "targetName": "codeAnalysis/comments"
+        },
+        {
+          "name": "framework",
+          "targetName": "codeAnalysis/framework"
+        },
+        {
+          "name": "complexity",
+          "targetName": "codeAnalysis/complexity"
+        },
+        {
+          "name": "patterns",
+          "targetName": "codeAnalysis/patterns"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
+      "name": "GitMetadataExtractor",
+      "description": "Extract git history and metadata for code files",
+      "uri": "https://your-function-app.azurewebsites.net/api/git-metadata",
+      "httpMethod": "POST",
+      "timeout": "PT30S",
+      "context": "/document",
+      "inputs": [
+        {
+          "name": "filePath",
+          "source": "/document/metadata_storage_path"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "branch",
+          "targetName": "gitMetadata/branch"
+        },
+        {
+          "name": "commit",
+          "targetName": "gitMetadata/commit"
+        },
+        {
+          "name": "authors",
+          "targetName": "gitMetadata/authors"
+        },
+        {
+          "name": "commitCount",
+          "targetName": "gitMetadata/commitCount"
+        },
+        {
+          "name": "lastModified",
+          "targetName": "gitMetadata/lastModified"
+        }
+      ]
+    }
+  ]
+}

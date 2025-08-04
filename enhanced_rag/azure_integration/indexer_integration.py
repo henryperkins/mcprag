@@ -1182,13 +1182,13 @@ class LocalRepositoryIndexer:
         try:
             # Use merge_or_upload if available, otherwise upload
             if hasattr(self.search_client, "merge_or_upload_documents"):
-            result = self.search_client.merge_or_upload_documents(documents)
-        else:
-            result = self.search_client.upload_documents(documents)
+                result = self.search_client.merge_or_upload_documents(documents)
+            else:
+                result = self.search_client.upload_documents(documents)
 
-        # Avoid unused local variable warning; ensure operation succeeded
-        _ = result
-        self.logger.debug(f"Uploaded {len(documents)} documents")
+            # Avoid unused local variable warning; ensure operation succeeded
+            _ = result
+            self.logger.debug(f"Uploaded {len(documents)} documents")
         except Exception as e:
             self.logger.error(f"Error uploading documents: {e}")
             raise
