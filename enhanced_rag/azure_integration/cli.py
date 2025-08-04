@@ -16,21 +16,213 @@ import sys
 import asyncio
 from datetime import datetime
 import logging
+import os
+import hashlib
+from pathlib import Path
+import ast
+from typing import List, Dict, Any, Optional, Tuple
 
 from azure.core.exceptions import ResourceNotFoundError
-from .enhanced_index_builder import EnhancedIndexBuilder
-from .indexer_integration import IndexerIntegration, DataSourceType, LocalRepositoryIndexer
+from .rest_index_builder import EnhancedIndexBuilder
 from .reindex_operations import ReindexOperations, ReindexMethod
+from .automation import DataAutomation
+from .rest import AzureSearchClient, SearchOperations
+from mcprag.config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def get_language_from_extension(file_path: str) -> str:
+    """Determine language from file extension."""
+    ext_map = {
+        '.py': 'python',
+        '.js': 'javascript',
+        '.mjs': 'javascript',
+        '.ts': 'typescript',
+        '.jsx': 'javascript',
+        '.tsx': 'typescript',
+        '.java': 'java',
+        '.cpp': 'cpp',
+        '.c': 'c',
+        '.cs': 'csharp',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.php': 'php',
+        '.rb': 'ruby',
+        '.swift': 'swift',
+        '.kt': 'kotlin',
+        '.scala': 'scala',
+        '.r': 'r',
+        '.md': 'markdown',
+        '.json': 'json',
+        '.yaml': 'yaml',
+        '.yml': 'yaml',
+        '.xml': 'xml',
+        '.html': 'html',
+        '.css': 'css',
+        '.scss': 'scss',
+        '.sass': 'sass'
+    }
+    
+    ext = Path(file_path).suffix.lower()
+    return ext_map.get(ext, 'text')
+
+
+def extract_python_chunks(content: str, file_path: str) -> List[Dict[str, Any]]:
+    """Extract semantic chunks from Python code."""
+    chunks = []
+    
+    try:
+        tree = ast.parse(content)
+        
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                chunk = {
+                    "chunk_type": "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class",
+                    "function_name": node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None,
+                    "class_name": node.name if isinstance(node, ast.ClassDef) else None,
+                    "start_line": node.lineno,
+                    "end_line": node.end_lineno or node.lineno,
+                    "docstring": ast.get_docstring(node) or "",
+                    "signature": f"def {node.name}" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else f"class {node.name}"
+                }
+                
+                # Extract code content
+                lines = content.split('\n')
+                chunk_content = '\n'.join(lines[chunk['start_line']-1:chunk['end_line']])
+                chunk['content'] = chunk_content
+                
+                chunks.append(chunk)
+    except (SyntaxError, ValueError):
+        # If AST parsing fails, return whole file as single chunk
+        chunks.append({
+            "chunk_type": "file",
+            "content": content,
+            "start_line": 1,
+            "end_line": len(content.split('\n'))
+        })
+    
+    return chunks
+
+
+def process_file(file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
+    """Process a single file and create document chunks."""
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except (IOError, OSError):
+        return []
+    
+    language = get_language_from_extension(file_path)
+    relative_path = os.path.relpath(file_path, repo_path)
+    
+    # Extract chunks based on language
+    if language == 'python':
+        chunks = extract_python_chunks(content, file_path)
+    else:
+        # For non-Python files, treat whole file as one chunk
+        chunks = [{
+            "chunk_type": "file",
+            "content": content,
+            "start_line": 1,
+            "end_line": len(content.split('\n'))
+        }]
+    
+    # Create documents for each chunk
+    documents = []
+    for i, chunk in enumerate(chunks):
+        doc_id = hashlib.sha256(f"{repo_name}:{relative_path}:{i}".encode()).hexdigest()[:16]
+        
+        doc = {
+            "id": doc_id,
+            "content": chunk.get('content', ''),
+            "file_path": relative_path,
+            "repository": repo_name,
+            "language": language,
+            "chunk_type": chunk.get('chunk_type', 'file'),
+            "chunk_id": f"{relative_path}:{i}",
+            "last_modified": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z",
+            "file_extension": Path(file_path).suffix
+        }
+        
+        # Add optional fields if they exist
+        if chunk.get('function_name'):
+            doc['function_name'] = chunk['function_name']
+        if chunk.get('class_name'):
+            doc['class_name'] = chunk['class_name']
+        if chunk.get('docstring'):
+            doc['docstring'] = chunk['docstring']
+        if chunk.get('signature'):
+            doc['signature'] = chunk['signature']
+        if chunk.get('start_line'):
+            doc['start_line'] = chunk['start_line']
+        if chunk.get('end_line'):
+            doc['end_line'] = chunk['end_line']
+        
+        documents.append(doc)
+    
+    return documents
+
+
+async def index_repository(repo_path: str, repo_name: str, patterns: Optional[List[Tuple[str, str]]] = None) -> int:
+    """Index an entire repository using REST API."""
+    # Initialize REST client and operations
+    rest_client = AzureSearchClient(
+        endpoint=Config.ENDPOINT,
+        api_key=Config.ADMIN_KEY
+    )
+    rest_ops = SearchOperations(rest_client)
+    data_automation = DataAutomation(rest_ops)
+    
+    # Collect all documents
+    all_documents = []
+    
+    # Default file extensions to process
+    extensions = {'.py', '.js', '.mjs', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', 
+                  '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
+                  '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'}
+    
+    # If patterns provided, extract extensions from them
+    if patterns:
+        extensions = set()
+        for pattern, _ in patterns:
+            if pattern.startswith('*.'):
+                extensions.add(pattern[1:])
+    
+    for root, dirs, files in os.walk(repo_path):
+        # Skip hidden directories and common non-code directories
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv']]
+        
+        for file in files:
+            if any(file.endswith(ext) for ext in extensions):
+                file_path = os.path.join(root, file)
+                docs = process_file(file_path, repo_path, repo_name)
+                all_documents.extend(docs)
+                
+                if docs:
+                    logger.info(f"Processed {file_path} ({len(docs)} chunks)")
+    
+    # Upload documents using async generator
+    async def document_generator():
+        for doc in all_documents:
+            yield doc
+    
+    # Upload in batches
+    result = await data_automation.bulk_upload(
+        index_name=Config.INDEX_NAME,
+        documents=document_generator(),
+        batch_size=100
+    )
+    
+    logger.info(f"Upload complete: {result['succeeded']} succeeded, {result['failed']} failed")
+    
+    return result['succeeded']
+
+
 async def cmd_local_repo(args):
     """Index a local repository."""
     logger.info(f"Indexing repository: {args.repo_path}")
-
-    indexer = LocalRepositoryIndexer()
 
     # Parse file patterns if provided
     patterns = None
@@ -47,39 +239,81 @@ async def cmd_local_repo(args):
             else:
                 logger.warning(f"Unknown pattern {pattern}, skipping")
 
-    # Determine embed_vectors setting
-    embed_vectors = None
-    if args.embed_vectors:
-        embed_vectors = True
-    elif args.no_embed_vectors:
-        embed_vectors = False
-    # else: None = auto-detect based on provider
-
-    # Run synchronous indexing in a thread pool to avoid blocking the event loop
-    await asyncio.to_thread(
-        indexer.index_repository,
+    # Index the repository
+    doc_count = await index_repository(
         repo_path=args.repo_path,
         repo_name=args.repo_name,
-        patterns=patterns,
-        embed_vectors=embed_vectors
+        patterns=patterns
     )
 
-    logger.info("Repository indexing completed")
+    logger.info(f"Repository indexing completed: {doc_count} documents indexed")
+
+
+async def index_changed_files(file_paths: List[str], repo_name: str) -> int:
+    """Index specific changed files using REST API."""
+    # Initialize REST client and operations
+    rest_client = AzureSearchClient(
+        endpoint=Config.ENDPOINT,
+        api_key=Config.ADMIN_KEY
+    )
+    rest_ops = SearchOperations(rest_client)
+    data_automation = DataAutomation(rest_ops)
+    
+    # Collect all documents
+    all_documents = []
+    
+    # Find the repo root (go up until we find .git or can't go further)
+    repo_path = None
+    for file_path in file_paths:
+        current = Path(file_path).parent
+        while current != current.parent:
+            if (current / '.git').exists():
+                repo_path = str(current)
+                break
+            current = current.parent
+        if repo_path:
+            break
+    
+    if not repo_path:
+        # Fall back to common parent
+        repo_path = os.path.commonpath([os.path.dirname(p) for p in file_paths])
+    
+    for file_path in file_paths:
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            docs = process_file(file_path, repo_path, repo_name)
+            all_documents.extend(docs)
+            
+            if docs:
+                logger.info(f"Processed {file_path} ({len(docs)} chunks)")
+    
+    # Upload documents using async generator
+    async def document_generator():
+        for doc in all_documents:
+            yield doc
+    
+    # Upload in batches
+    result = await data_automation.bulk_upload(
+        index_name=Config.INDEX_NAME,
+        documents=document_generator(),
+        batch_size=100
+    )
+    
+    logger.info(f"Upload complete: {result['succeeded']} succeeded, {result['failed']} failed")
+    
+    return result['succeeded']
 
 
 async def cmd_changed_files(args):
     """Index specific changed files."""
     logger.info(f"Indexing {len(args.files)} changed files")
 
-    indexer = LocalRepositoryIndexer()
-    # Run synchronous indexing in a thread pool to avoid blocking the event loop
-    await asyncio.to_thread(
-        indexer.index_changed_files,
+    # Index the changed files
+    doc_count = await index_changed_files(
         file_paths=args.files,
         repo_name=args.repo_name
     )
 
-    logger.info("Changed files indexing completed")
+    logger.info(f"Changed files indexing completed: {doc_count} documents indexed")
 
 
 async def cmd_create_enhanced_index(args):
@@ -131,7 +365,7 @@ async def cmd_validate_index(args):
     try:
         result = await builder.validate_vector_dimensions(
             index_name=args.name,
-            expected=args.check_dimensions
+            expected_dimensions=args.check_dimensions
         )
 
         # Output JSON details if requested
@@ -169,21 +403,33 @@ async def cmd_create_indexer(args):
     """Create Azure indexer."""
     logger.info(f"Creating indexer: {args.name}")
 
-    integration = IndexerIntegration()
+    # Initialize REST client and operations
+    rest_client = AzureSearchClient(
+        endpoint=Config.ENDPOINT,
+        api_key=Config.ADMIN_KEY
+    )
+    rest_ops = SearchOperations(rest_client)
+    from .automation import IndexerAutomation
+    indexer_automation = IndexerAutomation(rest_ops)
 
     try:
-        indexer = await integration.create_code_repository_indexer(
-            name=args.name,
-            data_source_type=DataSourceType(args.source),
-            connection_string=args.conn,
-            container_name=args.container,
-            index_name=args.index,
-            schedule_interval_minutes=args.schedule_minutes,
-            include_git_metadata=args.include_git
-        )
-        logger.info(f"Successfully created indexer: {indexer.name}")
-        logger.info(f"Target index: {indexer.target_index_name}")
-        logger.info(f"Schedule: Every {args.schedule_minutes} minutes")
+        # Create indexer pipeline based on source type
+        if args.source == 'azureblob':
+            result = await indexer_automation.create_blob_indexer_pipeline(
+                name_prefix=args.name,
+                index_name=args.index,
+                connection_string=args.conn,
+                container_name=args.container,
+                schedule_hours=args.schedule_minutes // 60,  # Convert minutes to hours
+                query=None
+            )
+            logger.info(f"Successfully created blob indexer pipeline")
+            logger.info(f"Indexer: {result['indexer']}")
+            logger.info(f"Target index: {args.index}")
+            logger.info(f"Schedule: Every {args.schedule_minutes} minutes")
+        else:
+            logger.error(f"Unsupported source type: {args.source}")
+            return 1
 
     except Exception as e:
         logger.error(f"Failed to create indexer: {e}")

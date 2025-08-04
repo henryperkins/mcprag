@@ -8,7 +8,7 @@ import asyncio
 from dotenv import load_dotenv
 from azure.search.documents.indexes import SearchIndexClient
 from azure.core.credentials import AzureKeyCredential
-from enhanced_rag.azure_integration.enhanced_index_builder import EnhancedIndexBuilder
+from enhanced_rag.azure_integration.rest_index_builder import EnhancedIndexBuilder
 
 load_dotenv()
 

@@ -62,14 +62,16 @@ try:
 except ImportError:
     LEARNING_SUPPORT = False
 
-try:
-    from enhanced_rag.azure_integration.index_operations import IndexOperations
-    from enhanced_rag.azure_integration.indexer_integration import IndexerIntegration
-    from enhanced_rag.azure_integration.document_operations import DocumentOperations
+# NOTE: The legacy Azure SDK based admin helpers (IndexOperations, IndexerIntegration,
+# DocumentOperations) have been fully replaced by their REST-API counterparts as part
+# of the Azure integration migration (see docs/azure_integration_migration_plan.md).
+# We purposely avoid importing the deprecated modules here to prevent an unnecessary
+# runtime dependency on the Azure SDK.  Instead, REST_API_SUPPORT (defined below)
+# determines whether admin-level functionality is available.
 
-    AZURE_ADMIN_SUPPORT = True
-except ImportError:
-    AZURE_ADMIN_SUPPORT = False
+# Kept for backward-compatibility checks further down in the module.  Code that still
+# guards on `AZURE_ADMIN_SUPPORT` should now reference the REST implementation.
+AZURE_ADMIN_SUPPORT = False
 
 # GitHub integration pulls in FastAPI app with slowapi limiter that can fail outside web context.
 # To avoid import-time side effects for MCP server, guard these imports strictly.
@@ -112,6 +114,20 @@ try:
     AZURE_SDK_AVAILABLE = True
 except ImportError:
     AZURE_SDK_AVAILABLE = False
+
+# New REST API automation support
+try:
+    from enhanced_rag.azure_integration.rest import AzureSearchClient, SearchOperations
+    from enhanced_rag.azure_integration.automation import (
+        IndexAutomation,
+        DataAutomation,
+        IndexerAutomation,
+        HealthMonitor
+    )
+    
+    REST_API_SUPPORT = True
+except ImportError:
+    REST_API_SUPPORT = False
 
 # MCP SDK
 try:
@@ -188,7 +204,8 @@ class MCPServer:
             f"MCP Server initialized - Features: "
             f"RAG={ENHANCED_RAG_AVAILABLE}, "
             f"Vector={VECTOR_SUPPORT}, "
-            f"Pipeline={PIPELINE_AVAILABLE}"
+            f"Pipeline={PIPELINE_AVAILABLE}, "
+            f"REST_API={REST_API_SUPPORT}"
         )
 
     def _init_components(self):
@@ -274,25 +291,11 @@ class MCPServer:
             self.usage_analyzer = None
             self.model_updater = None
 
-        # Initialize admin components if dependencies are available.
-        if AZURE_ADMIN_SUPPORT:
-            try:
-                self.index_ops = IndexOperations(
-                    endpoint=Config.ENDPOINT, admin_key=Config.ADMIN_KEY
-                )
-                self.indexer_integration = IndexerIntegration()
-                self.doc_ops = DocumentOperations(
-                    endpoint=Config.ENDPOINT, admin_key=Config.ADMIN_KEY
-                )
-            except Exception as e:
-                logger.warning(f"Admin components unavailable: {e}")
-                self.index_ops = None
-                self.indexer_integration = None
-                self.doc_ops = None
-        else:
-            self.index_ops = None
-            self.indexer_integration = None
-            self.doc_ops = None
+        # ------------------------------------------------------------------
+        # ADMIN COMPONENTS (REST-BASED)
+        # ------------------------------------------------------------------
+        # The original SDK based admin helpers have been superseded by the REST
+        # automation layer.  We now rely on those helpers when available.
 
         # Initialize GitHub integration
         if GITHUB_SUPPORT:
@@ -306,6 +309,42 @@ class MCPServer:
         else:
             self.github_client = None
             self.remote_indexer = None
+        
+        # Initialize REST API automation components
+        if REST_API_SUPPORT:
+            try:
+                # Create REST client and operations
+                self.rest_client = AzureSearchClient(
+                    endpoint=Config.ENDPOINT,
+                    api_key=Config.ADMIN_KEY
+                )
+                self.rest_ops = SearchOperations(self.rest_client)
+                
+                # Initialize automation managers
+                self.index_automation = IndexAutomation(
+                    endpoint=Config.ENDPOINT,
+                    api_key=Config.ADMIN_KEY
+                )
+                self.data_automation = DataAutomation(self.rest_ops)
+                self.indexer_automation = IndexerAutomation(self.rest_ops)
+                self.health_monitor = HealthMonitor(self.rest_ops)
+                
+                logger.info("REST API automation components initialized")
+            except Exception as e:
+                logger.warning(f"REST API components unavailable: {e}")
+                self.rest_client = None
+                self.rest_ops = None
+                self.index_automation = None
+                self.data_automation = None
+                self.indexer_automation = None
+                self.health_monitor = None
+        else:
+            self.rest_client = None
+            self.rest_ops = None
+            self.index_automation = None
+            self.data_automation = None
+            self.indexer_automation = None
+            self.health_monitor = None
 
     async def ensure_async_components_started(self):
         """
@@ -355,6 +394,14 @@ class MCPServer:
                 self.feedback_collector, "cleanup"
             ):
                 await self.feedback_collector.cleanup()
+            
+            # Cleanup REST API client
+            if self.rest_client is not None:
+                await self.rest_client.close()
+            
+            # Cleanup index automation client
+            if self.index_automation is not None and hasattr(self.index_automation, "client"):
+                await self.index_automation.client.close()
 
             logger.info("✅ MCP Server async components cleanup completed")
 

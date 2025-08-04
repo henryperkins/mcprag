@@ -12,10 +12,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Literal
 from enum import Enum
+import os
+import hashlib
+import ast
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
-from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes import SearchIndexClient, SearchIndexerClient
 from azure.search.documents.indexes.models import (
     SearchIndex,
     SearchIndexer,
@@ -23,7 +26,8 @@ from azure.search.documents.indexes.models import (
 )
 
 from enhanced_rag.core.config import get_config
-from .indexer_integration import LocalRepositoryIndexer
+from .rest import AzureSearchClient, SearchOperations
+from .automation import DataAutomation
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ class ReindexOperations:
         
         credential = AzureKeyCredential(self.api_key)
         self.index_client = SearchIndexClient(self.endpoint, credential)
+        self.indexer_client = SearchIndexerClient(self.endpoint, credential)
         self.search_client = SearchClient(self.endpoint, self.index_name, credential)
         
     async def get_index_info(self) -> Dict[str, Any]:
@@ -191,11 +196,11 @@ class ReindexOperations:
                 field_mappings=field_mappings
             )
             
-            self.index_client.create_or_update_indexer(indexer)
+            self.indexer_client.create_or_update_indexer(indexer)
             logger.info(f"Indexer '{indexer_name}' created successfully")
             
             # Run indexer immediately
-            self.index_client.run_indexer(indexer_name)
+            self.indexer_client.run_indexer(indexer_name)
             logger.info(f"Indexer '{indexer_name}' run started")
             
             return True
@@ -214,7 +219,7 @@ class ReindexOperations:
             Dict with status information or None
         """
         try:
-            status = self.index_client.get_indexer_status(indexer_name)
+            status = self.indexer_client.get_indexer_status(indexer_name)
             return {
                 "status": status.status,
                 "last_result": status.last_result.status if status.last_result else None,
@@ -225,6 +230,133 @@ class ReindexOperations:
         except Exception as e:
             logger.error(f"Failed to get indexer status: {e}")
             return None
+    
+    def _get_language_from_extension(self, file_path: str) -> str:
+        """Determine language from file extension."""
+        ext_map = {
+            '.py': 'python',
+            '.js': 'javascript',
+            '.mjs': 'javascript',
+            '.ts': 'typescript',
+            '.jsx': 'javascript',
+            '.tsx': 'typescript',
+            '.java': 'java',
+            '.cpp': 'cpp',
+            '.c': 'c',
+            '.cs': 'csharp',
+            '.go': 'go',
+            '.rs': 'rust',
+            '.php': 'php',
+            '.rb': 'ruby',
+            '.swift': 'swift',
+            '.kt': 'kotlin',
+            '.scala': 'scala',
+            '.r': 'r',
+            '.md': 'markdown',
+            '.json': 'json',
+            '.yaml': 'yaml',
+            '.yml': 'yaml',
+            '.xml': 'xml',
+            '.html': 'html',
+            '.css': 'css'
+        }
+        
+        ext = Path(file_path).suffix.lower()
+        return ext_map.get(ext, 'text')
+
+    def _extract_python_chunks(self, content: str, file_path: str) -> List[Dict[str, Any]]:
+        """Extract semantic chunks from Python code."""
+        chunks = []
+        
+        try:
+            tree = ast.parse(content)
+            
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    chunk = {
+                        "chunk_type": "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class",
+                        "function_name": node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None,
+                        "class_name": node.name if isinstance(node, ast.ClassDef) else None,
+                        "start_line": node.lineno,
+                        "end_line": node.end_lineno or node.lineno,
+                        "docstring": ast.get_docstring(node) or "",
+                        "signature": f"def {node.name}" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else f"class {node.name}"
+                    }
+                    
+                    # Extract code content
+                    lines = content.split('\n')
+                    chunk_content = '\n'.join(lines[chunk['start_line']-1:chunk['end_line']])
+                    chunk['content'] = chunk_content
+                    
+                    chunks.append(chunk)
+        except (SyntaxError, ValueError):
+            # If AST parsing fails, return whole file as single chunk
+            chunks.append({
+                "chunk_type": "file",
+                "content": content,
+                "start_line": 1,
+                "end_line": len(content.split('\n'))
+            })
+        
+        return chunks
+
+    def _process_file(self, file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
+        """Process a single file and create document chunks."""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+        except (IOError, OSError):
+            return []
+        
+        language = self._get_language_from_extension(file_path)
+        relative_path = os.path.relpath(file_path, repo_path)
+        
+        # Extract chunks based on language
+        if language == 'python':
+            chunks = self._extract_python_chunks(content, file_path)
+        else:
+            # For non-Python files, treat whole file as one chunk
+            chunks = [{
+                "chunk_type": "file",
+                "content": content,
+                "start_line": 1,
+                "end_line": len(content.split('\n'))
+            }]
+        
+        # Create documents for each chunk
+        documents = []
+        for i, chunk in enumerate(chunks):
+            doc_id = hashlib.sha256(f"{repo_name}:{relative_path}:{i}".encode()).hexdigest()[:16]
+            
+            doc = {
+                "id": doc_id,
+                "content": chunk.get('content', ''),
+                "file_path": relative_path,
+                "repository": repo_name,
+                "language": language,
+                "chunk_type": chunk.get('chunk_type', 'file'),
+                "chunk_id": f"{relative_path}:{i}",
+                "last_modified": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z",
+                "file_extension": Path(file_path).suffix
+            }
+            
+            # Add optional fields if they exist
+            if chunk.get('function_name'):
+                doc['function_name'] = chunk['function_name']
+            if chunk.get('class_name'):
+                doc['class_name'] = chunk['class_name']
+            if chunk.get('docstring'):
+                doc['docstring'] = chunk['docstring']
+            if chunk.get('signature'):
+                doc['signature'] = chunk['signature']
+            if chunk.get('start_line'):
+                doc['start_line'] = chunk['start_line']
+            if chunk.get('end_line'):
+                doc['end_line'] = chunk['end_line']
+            
+            documents.append(doc)
+        
+        return documents
     
     async def reindex_repository(
         self,
@@ -252,19 +384,51 @@ class ReindexOperations:
                 deleted = await self.clear_documents(f"repository eq '{repo_name}'")
                 logger.info(f"Cleared {deleted} existing documents")
             
-            # Use local repository indexer
-            indexer = LocalRepositoryIndexer()
+            # Initialize REST client and operations
+            config = get_config()
+            rest_client = AzureSearchClient(
+                endpoint=config.azure.endpoint,
+                api_key=config.azure.admin_key
+            )
+            rest_ops = SearchOperations(rest_client)
+            data_automation = DataAutomation(rest_ops)
             
-            # Run indexing synchronously in thread pool
-            await asyncio.to_thread(
-                indexer.index_repository,
-                repo_path=repo_path,
-                repo_name=repo_name,
-                embed_vectors=True
+            # Collect all documents
+            all_documents = []
+            
+            # Default file extensions to process
+            extensions = {'.py', '.js', '.mjs', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', 
+                          '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
+                          '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'}
+            
+            for root, dirs, files in os.walk(repo_path):
+                # Skip hidden directories and common non-code directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv']]
+                
+                for file in files:
+                    if any(file.endswith(ext) for ext in extensions):
+                        file_path = os.path.join(root, file)
+                        docs = self._process_file(file_path, repo_path, repo_name)
+                        all_documents.extend(docs)
+                        
+                        if docs:
+                            logger.info(f"Processed {file_path} ({len(docs)} chunks)")
+            
+            # Upload documents using async generator
+            async def document_generator():
+                for doc in all_documents:
+                    yield doc
+            
+            # Upload in batches
+            result = await data_automation.bulk_upload(
+                index_name=self.index_name,
+                documents=document_generator(),
+                batch_size=100
             )
             
+            logger.info(f"Upload complete: {result['succeeded']} succeeded, {result['failed']} failed")
             logger.info("Repository reindexing completed")
-            return True
+            return result['succeeded'] > 0
             
         except Exception as e:
             logger.error(f"Repository reindexing failed: {e}")

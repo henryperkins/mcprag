@@ -15,12 +15,18 @@ anyio
 # Security and rate limiting
 slowapi==0.1.9
 
+# Retry logic for REST API
+tenacity==8.2.3
+
 # MCP SDK (optional - install with pip install 'mcp[cli]')
 # mcp[cli]
 fastmcp
 
 # Microsoft Docs MCP integration
 aiohttp==3.9.1
+
+# Graph dependencies for dependency analysis
+networkx==3.1
 
 # Development dependencies
 pytest==7.4.3

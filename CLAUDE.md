@@ -326,12 +326,20 @@ This is a **state-of-the-art code search solution** that combines Azure Cognitiv
 ### Core Components
 
 1. **Enhanced RAG Azure Integration (`enhanced_rag/azure_integration/`)** - Comprehensive indexing system
-   - **LocalRepositoryIndexer** - AST-based code chunking with semantic extraction
-   - **ReindexOperations** - Complete reindexing strategies (drop/rebuild, incremental, clear)
-   - **IndexManagement** - Index optimization, duplicate detection, statistics
-   - Parses JavaScript/TypeScript via Babel AST (`parse_js.mjs`)
-   - Creates rich context: function signatures, imports, function calls, docstrings
-   - Supports incremental indexing of changed files
+   - **Unified Architecture**:
+     - `UnifiedAutomation` - Single entry point for all operations
+     - `ReindexAutomation` - Advanced reindexing strategies with health monitoring
+     - `EmbeddingAutomation` - Batch embedding generation with caching
+     - `CLIAutomation` - Repository indexing and file processing
+   - **Core Components**:
+     - **ReindexOperations** - Complete reindexing strategies (drop/rebuild, incremental, clear)
+     - **EmbeddingProvider** - Pluggable embedding generation (Azure OpenAI, null provider)
+     - **REST API Layer** - Low-level Azure Search operations
+   - **Features**:
+     - AST-based code chunking for Python (built-in) and JS/TS (via Babel)
+     - Rich context extraction: function signatures, imports, docstrings
+     - Incremental indexing of changed files
+     - Embedding cache with TTL and LRU eviction
 
 2. **SOTA MCP Server (`mcp_server_sota.py`)** - Advanced search API
    - Intent-aware query enhancement (implement/debug/understand/refactor)
@@ -373,6 +381,12 @@ Code Files → AST Parser → Semantic Chunks → Azure Search → MCP Server �
 Required in `.env`:
 - `ACS_ENDPOINT` - Azure Cognitive Search endpoint
 - `ACS_ADMIN_KEY` - Azure admin key
+- `ACS_INDEX_NAME` - Optional, defaults to `codebase-mcp-sota`
+
+For embedding generation (optional):
+- `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint
+- `AZURE_OPENAI_KEY` or `AZURE_OPENAI_API_KEY` - API key
+- `AZURE_OPENAI_EMBEDDING_MODEL` - Model name (defaults to `text-embedding-3-large`)
 
 ## Testing & Quality Assurance
 
@@ -553,18 +567,66 @@ docs = await client.use_mcp_tool(
 
 For building extensions or automated workflows, see the [Claude Code SDK documentation](https://docs.anthropic.com/en/docs/claude-code/sdk).
 
-### Programmatic Reindexing API
+### Unified Automation API
 
-The enhanced_rag module provides a Python API for reindexing operations:
+The enhanced_rag module now provides a unified interface for all Azure Search operations:
 
 ```python
-from enhanced_rag.azure_integration import ReindexOperations, ReindexMethod, IndexManagement
+from enhanced_rag.azure_integration import UnifiedAutomation
 import asyncio
 
-async def manage_index():
-    # Initialize operations
+async def use_unified_api():
+    # Initialize unified automation
+    automation = UnifiedAutomation(
+        endpoint="https://your-search.search.windows.net",
+        api_key="your-admin-key"
+    )
+    
+    # Index a repository with progress tracking
+    result = await automation.index_repository(
+        repo_path="./my-project",
+        repo_name="my-project",
+        generate_embeddings=True,
+        progress_callback=lambda p: print(f"Progress: {p}")
+    )
+    
+    # Get comprehensive system health
+    health = await automation.get_system_health()
+    print(f"Service health: {health['service']}")
+    print(f"Index health: {health['default_index']}")
+    
+    # Analyze and get recommendations
+    analysis = await automation.analyze_and_recommend()
+    for action in analysis['suggested_actions']:
+        print(f"{action['priority']}: {action['action']} - {action['reason']}")
+    
+    # Perform smart reindexing
+    await automation.reindex(
+        method="repository",
+        repo_path="./my-project",
+        repo_name="my-project"
+    )
+
+# Run the async function
+asyncio.run(use_unified_api())
+```
+
+### Programmatic Reindexing API
+
+The enhanced_rag module also provides direct access to individual components:
+
+```python
+from enhanced_rag.azure_integration import (
+    ReindexOperations, 
+    ReindexMethod,
+    EmbeddingAutomation,
+    CLIAutomation
+)
+import asyncio
+
+async def manage_components():
+    # Direct component usage
     reindex_ops = ReindexOperations()
-    index_mgmt = IndexManagement()
     
     # Get index status
     info = await reindex_ops.get_index_info()
@@ -588,21 +650,9 @@ async def manage_index():
         repo_name="my-project",
         method=ReindexMethod.INCREMENTAL
     )
-    
-    # Get optimization recommendations
-    optimizations = await index_mgmt.optimize_index()
-    for rec in optimizations['recommendations']:
-        print(f"{rec['type']}: {rec['message']}")
-    
-    # Find duplicates
-    duplicates = await index_mgmt.find_duplicates()
-    print(f"Found {len(duplicates)} duplicate groups")
-    
-    # Export data for analysis
-    await index_mgmt.export_index_data("export.json", sample_size=100)
 
 # Run the async function
-asyncio.run(manage_index())
+asyncio.run(manage_components())
 ```
 
 ### Advanced SDK Integration Patterns
@@ -868,6 +918,12 @@ Based on testing and recent improvements, the following issues have been identif
    - Added index statistics, duplicate detection, optimization recommendations
    - Export functionality for data analysis
    - Stale document detection
+
+4. **Fragmented automation components** - ✅ FIXED
+   - Created unified automation architecture
+   - `UnifiedAutomation` provides single entry point
+   - All managers (reindex, embedding, CLI) now integrated
+   - Consistent patterns across all automation components
 
 ### Current Status
 

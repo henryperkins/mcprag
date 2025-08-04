@@ -1,114 +1,107 @@
 #!/usr/bin/env python3
-"""
-Deploy complete codebase search infrastructure to Azure Cognitive Search
-This script creates all components in the correct order:
-1. Data Source
-2. Skillset
-3. Index (with vector field)
-4. Indexer
+"""Deploy complete code-base search infrastructure via Azure Search REST API.
+
+This script is the REST-centric replacement for the old SDK version that relied
+on `IndexOperations`.  It performs the following steps:
+
+1.  Ensures the target index exists (and contains the required vector search
+    configuration).
+2.  Creates/updates the data-source definition.
+3.  Creates/updates the skill-set definition.
+4.  Creates/updates the indexer.
+
+All HTTP traffic is executed through the minimal asynchronous client defined in
+`enhanced_rag.azure_integration.rest` so **no Azure SDK packages are
+required**.
 """
 
 import asyncio
+import json
 from pathlib import Path
+from typing import Dict, Any
 
-from enhanced_rag.azure_integration.index_operations import IndexOperations
-from enhanced_rag.core.config import get_config
-from azure_search_client import AzureSearchClient
+from enhanced_rag.azure_integration.config import AzureSearchConfig
+from enhanced_rag.azure_integration.rest import AzureSearchClient, SearchOperations
+from enhanced_rag.azure_integration.automation import IndexAutomation
+
+# ---------------------------------------------------------------------------
+# Helper utilities
+# ---------------------------------------------------------------------------
 
 
-async def deploy_codebase_search():
-    """Deploy all components for codebase search"""
+async def _load_json(path: Path) -> Dict[str, Any]:  # noqa: D401
+    """Load a JSON file, raising if it does not exist or is invalid."""
 
-    # Get configuration
-    config = get_config()
-    endpoint = config.azure.endpoint
-    admin_key = config.azure.admin_key
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return json.loads(path.read_text())
 
-    print(f"🚀 Deploying to Azure Cognitive Search: {endpoint}")
 
-    # Initialize operations client
-    index_ops = IndexOperations(endpoint, admin_key)
+async def deploy_codebase_search() -> None:  # noqa: D401
+    """Deploy the code-base search components using REST API helpers."""
 
-    try:
-        # Step 1: Create the index with vector field
-        print("\n📊 Step 1: Creating index schema...")
-        success = await index_ops.create_codebase_index("codebase-mcp-sota")
-        if success:
-            print("✅ Index 'codebase-mcp-sota' created successfully!")
+    # ---------------------------------------------------------------------
+    # Load environment configuration (ACS_ENDPOINT / ACS_ADMIN_KEY, …)
+    # ---------------------------------------------------------------------
+    cfg = AzureSearchConfig.from_env()
+
+    print(f"🚀 Deploying to Azure Cognitive Search via REST: {cfg.endpoint}")
+
+    # Create REST client/ops helpers
+    async with AzureSearchClient(cfg.endpoint, cfg.api_key, cfg.api_version) as client:
+        ops = SearchOperations(client)
+
+        # ------------------------------------------------------------------
+        # Step 1: Ensure the index schema exists
+        # ------------------------------------------------------------------
+        print("\n📊 Step 1: Ensuring index schema …")
+
+        schema_path = Path("azure_search_index_schema.json")
+        index_schema = await _load_json(schema_path)
+
+        index_name = index_schema["name"]
+        index_auto = IndexAutomation(cfg.endpoint, cfg.api_key, cfg.api_version)
+        ensure_result = await index_auto.ensure_index_exists(index_schema)
+
+        if ensure_result["created"]:
+            print(f"✅ Index '{index_name}' created")
+        elif ensure_result["updated"]:
+            print(f"🔄 Index '{index_name}' updated to match schema")
         else:
-            print("❌ Failed to create index")
-            return False
+            print(f"✅ Index '{index_name}' already up-to-date")
 
-        # Step 2: Create data source
-        print("\n📁 Step 2: Creating data source...")
-        search_client = AzureSearchClient()
-        if not search_client.create_data_source():
-            print("❌ Data source creation failed")
-            return False
+        # ------------------------------------------------------------------
+        # Steps 2-4 still rely on JSON ARM templates.  We simply POST them to
+        # the management endpoints.  These steps mirror the original SDK
+        # implementation but without any SDK calls.
+        # ------------------------------------------------------------------
 
-        # Step 3: Create skillset
-        print("\n🧠 Step 3: Creating skillset...")
-        if not search_client.create_skillset():
-            print("❌ Skillset creation failed")
-            return False
+        async def _apply_resource(file_name: str, url_suffix: str) -> None:
+            body = await _load_json(Path(file_name))
+            await client.request("PUT", url_suffix, json=body)
+            print(f"✅ {file_name} applied")
 
-        # Step 4: Create indexer
-        print("\n⚙️  Step 4: Creating indexer...")
-        if not search_client.create_indexer():
-            print("❌ Indexer creation failed")
-            return False
+        print("\n📁 Step 2: Creating/Updating data-source …")
+        await _apply_resource("datasource-config.json", "/datasources/test-datasource")
 
-        print("\n🎉 Deployment preparation complete!")
-        print("\n📋 Next steps:")
-        print("1. ✅ Index schema created")
-        print("2. 🔄 Create data source using datasource-config.json")
-        print("3. 🔄 Create skillset using skillset-config.json")
-        print("4. 🔄 Create indexer using indexer-config.json")
+        print("\n🧠 Step 3: Creating/Updating skill-set …")
+        await _apply_resource("skillset-config.json", "/skillsets/test-skillset")
 
-        return True
+        print("\n⚙️  Step 4: Creating/Updating indexer …")
+        await _apply_resource("indexer-config.json", "/indexers/test-indexer")
 
-    except Exception as e:
-        print(f"❌ Deployment failed: {e}")
-        return False
-    finally:
-        await index_ops.close()
+    # ---------------------------------------------------------------------
+    # Verification – fetch index stats to confirm the service is reachable.
+    # ---------------------------------------------------------------------
+    async with AzureSearchClient(cfg.endpoint, cfg.api_key, cfg.api_version) as client:
+        ops = SearchOperations(client)
+        stats = await ops.get_index_stats(index_name)
+        doc_count = stats.get("documentCount", "N/A")
+        print("\n🔍 Index statistics:")
+        print(f"   Document count: {doc_count}")
 
-
-async def verify_index_schema():
-    """Verify the index has the correct schema including vector field"""
-    index_ops = IndexOperations()
-
-    try:
-        # Get index statistics to verify it exists
-        stats = await index_ops.get_index_statistics("codebase-mcp-sota")
-        if "error" not in stats:
-            print("✅ Index exists and is accessible")
-            print(f"   Document count: {stats.get('document_count', 'N/A')}")
-            print(f"   Storage size: {stats.get('storage_size', 'N/A')}")
-        else:
-            print(f"❌ Index verification failed: {stats['error']}")
-
-    except Exception as e:
-        print(f"❌ Index verification error: {e}")
-    finally:
-        await index_ops.close()
+    print("\n🎉 Deployment finished!")
 
 
 if __name__ == "__main__":
-    print("🔍 Azure Cognitive Search Codebase Deployment")
-    print("=" * 50)
-
-    # Check if config files exist
-    required_files = ["datasource-config.json", "skillset-config.json", "indexer-config.json"]
-    missing_files = [f for f in required_files if not Path(f).exists()]
-
-    if missing_files:
-        print(f"❌ Missing required files: {missing_files}")
-        exit(1)
-
-    # Run deployment
     asyncio.run(deploy_codebase_search())
-
-    # Verify index
-    print("\n🔍 Verifying index schema...")
-    asyncio.run(verify_index_schema())

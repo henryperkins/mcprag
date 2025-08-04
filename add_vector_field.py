@@ -1,161 +1,93 @@
 #!/usr/bin/env python3
-"""
-Add the missing content_vector field to the existing codebase-mcp-sota index
+"""Add or verify the `content_vector` field on an existing index (REST version).
+
+This is the REST-API replacement for the original `add_vector_field.py` that
+depended on `IndexOperations` and the Azure SDK models.  The new
+implementation fetches the index JSON definition, patches it in-memory, and
+sends it back with a PUT request.
+
+Limitations
+-----------
+• The script no longer tries to build a full `SearchIndex` object; instead it
+  works directly with the JSON representation.
+• Some advanced settings (e.g. algorithm parameters) are hard-coded to the
+  defaults required by the migration guidance.
 """
 
 import asyncio
-from enhanced_rag.azure_integration.index_operations import IndexOperations
-from azure.search.documents.indexes.models import (
-    SearchField,
-    SearchFieldDataType,
-    VectorSearch,
-    VectorSearchProfile,
-    HnswAlgorithmConfiguration,
-    VectorSearchAlgorithmKind,
-    VectorSearchAlgorithmMetric
-)
+import copy
+import json
+from typing import Any, Dict
+
+from enhanced_rag.azure_integration.config import AzureSearchConfig
+from enhanced_rag.azure_integration.rest import AzureSearchClient, SearchOperations
 
 
-async def add_vector_field_to_index():
-    """Add the content_vector field to the existing index"""
-    
-    index_ops = IndexOperations()
-    
-    try:
-        # Get the current index
-        print("📊 Getting current index schema...")
-        current_index = await index_ops._run_in_executor(
-            index_ops.client.get_index, "codebase-mcp-sota"
-        )
-        
-        print(f"✅ Current index has {len(current_index.fields)} fields")
-        
-        # Check if content_vector field already exists
-        vector_field_exists = any(field.name == "content_vector" for field in current_index.fields)
-        
-        if vector_field_exists:
-            print("✅ content_vector field already exists!")
-            return True
-        
-        print("➕ Adding content_vector field...")
-        
-        # Create the vector field
-        vector_field = SearchField(
-            name="content_vector",
-            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
-            searchable=True,
-            vector_search_dimensions=3072,
-            vector_search_profile_name="vector-profile"
-        )
-        
-        # Add the field to the existing fields
-        current_index.fields.append(vector_field)
-        
-        # Create vector search configuration if it doesn't exist
-        if not current_index.vector_search:
-            print("➕ Adding vector search configuration...")
-            current_index.vector_search = VectorSearch(
-                profiles=[
-                    VectorSearchProfile(
-                        name="vector-profile",
-                        algorithm_configuration_name="vector-config"
-                    )
+VECTOR_FIELD_NAME = "content_vector"
+
+
+def _vector_field_definition(dimensions: int = 3072) -> Dict[str, Any]:
+    """Return a minimal vector field definition compatible with REST schema."""
+    return {
+        "name": VECTOR_FIELD_NAME,
+        "type": "Collection(Edm.Single)",
+        "searchable": True,
+        "vectorSearchDimensions": dimensions,
+        "vectorSearchProfileName": "vector-profile",
+    }
+
+
+async def add_vector_field(index_name: str = "codebase-mcp-sota", dimensions: int = 3072) -> None:
+    """Ensure *content_vector* exists on *index_name* and update if missing."""
+
+    cfg = AzureSearchConfig.from_env()
+    async with AzureSearchClient(cfg.endpoint, cfg.api_key, cfg.api_version) as client:
+        ops = SearchOperations(client)
+
+        # ------------------------------------------------------------------
+        # Fetch current index definition
+        # ------------------------------------------------------------------
+        index_def = await ops.get_index(index_name)
+
+        fields = index_def.get("fields", [])
+        if any(f.get("name") == VECTOR_FIELD_NAME for f in fields):
+            print("✅ content_vector field already present – nothing to do.")
+            return
+
+        print("➕ Adding content_vector field …")
+
+        # Patch fields
+        updated_def = copy.deepcopy(index_def)
+        updated_def["fields"] = fields + [_vector_field_definition(dimensions)]
+
+        # Ensure vectorSearch section exists
+        if "vectorSearch" not in updated_def:
+            updated_def["vectorSearch"] = {
+                "profiles": [
+                    {
+                        "name": "vector-profile",
+                        "algorithmConfigurationName": "vector-config",
+                    }
                 ],
-                algorithms=[
-                    HnswAlgorithmConfiguration(
-                        name="vector-config",
-                        kind=VectorSearchAlgorithmKind.HNSW,
-                        parameters={
+                "algorithms": [
+                    {
+                        "name": "vector-config",
+                        "kind": "hnsw",
+                        "parameters": {
                             "m": 4,
                             "efConstruction": 400,
                             "efSearch": 500,
-                            "metric": VectorSearchAlgorithmMetric.COSINE
-                        }
-                    )
-                ]
-            )
-        
-        # Update the index
-        print("🔄 Updating index schema...")
-        await index_ops._run_in_executor(
-            index_ops.client.create_or_update_index, current_index
-        )
-        
-        print("✅ Successfully added content_vector field to index!")
-        print(f"📊 Index now has {len(current_index.fields)} fields")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error adding vector field: {e}")
-        return False
-    finally:
-        await index_ops.close()
+                            "metric": "cosine",
+                        },
+                    }
+                ],
+            }
 
+        # PUT the updated index definition
+        await ops.create_index(updated_def)
 
-async def verify_vector_field():
-    """Verify the vector field was added correctly"""
-    
-    index_ops = IndexOperations()
-    
-    try:
-        print("\n🔍 Verifying vector field...")
-        
-        # Get the updated index
-        updated_index = await index_ops._run_in_executor(
-            index_ops.client.get_index, "codebase-mcp-sota"
-        )
-        
-        # Find the vector field
-        vector_field = next(
-            (field for field in updated_index.fields if field.name == "content_vector"), 
-            None
-        )
-        
-        if vector_field:
-            print("✅ content_vector field found!")
-            print(f"   Type: {vector_field.type}")
-            print(f"   Dimensions: {vector_field.vector_search_dimensions}")
-            print(f"   Profile: {vector_field.vector_search_profile_name}")
-            print(f"   Searchable: {vector_field.searchable}")
-        else:
-            print("❌ content_vector field not found!")
-            return False
-        
-        # Check vector search configuration
-        if updated_index.vector_search:
-            print("✅ Vector search configuration found!")
-            print(f"   Profiles: {len(updated_index.vector_search.profiles)}")
-            print(f"   Algorithms: {len(updated_index.vector_search.algorithms)}")
-        else:
-            print("❌ Vector search configuration missing!")
-            return False
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error verifying vector field: {e}")
-        return False
-    finally:
-        await index_ops.close()
+        print("✅ Vector field added and index updated successfully.")
 
 
 if __name__ == "__main__":
-    print("🔧 Adding Vector Field to Existing Index")
-    print("=" * 45)
-    
-    # Add the vector field
-    success = asyncio.run(add_vector_field_to_index())
-    
-    if success:
-        # Verify it was added correctly
-        asyncio.run(verify_vector_field())
-        
-        print("\n🎉 Vector field addition complete!")
-        print("\n📋 Next steps:")
-        print("1. ✅ Index now has content_vector field")
-        print("2. 🔄 Your indexer should now work without the field mapping error")
-        print("3. ▶️  Try running your indexer again")
-    else:
-        print("\n❌ Failed to add vector field")
-        print("   Please check the error messages above")
+    asyncio.run(add_vector_field())

@@ -5,7 +5,7 @@ Create enhanced Azure Search index with all advanced features
 
 import asyncio
 import sys
-from enhanced_rag.azure_integration.enhanced_index_builder import EnhancedIndexBuilder
+from enhanced_rag.azure_integration.rest_index_builder import EnhancedIndexBuilder
 from dotenv import load_dotenv
 
 # Load environment variables

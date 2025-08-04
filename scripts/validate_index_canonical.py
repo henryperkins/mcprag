@@ -6,7 +6,7 @@ import os
 import sys
 import asyncio
 from dotenv import load_dotenv
-from enhanced_rag.azure_integration.enhanced_index_builder import EnhancedIndexBuilder
+from enhanced_rag.azure_integration.rest_index_builder import EnhancedIndexBuilder
 from enhanced_rag.core.config import EmbeddingConfig
 
 # Load environment

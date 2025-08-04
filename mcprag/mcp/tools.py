@@ -1114,3 +1114,348 @@ async def _track_interaction(
             logger.warning(f"Feedback collector tracking failed: {e}")
 
     return err("No tracking backend available")
+    
+    # ========== Azure AI Search Management Tools ==========
+    
+    @mcp.tool()
+    async def manage_index(
+        action: str,
+        index_definition: Optional[Dict[str, Any]] = None,
+        index_name: Optional[str] = None,
+        update_if_different: bool = True,
+        backup_documents: bool = False
+    ) -> Dict[str, Any]:
+        """Manage Azure AI Search indexes.
+        
+        Actions:
+        - create: Create or update an index (requires index_definition)
+        - ensure: Ensure index exists with correct schema (requires index_definition)
+        - recreate: Drop and recreate index (requires index_definition)
+        - delete: Delete an index (requires index_name)
+        - optimize: Get optimization recommendations (requires index_name)
+        - validate: Validate index schema (requires index_name)
+        - list: List all indexes with stats
+        """
+        if not _check_component(server.index_automation, "Index automation"):
+            return err("Index automation not available")
+        
+        if not Config.ADMIN_MODE and action in ["create", "recreate", "delete"]:
+            return err("Admin mode required for destructive operations")
+            
+        try:
+            if action == "create" or action == "ensure":
+                if not index_definition:
+                    return err("index_definition required for create/ensure")
+                result = await server.index_automation.ensure_index_exists(
+                    index_definition, update_if_different
+                )
+                return ok(result)
+                
+            elif action == "recreate":
+                if not index_definition:
+                    return err("index_definition required for recreate")
+                result = await server.index_automation.recreate_index(
+                    index_definition, backup_documents
+                )
+                return ok(result)
+                
+            elif action == "delete":
+                if not index_name:
+                    return err("index_name required for delete")
+                await server.rest_ops.delete_index(index_name)
+                return ok({"deleted": True, "index": index_name})
+                
+            elif action == "optimize":
+                if not index_name:
+                    return err("index_name required for optimize")
+                result = await server.index_automation.optimize_index(index_name)
+                return ok(result)
+                
+            elif action == "validate":
+                if not index_name:
+                    return err("index_name required for validate")
+                result = await server.index_automation.validate_index_schema(
+                    index_name, index_definition
+                )
+                return ok(result)
+                
+            elif action == "list":
+                result = await server.index_automation.list_indexes_with_stats()
+                return ok({"indexes": result})
+                
+            else:
+                return err(f"Invalid action: {action}")
+                
+        except Exception as e:
+            return err(str(e))
+    
+    @mcp.tool()
+    async def manage_documents(
+        action: str,
+        index_name: str,
+        documents: Optional[List[Dict[str, Any]]] = None,
+        document_keys: Optional[List[str]] = None,
+        filter_query: Optional[str] = None,
+        batch_size: int = 1000,
+        merge: bool = False,
+        days_old: Optional[int] = None,
+        date_field: Optional[str] = None,
+        dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Manage documents in Azure AI Search.
+        
+        Actions:
+        - upload: Upload documents (requires documents)
+        - delete: Delete documents by key (requires document_keys)
+        - cleanup: Delete old documents (requires days_old and date_field)
+        - count: Get document count
+        - verify: Verify document integrity
+        """
+        if not _check_component(server.data_automation, "Data automation"):
+            return err("Data automation not available")
+            
+        if not Config.ADMIN_MODE and action in ["upload", "delete", "cleanup"]:
+            return err("Admin mode required for document modifications")
+            
+        try:
+            if action == "upload":
+                if not documents:
+                    return err("documents required for upload")
+                
+                # Convert list to async generator
+                async def doc_generator():
+                    for doc in documents:
+                        yield doc
+                
+                result = await server.data_automation.bulk_upload(
+                    index_name, doc_generator(), batch_size, merge
+                )
+                return ok(result)
+                
+            elif action == "delete":
+                if not document_keys:
+                    return err("document_keys required for delete")
+                result = await server.rest_ops.delete_documents(index_name, document_keys)
+                return ok({"deleted": len(document_keys), "index": index_name})
+                
+            elif action == "cleanup":
+                if not days_old or not date_field:
+                    return err("days_old and date_field required for cleanup")
+                result = await server.data_automation.cleanup_old_documents(
+                    index_name, date_field, days_old, batch_size, dry_run
+                )
+                return ok(result)
+                
+            elif action == "count":
+                count = await server.rest_ops.count_documents(index_name)
+                return ok({"count": count, "index": index_name})
+                
+            elif action == "verify":
+                result = await server.data_automation.verify_documents(
+                    index_name, sample_size=100
+                )
+                return ok(result)
+                
+            else:
+                return err(f"Invalid action: {action}")
+                
+        except Exception as e:
+            return err(str(e))
+    
+    @mcp.tool()
+    async def manage_indexer(
+        action: str,
+        indexer_name: Optional[str] = None,
+        indexer_definition: Optional[Dict[str, Any]] = None,
+        datasource_definition: Optional[Dict[str, Any]] = None,
+        skillset_definition: Optional[Dict[str, Any]] = None,
+        wait_for_completion: bool = False,
+        lookback_hours: int = 24
+    ) -> Dict[str, Any]:
+        """Manage Azure AI Search indexers.
+        
+        Actions:
+        - create: Create indexer (requires indexer_definition)
+        - delete: Delete indexer (requires indexer_name)
+        - run: Run indexer on demand (requires indexer_name)
+        - reset: Reset indexer (requires indexer_name)
+        - status: Get indexer status (requires indexer_name)
+        - health: Monitor indexer health (requires indexer_name)
+        - list: List all indexers
+        """
+        if not _check_component(server.indexer_automation, "Indexer automation"):
+            return err("Indexer automation not available")
+            
+        if not Config.ADMIN_MODE and action in ["create", "delete", "reset"]:
+            return err("Admin mode required for indexer modifications")
+            
+        try:
+            if action == "create":
+                if not indexer_definition:
+                    return err("indexer_definition required for create")
+                    
+                # Create datasource if provided
+                if datasource_definition:
+                    await server.rest_ops.create_datasource(datasource_definition)
+                    
+                # Create skillset if provided
+                if skillset_definition:
+                    await server.rest_ops.create_skillset(skillset_definition)
+                    
+                result = await server.rest_ops.create_indexer(indexer_definition)
+                return ok({"created": True, "indexer": result})
+                
+            elif action == "delete":
+                if not indexer_name:
+                    return err("indexer_name required for delete")
+                await server.rest_ops.delete_indexer(indexer_name)
+                return ok({"deleted": True, "indexer": indexer_name})
+                
+            elif action == "run":
+                if not indexer_name:
+                    return err("indexer_name required for run")
+                result = await server.indexer_automation.reset_and_run_indexer(
+                    indexer_name, wait_for_completion
+                )
+                return ok(result)
+                
+            elif action == "reset":
+                if not indexer_name:
+                    return err("indexer_name required for reset")
+                await server.rest_ops.reset_indexer(indexer_name)
+                return ok({"reset": True, "indexer": indexer_name})
+                
+            elif action == "status":
+                if not indexer_name:
+                    return err("indexer_name required for status")
+                result = await server.rest_ops.get_indexer_status(indexer_name)
+                return ok(result)
+                
+            elif action == "health":
+                if not indexer_name:
+                    return err("indexer_name required for health")
+                result = await server.indexer_automation.monitor_indexer_health(
+                    indexer_name, lookback_hours
+                )
+                return ok(result)
+                
+            elif action == "list":
+                result = await server.rest_ops.list_indexers()
+                return ok({"indexers": result})
+                
+            else:
+                return err(f"Invalid action: {action}")
+                
+        except Exception as e:
+            return err(str(e))
+    
+    @mcp.tool()
+    async def health_check() -> Dict[str, Any]:
+        """Get comprehensive health status of Azure AI Search service."""
+        if not _check_component(server.health_monitor, "Health monitor"):
+            return err("Health monitor not available")
+            
+        try:
+            result = await server.health_monitor.get_full_health_report()
+            return ok(result)
+        except Exception as e:
+            return err(str(e))
+    
+    @mcp.tool()
+    async def create_datasource(
+        datasource_type: str,
+        name: str,
+        connection_string: str,
+        container: str,
+        query: Optional[str] = None,
+        change_detection_column: Optional[str] = None,
+        delete_detection_column: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a data source for indexers.
+        
+        Args:
+            datasource_type: Type of datasource (azureblob, azuresql, cosmosdb)
+            name: Data source name
+            connection_string: Connection string
+            container: Container/table name
+            query: Optional query/filter
+            change_detection_column: Column for change tracking (SQL)
+            delete_detection_column: Column for soft delete detection
+        """
+        if not _check_component(server.rest_ops, "REST operations"):
+            return err("REST operations not available")
+            
+        if not Config.ADMIN_MODE:
+            return err("Admin mode required for datasource creation")
+            
+        try:
+            from enhanced_rag.azure_integration.rest.models import (
+                create_blob_datasource,
+                create_sql_datasource
+            )
+            
+            if datasource_type == "azureblob":
+                datasource = create_blob_datasource(
+                    name=name,
+                    connection_string=connection_string,
+                    container_name=container,
+                    query=query
+                )
+            elif datasource_type == "azuresql":
+                datasource = create_sql_datasource(
+                    name=name,
+                    connection_string=connection_string,
+                    table_or_view=container,
+                    change_detection_policy={
+                        "@odata.type": "#Microsoft.Azure.Search.HighWaterMarkChangeDetectionPolicy",
+                        "highWaterMarkColumnName": change_detection_column
+                    } if change_detection_column else None,
+                    delete_detection_policy={
+                        "@odata.type": "#Microsoft.Azure.Search.SoftDeleteColumnDeletionDetectionPolicy",
+                        "softDeleteColumnName": delete_detection_column,
+                        "softDeleteMarkerValue": "true"
+                    } if delete_detection_column else None
+                )
+            else:
+                return err(f"Unsupported datasource type: {datasource_type}")
+                
+            result = await server.rest_ops.create_datasource(datasource)
+            return ok({"created": True, "datasource": result})
+        except Exception as e:
+            return err(str(e))
+    
+    @mcp.tool()
+    async def create_skillset(
+        name: str,
+        skills: List[Dict[str, Any]],
+        cognitive_services_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a skillset for cognitive enrichment.
+        
+        Args:
+            name: Skillset name
+            skills: List of skill definitions
+            cognitive_services_key: Optional cognitive services key
+        """
+        if not _check_component(server.rest_ops, "REST operations"):
+            return err("REST operations not available")
+            
+        if not Config.ADMIN_MODE:
+            return err("Admin mode required for skillset creation")
+            
+        try:
+            skillset_def = {
+                "name": name,
+                "skills": skills
+            }
+            
+            if cognitive_services_key:
+                skillset_def["cognitiveServices"] = {
+                    "@odata.type": "#Microsoft.Azure.Search.CognitiveServicesByKey",
+                    "key": cognitive_services_key
+                }
+                
+            result = await server.rest_ops.create_skillset(skillset_def)
+            return ok({"created": True, "skillset": result})
+        except Exception as e:
+            return err(str(e))
