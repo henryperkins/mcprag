@@ -56,21 +56,21 @@ class EnhancedIndexBuilder:
     Builds optimized search indexes with all advanced features
     Based on Azure AI Search best practices from createindex.md
     """
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or get_config().azure.model_dump()
         self.index_client = self._create_index_client()
-        
+
     def _create_index_client(self) -> SearchIndexClient:
         """Create Azure Search index client"""
         endpoint = self.config['endpoint']
         api_key = self.config['admin_key']
-        
+
         return SearchIndexClient(
             endpoint=endpoint,
             credential=AzureKeyCredential(api_key)
         )
-    
+
     async def create_enhanced_rag_index(
         self,
         index_name: str,
@@ -81,49 +81,64 @@ class EnhancedIndexBuilder:
     ) -> SearchIndex:
         """
         Create an enhanced index optimized for RAG scenarios
-        
+
         Args:
             index_name: Name of the index
             description: Human-readable description
             enable_vectors: Enable vector search capabilities
             enable_semantic: Enable semantic ranking
             custom_analyzers: Optional custom analyzers
-            
+
         Returns:
             Created search index
         """
-        # Build comprehensive field collection
+        # Build comprehensive field collection (without vector field)
         fields = self._build_enhanced_fields()
-        
-        # Add vector search configuration
-        vector_search = (
-            self._build_vector_search_config()
-            if enable_vectors else None
-        )
-        
+
+        # ------------------------------------------------------------------
+        # Vector section – add only if enable_vectors is True
+        # ------------------------------------------------------------------
+        vector_search = None
+        if enable_vectors:
+            # Add vector field with proper configuration
+            vector_dimensions = get_config().embedding.dimensions
+            vector_field = SearchField(
+                name="content_vector",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                searchable=True,
+                retrievable=False,  # Set to False to save storage
+                stored=False,  # Reduces storage for compressed vectors
+                vector_search_dimensions=vector_dimensions,
+                vector_search_profile_name="vector-profile-hnsw"
+            )
+            fields.append(vector_field)
+
+            # Build vector search configuration only when vectors are enabled
+            vector_search = self._build_vector_search_config()
+
         # Add semantic configuration
         semantic_search = (
             self._build_semantic_config()
             if enable_semantic else None
         )
-        
+
         # Build scoring profiles
         scoring_profiles = self._build_scoring_profiles()
-        
+
         # Build suggesters
         suggesters = self._build_suggesters()
-        
+
         # Build analyzers
         analyzers = self._build_code_analyzers()
         if custom_analyzers:
             analyzers.extend(custom_analyzers)
-        
+
         # Configure CORS for browser-based access
         cors_options = CorsOptions(
             allowed_origins=["*"],  # Configure appropriately for production
             max_age_in_seconds=300
         )
-        
+
         # Create or update synonym map resource
         code_synonyms = SynonymMap(
             name="code_synonyms",
@@ -173,9 +188,9 @@ class EnhancedIndexBuilder:
                     f.synonym_map_names = [compliant_synonym_name for _ in names]
         except Exception:
             pass
-        
+
         # SDK lacks a typed 'description' field on SearchIndex; skipping.
-        
+
         try:
             # Ensure synonym map exists/updated before index (idempotent) with compliant name
             from azure.search.documents.indexes.models import SynonymMap as _SynonymMap  # import at outer scope of try
@@ -200,11 +215,11 @@ class EnhancedIndexBuilder:
         except Exception as e:
             logger.error(f"Error creating index '{index_name}': {e}")
             raise
-    
+
     def _build_enhanced_fields(self) -> List[SearchField]:
         """Build comprehensive field collection for enhanced RAG"""
         fields = []
-        
+
         # Document key (required)
         fields.append(
             SimpleField(
@@ -215,7 +230,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         # Core content fields
         fields.extend([
             SearchableField(
@@ -295,7 +310,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         ])
-        
+
         fields.append(
             SimpleField(
                 name="chunk_id",
@@ -304,7 +319,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SearchableField(
                 name="semantic_context",
@@ -313,7 +328,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="chunk_type",
@@ -323,7 +338,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         # Code-specific searchable fields
         fields.append(
             SearchableField(
@@ -335,7 +350,7 @@ class EnhancedIndexBuilder:
                 facetable=True
             )
         )
-        
+
         fields.append(
             SearchableField(
                 name="class_name",
@@ -346,7 +361,7 @@ class EnhancedIndexBuilder:
                 facetable=True
             )
         )
-        
+
         # Import/dependency tracking
         fields.append(
             SearchField(
@@ -359,7 +374,7 @@ class EnhancedIndexBuilder:
                 # Note: Custom analyzers not supported on Collection fields
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="dependencies",
@@ -369,7 +384,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         # Documentation fields
         fields.append(
             SearchableField(
@@ -380,7 +395,7 @@ class EnhancedIndexBuilder:
                 analyzer_name="en.microsoft"
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="signature",
@@ -388,7 +403,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SearchableField(
                 name="comments",
@@ -398,7 +413,7 @@ class EnhancedIndexBuilder:
                 analyzer_name="en.microsoft"
             )
         )
-        
+
         # Framework field
         fields.append(
             SimpleField(
@@ -409,7 +424,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         # Scoring-related fields
         fields.append(
             SimpleField(
@@ -420,7 +435,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="test_coverage",
@@ -430,7 +445,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="reference_count",
@@ -440,7 +455,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         # Tag collection for boost scoring
         fields.append(
             SimpleField(
@@ -453,23 +468,10 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
-        # IMPORTANT: vector_search_dimensions must match both indexer-side embedding skill dimensions
-        # (when integrated vectorization is used) and client-side provider.dimensions when used.
-        # Vector field for semantic similarity
-        fields.append(
-            SearchField(
-                name="content_vector",
-                type=SearchFieldDataType.Collection(
-                    SearchFieldDataType.Single
-                ),
-                searchable=True,
-                retrievable=False,  # Set to False to save storage
-                vector_search_dimensions=get_config().embedding.dimensions,
-                vector_search_profile_name="vector-profile-hnsw"
-            )
-        )
-        
+
+        # Vector field is now handled conditionally in create_enhanced_rag_index
+        # based on the enable_vectors parameter
+
         # Line number tracking
         fields.append(
             SimpleField(
@@ -479,7 +481,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="end_line",
@@ -488,18 +490,31 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
-        # Git metadata
+
+        # ----- repository & branch metadata ---------------------------------
         fields.append(
-            SimpleField(
-                name="git_branch",
+            SearchField(
+                name="repository",
                 type=SearchFieldDataType.String,
+                searchable=False,
                 filterable=True,
                 facetable=True,
-                retrievable=True
+                sortable=True,
+                retrievable=True,
             )
         )
-        
+        fields.append(
+            SearchField(
+                name="git_branch",
+                type=SearchFieldDataType.String,
+                searchable=False,
+                filterable=True,
+                facetable=True,
+                sortable=True,
+                retrievable=True,
+            )
+        )
+
         fields.append(
             SimpleField(
                 name="git_commit",
@@ -526,7 +541,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="git_authors",
@@ -538,7 +553,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         # Patterns and intent optimization
         fields.append(
             SimpleField(
@@ -551,7 +566,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         fields.append(
             SimpleField(
                 name="intent_keywords",
@@ -562,18 +577,18 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         )
-        
+
         return fields
-    
+
     def _build_vector_search_config(self) -> VectorSearch:
         """Build vector search configuration"""
         # Define the vectorizers
         vectorizers = []
-        
+
         # Add Azure OpenAI vectorizer for integrated vectorization
         azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         azure_openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-        
+
         if azure_openai_endpoint and azure_openai_deployment:
             vectorizers.append(
                 AzureOpenAIVectorizer(
@@ -585,7 +600,7 @@ class EnhancedIndexBuilder:
                     }
                 )
             )
-        
+
         # Also support custom vectorizer if configured
         vectorizer_config = self.config.get('custom_vectorizer')
         if vectorizer_config and vectorizer_config.get('uri'):
@@ -601,7 +616,7 @@ class EnhancedIndexBuilder:
                     custom_web_api_parameters=custom_vectorizer.to_dict()['customWebApiParameters']
                 )
             )
-        
+
         chosen_vectorizer_name = None
         if azure_openai_endpoint and azure_openai_deployment:
             chosen_vectorizer_name = "text-embedding-3-large-vectorizer"
@@ -632,7 +647,7 @@ class EnhancedIndexBuilder:
                 )
 
         return vector_search
-    
+
     def _build_semantic_config(self) -> SemanticSearch:
         """Build semantic search configuration"""
         return SemanticSearch(
@@ -654,7 +669,7 @@ class EnhancedIndexBuilder:
                 )
             ]
         )
-    
+
     def _build_scoring_profiles(self) -> List[ScoringProfile]:
         """Build scoring profiles for different scenarios"""
         return [
@@ -692,7 +707,7 @@ class EnhancedIndexBuilder:
                 ],
                 function_aggregation=ScoringFunctionAggregation.SUM
             ),
-            
+
             # Boost recent code
             ScoringProfile(
                 name="freshness_boost",
@@ -713,7 +728,7 @@ class EnhancedIndexBuilder:
                     )
                 ]
             ),
-            
+
             # Boost popular/referenced code
             ScoringProfile(
                 name="popularity_boost",
@@ -730,7 +745,7 @@ class EnhancedIndexBuilder:
                     )
                 ]
             ),
-            
+
             # Tag-based boosting
             ScoringProfile(
                 name="tag_boost",
@@ -746,7 +761,7 @@ class EnhancedIndexBuilder:
                 ]
             )
         ]
-    
+
     def _build_suggesters(self) -> List[SearchSuggester]:
         """Build suggesters for autocomplete"""
         # Ensure suggester only references existing fields in this schema
@@ -756,7 +771,7 @@ class EnhancedIndexBuilder:
                 source_fields=["function_name", "class_name", "file_path"]
             )
         ]
-    
+
     def _build_code_analyzers(self) -> List[CustomAnalyzer]:
         """Build custom analyzers for code"""
         return [
@@ -769,7 +784,7 @@ class EnhancedIndexBuilder:
                     TokenFilterName.STOPWORDS
                 ]
             ),
-            
+
             # Analyzer for code identifiers (camelCase, snake_case)
             CustomAnalyzer(
                 name="code_identifier_analyzer",
@@ -778,7 +793,7 @@ class EnhancedIndexBuilder:
                     TokenFilterName.LOWERCASE
                 ]
             ),
-            
+
             # Analyzer for import paths
             CustomAnalyzer(
                 name="import_path_analyzer",
@@ -786,7 +801,7 @@ class EnhancedIndexBuilder:
                 token_filters=[TokenFilterName.LOWERCASE]
             )
         ]
-    
+
     async def create_intent_optimized_indexes(
         self,
         base_name: str,
@@ -794,16 +809,16 @@ class EnhancedIndexBuilder:
     ) -> Dict[SearchIntent, str]:
         """
         Create separate indexes optimized for different intents
-        
+
         Args:
             base_name: Base name for indexes
             description_template: Template for descriptions
-            
+
         Returns:
             Mapping of intent to index name
         """
         intent_indexes = {}
-        
+
         # Define intent-specific optimizations
         intent_configs = {
             SearchIntent.IMPLEMENT: {
@@ -847,10 +862,10 @@ class EnhancedIndexBuilder:
                 ]
             }
         }
-        
+
         for intent, config in intent_configs.items():
             index_name = f"{base_name}-{config['suffix']}"
-            
+
             # Create intent-specific index
             await self.create_enhanced_rag_index(
                 index_name=index_name,
@@ -858,11 +873,11 @@ class EnhancedIndexBuilder:
                 enable_vectors=True,
                 enable_semantic=True
             )
-            
+
             intent_indexes[intent] = index_name
-            
+
         return intent_indexes
-    
+
     async def update_index_analyzers(
         self,
         index_name: str,
@@ -871,31 +886,31 @@ class EnhancedIndexBuilder:
         """
         Update analyzers on existing index
         Note: Only searchAnalyzer can be updated on existing fields
-        
+
         Returns:
             True if successful
         """
         try:
             # Get existing index
             index = self.index_client.get_index(index_name)
-            
+
             # Add new analyzers
             if not index.analyzers:
                 index.analyzers = []
             index.analyzers.extend(new_analyzers)
-            
+
             # Update the index
             self.index_client.create_or_update_index(index)
-            
+
             logger.info(f"Updated analyzers for index '{index_name}'")
             return True
-            
+
         except Exception as e:
             logger.error(
                 f"Error updating analyzers for index '{index_name}': {e}"
             )
             return False
-    
+
     async def validate_index_schema(
         self,
         index_name: str,
@@ -903,16 +918,16 @@ class EnhancedIndexBuilder:
     ) -> Dict[str, Any]:
         """
         Validate that index has expected schema
-        
+
         Returns:
             Validation results
         """
         try:
             index = self.index_client.get_index(index_name)
-            
+
             existing_fields = {field.name for field in index.fields}
             expected_set = set(expected_fields)
-            
+
             return {
                 'valid': expected_set.issubset(existing_fields),
                 'missing_fields': list(expected_set - existing_fields),
@@ -924,11 +939,11 @@ class EnhancedIndexBuilder:
                     p.name for p in (index.scoring_profiles or [])
                 ]
             }
-            
+
         except Exception as e:
             logger.error(f"Error validating index '{index_name}': {e}")
             return {'error': str(e)}
-    
+
     async def validate_vector_dimensions(
         self,
         index_name: str,
@@ -936,24 +951,24 @@ class EnhancedIndexBuilder:
     ) -> Dict[str, Any]:
         """
         Validate that the index has the expected vector dimensions.
-        
+
         Args:
             index_name: Name of the index to validate
             expected: Expected vector dimensions
-            
+
         Returns:
             Validation results with 'ok', 'actual', 'expected', and 'message' fields
         """
         try:
             index = self.index_client.get_index(index_name)
-            
+
             # Find the content_vector field
             vector_field = None
             for field in index.fields:
                 if field.name == "content_vector" and hasattr(field, 'vector_search_dimensions'):
                     vector_field = field
                     break
-            
+
             if not vector_field:
                 return {
                     'ok': False,
@@ -961,9 +976,9 @@ class EnhancedIndexBuilder:
                     'expected': expected,
                     'message': f"No 'content_vector' field found in index '{index_name}'"
                 }
-            
+
             actual_dims = getattr(vector_field, 'vector_search_dimensions', None)
-            
+
             if actual_dims is None:
                 return {
                     'ok': False,
@@ -971,9 +986,9 @@ class EnhancedIndexBuilder:
                     'expected': expected,
                     'message': f"Field 'content_vector' exists but has no vector_search_dimensions"
                 }
-            
+
             ok = actual_dims == expected
-            
+
             if ok:
                 message = f"Vector dimensions match: {actual_dims}"
             else:
@@ -981,12 +996,12 @@ class EnhancedIndexBuilder:
                     f"Vector dimension mismatch in index '{index_name}': "
                     f"expected {expected}, actual {actual_dims}"
                 )
-            
+
             # Optionally include configured vectorizers
             vectorizers = []
             if index.vector_search and hasattr(index.vector_search, 'vectorizers'):
                 vectorizers = [v.name for v in (index.vector_search.vectorizers or [])]
-            
+
             return {
                 'ok': ok,
                 'actual': actual_dims,
@@ -994,7 +1009,7 @@ class EnhancedIndexBuilder:
                 'message': message,
                 'vectorizers': vectorizers
             }
-            
+
         except Exception as e:
             logger.error(f"Error validating vector dimensions for '{index_name}': {e}")
             return {
@@ -1003,7 +1018,7 @@ class EnhancedIndexBuilder:
                 'expected': expected,
                 'message': f"Error accessing index: {str(e)}"
             }
-    
+
     def build_index(
         self,
         index_name: str,
@@ -1014,20 +1029,20 @@ class EnhancedIndexBuilder:
     ) -> SearchIndex:
         """
         Build an optimized index based on the createavectorindex.md documentation.
-        
+
         Args:
             index_name: Name of the index
             vector_dimensions: Vector dimensions (3072 for text-embedding-3-large)
             enable_integrated_vectorization: Enable Azure OpenAI vectorizer
             azure_openai_endpoint: Azure OpenAI endpoint for vectorization
             azure_openai_deployment: Azure OpenAI deployment name
-            
+
         Returns:
             SearchIndex object ready to be created
         """
         # Build fields including proper vector field configuration
         fields = []
-        
+
         # Document key
         fields.append(
             SimpleField(
@@ -1038,7 +1053,7 @@ class EnhancedIndexBuilder:
                 filterable=True
             )
         )
-        
+
         # Content fields (human-readable)
         fields.extend([
             SearchableField(
@@ -1091,7 +1106,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         ])
-        
+
         # Additional metadata fields from our enhanced schema
         fields.extend([
             SimpleField(
@@ -1136,7 +1151,7 @@ class EnhancedIndexBuilder:
                 retrievable=True
             )
         ])
-        
+
         # Vector field with proper configuration based on documentation
         vector_field = SearchField(
             name="content_vector",
@@ -1148,11 +1163,11 @@ class EnhancedIndexBuilder:
             vector_search_profile_name="vector-profile-hnsw"
         )
         fields.append(vector_field)
-        
+
         # Build vector search configuration
         vectorizers = []
         vectorizer_name = None
-        
+
         if enable_integrated_vectorization and azure_openai_endpoint:
             vectorizer_name = "vectorizer-1753995386159"
             vectorizers.append(
@@ -1165,7 +1180,7 @@ class EnhancedIndexBuilder:
                     }
                 )
             )
-        
+
         # HNSW algorithm configuration
         algorithm = HnswAlgorithmConfiguration(
             name="hnsw-algorithm",
@@ -1176,21 +1191,21 @@ class EnhancedIndexBuilder:
                 metric="cosine"  # For Azure OpenAI embeddings
             )
         )
-        
+
         # Vector profile
         vector_profile = VectorSearchProfile(
             name="vector-profile-hnsw",
             algorithm_configuration_name="hnsw-algorithm",
             vectorizer_name=vectorizer_name if enable_integrated_vectorization else None
         )
-        
+
         # Vector search configuration
         vector_search = VectorSearch(
             algorithms=[algorithm],
             profiles=[vector_profile],
             vectorizers=vectorizers if vectorizers else None
         )
-        
+
         # Semantic configuration for hybrid search
         semantic_config = SemanticConfiguration(
             name="semantic-config",
@@ -1206,11 +1221,11 @@ class EnhancedIndexBuilder:
                 ]
             )
         )
-        
+
         semantic_search = SemanticSearch(
             configurations=[semantic_config]
         )
-        
+
         # Create the index
         index = SearchIndex(
             name=index_name,
@@ -1222,16 +1237,16 @@ class EnhancedIndexBuilder:
                 max_age_in_seconds=300
             )
         )
-        
+
         return index
-    
+
     def create_or_update_index(self, index: SearchIndex) -> SearchIndex:
         """
         Create or update an index in Azure Search.
-        
+
         Args:
             index: SearchIndex object to create or update
-            
+
         Returns:
             Created/updated SearchIndex
         """

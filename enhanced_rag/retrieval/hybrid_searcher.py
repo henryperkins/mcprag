@@ -454,7 +454,11 @@ class HybridSearcher:
                         'language': result.get('language'),
                         'function_name': result.get('function_name'),
                         'class_name': result.get('class_name'),
-                        'highlights': result.get('@search.highlights', {})
+                        'highlights': result.get('@search.highlights', {}),
+                        'docstring': result.get('docstring'),
+                        'signature': result.get('signature'),
+                        'imports': result.get('imports'),
+                        'semantic_context': result.get('semantic_context')
                     }
                 ))
             except Exception as e:

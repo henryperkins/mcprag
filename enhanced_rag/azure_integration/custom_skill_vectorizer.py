@@ -23,18 +23,18 @@ logger = logging.getLogger(__name__)
 
 class CustomSkillBase(ABC):
     """Base class for custom skills"""
-    
+
     @abstractmethod
     async def process_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Process a single record"""
         pass
-    
+
     async def process_batch(
         self, values: List[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Process a batch of records"""
         results = []
-        
+
         for record in values:
             try:
                 result = await self.process_record(record['data'])
@@ -54,7 +54,7 @@ class CustomSkillBase(ABC):
                     'errors': [{'message': str(e)}],
                     'warnings': []
                 })
-        
+
         return {'values': results}
 
 
@@ -63,19 +63,19 @@ class CodeAnalyzerSkill(CustomSkillBase):
     Custom skill for analyzing code structure
     Extracts AST information, complexity metrics, and patterns
     """
-    
+
     def __init__(self):
         self.query_enhancer = ContextualQueryEnhancer()
-    
+
     async def process_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze code and extract structured information
-        
+
         Expected input:
         - code: The code content
         - language: Programming language
         - filePath: File path for context
-        
+
         Returns:
         - functions: List of function definitions
         - classes: List of class definitions
@@ -91,7 +91,7 @@ class CodeAnalyzerSkill(CustomSkillBase):
         imports = self._extract_imports(code, language)
         complexity = self._calculate_complexity(code, functions, classes)
         patterns = self._detect_patterns(code, language, functions, classes)
-        
+
         return {
             'functions': functions,
             'classes': classes,
@@ -99,7 +99,7 @@ class CodeAnalyzerSkill(CustomSkillBase):
             'complexity': complexity,
             'patterns': patterns
         }
-    
+
     def _extract_functions(
         self,
         code: str,
@@ -145,7 +145,7 @@ class CodeAnalyzerSkill(CustomSkillBase):
                     })
 
         return functions
-    
+
     def _extract_classes(
         self,
         code: str,
@@ -164,11 +164,11 @@ class CodeAnalyzerSkill(CustomSkillBase):
                 })
 
         return classes
-    
+
     def _extract_imports(self, code: str, language: str) -> List[str]:
         """Extract import statements"""
         imports = []
-        
+
         if language.lower() == 'python':
             import re
             patterns = [
@@ -185,9 +185,9 @@ class CodeAnalyzerSkill(CustomSkillBase):
             ]
             for pattern in patterns:
                 imports.extend(re.findall(pattern, code))
-        
+
         return list(set(imports))
-    
+
     def _calculate_complexity(
         self,
         code: str,
@@ -197,10 +197,10 @@ class CodeAnalyzerSkill(CustomSkillBase):
         """Calculate code complexity score"""
         # Simplified complexity calculation
         lines = code.split('\n')
-        
+
         # Base complexity from line count
         base_complexity = min(len(lines) / 100, 1.0)
-        
+
         # Add complexity for control structures
         control_keywords = [
             'if', 'else', 'elif', 'for', 'while',
@@ -213,21 +213,21 @@ class CodeAnalyzerSkill(CustomSkillBase):
             if keyword in line
         )
         control_complexity = min(control_count / 20, 1.0)
-        
+
         # Add complexity for nesting
         max_indent = 0
         for line in lines:
             indent = len(line) - len(line.lstrip())
             max_indent = max(max_indent, indent)
         indent_complexity = min(max_indent / 40, 1.0)
-        
+
         # Combine scores
         complexity = (
             base_complexity + control_complexity + indent_complexity
         ) / 3
-        
+
         return round(complexity, 2)
-    
+
     def _detect_patterns(
         self,
         code: str,
@@ -237,10 +237,10 @@ class CodeAnalyzerSkill(CustomSkillBase):
     ) -> List[str]:
         """Detect code patterns"""
         patterns = []
-        
+
         # Check for common patterns
         code_lower = code.lower()
-        
+
         # Design patterns
         if 'singleton' in code_lower or '_instance' in code_lower:
             patterns.append('singleton')
@@ -251,20 +251,20 @@ class CodeAnalyzerSkill(CustomSkillBase):
             patterns.append('factory')
         if 'observer' in code_lower or 'subscribe' in code_lower:
             patterns.append('observer')
-        
+
         # Async patterns
         if language.lower() in ['python', 'javascript', 'typescript']:
             if 'async' in code_lower:
                 patterns.append('async')
             if 'await' in code_lower:
                 patterns.append('async-await')
-        
+
         # Framework patterns
         if '@component' in code_lower or 'React.Component' in code:
             patterns.append('component-based')
         if '@injectable' in code_lower or 'dependency injection' in code_lower:
             patterns.append('dependency-injection')
-        
+
         return patterns
 
 
@@ -273,14 +273,14 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
     Custom skill for generating embeddings
     Can use various embedding models based on configuration
     """
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or get_config().embedding.model_dump()
         self.session: Optional[aiohttp.ClientSession] = None
         self._semaphore = asyncio.Semaphore(
             self.config.get('max_concurrent_requests', 5)
         )
-        
+
         # Initialize embedding provider based on config
         self.provider = None
         if self.config.get('provider') == 'client':
@@ -289,53 +289,56 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
         elif self.config.get('provider') == 'none':
             self.provider = None
         # else: provider remains None, will use azure_openai_http method
-        
+
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
-    
+
     async def process_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate embeddings for text or code
-        
+
         Expected input:
         - text: The text to embed
         - language: Optional programming language for code
-        
+
         Returns:
         - embedding: Vector embedding
         """
         text = data.get('text', '')
         language = data.get('language', 'text')
-        
+
         # Add language context to improve embeddings
         if language != 'text':
             text = f"[{language}] {text}"
-        
+
         # Generate embedding based on provider
         if self.provider is not None:
             # Use client-side embedding provider
             embedding = self.provider.generate_embedding(text)
-            if embedding and len(embedding) != self.config.get('dimensions', get_config().embedding.dimensions):
-                # Truncate or pad to match configured dimensions
-                dimensions = self.config.get('dimensions', get_config().embedding.dimensions)
-                if len(embedding) > dimensions:
-                    embedding = embedding[:dimensions]
-                else:
-                    embedding = embedding + [0.0] * (dimensions - len(embedding))
-            return {'embedding': embedding or []}
+            if embedding:
+                expected_dims = self.config.get('dimensions', get_config().embedding.dimensions)
+                if len(embedding) != expected_dims:
+                    logger.error(
+                        f"CRITICAL: Embedding dimension mismatch! "
+                        f"Got {len(embedding)}, expected {expected_dims}. "
+                        f"Index must be recreated with correct dimensions."
+                    )
+                    # Return None to prevent corrupted data
+                    return {'embedding': None, 'error': 'dimension_mismatch'}
+            return {'embedding': embedding}
         elif self.config.get('provider') == 'azure_openai_http':
             # Use existing Azure HTTP method
             embedding = await self._generate_azure_openai_embedding_with_retry(text)
             return {'embedding': embedding}
         else:
-            # Provider is 'none' or unknown - return empty embedding
-            return {'embedding': []}
-    
+            # Provider is 'none' or unknown - return None instead of zero vectors
+            return {'embedding': None, 'error': 'no_provider'}
+
     async def _generate_azure_openai_embedding(self, text: str) -> List[float]:
         """Generate embedding using Azure OpenAI"""
         if not self.session:
@@ -405,30 +408,30 @@ class EmbeddingGeneratorSkill(CustomSkillBase):
         # Fallback in case no return occurred above
         dims = int(self.config.get('dimensions', get_config().embedding.dimensions))
         return [0.0] * dims
-    
+
     def _generate_simple_embedding(self, text: str) -> List[float]:
         """Generate a simple embedding for testing"""
         # This is just for testing - use real embeddings in production
         import hashlib
-        
+
         # Generate deterministic "embedding" from text
         hash_obj = hashlib.sha256(text.encode())
         hash_bytes = hash_obj.digest()
-        
+
         # Convert to float values
         embedding = []
         for i in range(0, len(hash_bytes), 2):
             if i + 1 < len(hash_bytes):
                 value = (hash_bytes[i] + hash_bytes[i + 1]) / 510.0  # Normalize [0,1]
                 embedding.append(value)
-        
+
         # Pad or truncate to desired dimensions
         dimensions = self.config['dimensions']
         if len(embedding) < dimensions:
             embedding.extend([0.0] * (dimensions - len(embedding)))
         else:
             embedding = embedding[:dimensions]
-        
+
         return embedding
 
 
@@ -437,7 +440,7 @@ class CustomWebApiVectorizer:
     Custom Web API Vectorizer for query-time embeddings
     Based on the customskill.md vectorizer documentation
     """
-    
+
     def __init__(
         self,
         name: str,
@@ -463,7 +466,7 @@ class CustomWebApiVectorizer:
         # Circuit breaker state
         self._fail_count = 0
         self._open_until = 0.0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to Azure Search vectorizer definition"""
         return {
@@ -478,7 +481,7 @@ class CustomWebApiVectorizer:
                 "authIdentity": self.auth_identity
             }
         }
-    
+
     async def vectorize_query(
         self,
         query: str,
@@ -486,11 +489,11 @@ class CustomWebApiVectorizer:
     ) -> List[float]:
         """
         Vectorize a query using the custom endpoint
-        
+
         Args:
             query: Query text
             query_type: Type of query (text, imageUrl, imageBinary)
-            
+
         Returns:
             Vector embedding
         """
@@ -596,7 +599,7 @@ class GitMetadataExtractorSkill(CustomSkillBase):
     """
     Custom skill for extracting git metadata
     """
-    
+
     async def process_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extract git metadata for a file with input validation and safe subprocess usage.
@@ -673,36 +676,36 @@ class ContextAwareChunkingSkill(CustomSkillBase):
     Custom skill for intelligent code chunking
     Chunks based on code structure rather than arbitrary size
     """
-    
+
     def __init__(self, max_chunk_size: int = 2000, overlap_size: int = 200):
         self.max_chunk_size = max_chunk_size
         self.overlap_size = overlap_size
-    
+
     async def process_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Chunk code intelligently based on structure
-        
+
         Expected input:
         - code: The code content
         - language: Programming language
-        
+
         Returns:
         - chunks: List of code chunks with metadata
         """
         code = data.get('code', '')
         language = data.get('language', 'unknown')
-        
+
         # Simple line-based chunking with function awareness
         chunks = []
         lines = code.split('\n')
-        
+
         current_chunk = []
         current_size = 0
         chunk_start_line = 0
-        
+
         for i, line in enumerate(lines):
             line_size = len(line) + 1  # +1 for newline
-            
+
             # Check if adding this line would exceed chunk size
             if current_size + line_size > self.max_chunk_size and current_chunk:
                 # Save current chunk
@@ -712,16 +715,16 @@ class ContextAwareChunkingSkill(CustomSkillBase):
                     'end_line': i - 1,
                     'chunk_type': self._detect_chunk_type(current_chunk, language)
                 })
-                
+
                 # Start new chunk with overlap
                 overlap_lines = max(0, len(current_chunk) - 5)  # Last 5 lines
                 current_chunk = current_chunk[-overlap_lines:] if overlap_lines > 0 else []
                 current_size = sum(len(l) + 1 for l in current_chunk)
                 chunk_start_line = i - overlap_lines if overlap_lines > 0 else i
-            
+
             current_chunk.append(line)
             current_size += line_size
-        
+
         # Add final chunk
         if current_chunk:
             chunks.append({
@@ -730,15 +733,15 @@ class ContextAwareChunkingSkill(CustomSkillBase):
                 'end_line': len(lines) - 1,
                 'chunk_type': self._detect_chunk_type(current_chunk, language)
             })
-        
+
         return {
             'chunks': chunks
         }
-    
+
     def _detect_chunk_type(self, lines: List[str], language: str) -> str:
         """Detect the type of code in a chunk"""
         content = '\n'.join(lines).lower()
-        
+
         if any(keyword in content for keyword in ['function', 'def', 'func']):
             return 'function'
         elif 'class' in content:
@@ -755,9 +758,9 @@ async def create_code_analysis_endpoint(host: str = "0.0.0.0", port: int = 8080)
     This can be deployed as an Azure Function or container
     """
     from aiohttp import web
-    
+
     analyzer = CodeAnalyzerSkill()
-    
+
     async def handle_request(request: web.Request) -> web.Response:
         try:
             data = await request.json()
@@ -769,15 +772,15 @@ async def create_code_analysis_endpoint(host: str = "0.0.0.0", port: int = 8080)
                 {'error': str(e)},
                 status=500
             )
-    
+
     app = web.Application()
     app.router.add_post('/', handle_request)
-    
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
-    
+
     logger.info(f"Code analysis endpoint running on http://{host}:{port}")
-    
+
     return runner

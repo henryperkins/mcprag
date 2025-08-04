@@ -2,7 +2,7 @@
 
 Usage:
     python -m enhanced_rag.azure_integration.cli <command> [options]
-    
+
 Commands:
     local-repo          Index a local repository
     changed-files       Index specific changed files
@@ -15,11 +15,9 @@ import argparse
 import sys
 import asyncio
 from datetime import datetime
-from pathlib import Path
-from typing import List, Optional
 import logging
 
-from enhanced_rag.core.config import get_config
+from azure.core.exceptions import ResourceNotFoundError
 from .enhanced_index_builder import EnhancedIndexBuilder
 from .indexer_integration import IndexerIntegration, DataSourceType, LocalRepositoryIndexer
 from .reindex_operations import ReindexOperations, ReindexMethod
@@ -31,9 +29,9 @@ logger = logging.getLogger(__name__)
 async def cmd_local_repo(args):
     """Index a local repository."""
     logger.info(f"Indexing repository: {args.repo_path}")
-    
+
     indexer = LocalRepositoryIndexer()
-    
+
     # Parse file patterns if provided
     patterns = None
     if args.patterns:
@@ -48,7 +46,7 @@ async def cmd_local_repo(args):
                 patterns.append((pattern, 'typescript'))
             else:
                 logger.warning(f"Unknown pattern {pattern}, skipping")
-    
+
     # Determine embed_vectors setting
     embed_vectors = None
     if args.embed_vectors:
@@ -56,7 +54,7 @@ async def cmd_local_repo(args):
     elif args.no_embed_vectors:
         embed_vectors = False
     # else: None = auto-detect based on provider
-    
+
     # Run synchronous indexing in a thread pool to avoid blocking the event loop
     await asyncio.to_thread(
         indexer.index_repository,
@@ -65,14 +63,14 @@ async def cmd_local_repo(args):
         patterns=patterns,
         embed_vectors=embed_vectors
     )
-    
+
     logger.info("Repository indexing completed")
 
 
 async def cmd_changed_files(args):
     """Index specific changed files."""
     logger.info(f"Indexing {len(args.files)} changed files")
-    
+
     indexer = LocalRepositoryIndexer()
     # Run synchronous indexing in a thread pool to avoid blocking the event loop
     await asyncio.to_thread(
@@ -80,20 +78,30 @@ async def cmd_changed_files(args):
         file_paths=args.files,
         repo_name=args.repo_name
     )
-    
+
     logger.info("Changed files indexing completed")
 
 
 async def cmd_create_enhanced_index(args):
     """Create enhanced RAG index."""
     logger.info(f"Creating enhanced index: {args.name}")
-    
+
     builder = EnhancedIndexBuilder()
-    
+
+    # Handle --recreate flag: delete existing index if it exists
+    if args.recreate:
+        try:
+            builder.index_client.delete_index(args.name)
+            logger.info(f"Deleted existing index '{args.name}'")
+        except ResourceNotFoundError:
+            logger.info(f"Index '{args.name}' does not exist, proceeding with creation")
+        except Exception as e:
+            logger.warning(f"Error deleting index '{args.name}': {e}")
+
     # Determine feature flags
     enable_vectors = not args.no_vectors
     enable_semantic = not args.no_semantic
-    
+
     try:
         index = await builder.create_enhanced_rag_index(
             index_name=args.name,
@@ -110,22 +118,22 @@ async def cmd_create_enhanced_index(args):
     except Exception as e:
         logger.error(f"Failed to create index: {e}")
         return 1
-    
+
     return 0
 
 
 async def cmd_validate_index(args):
     """Validate index vector dimensions."""
     logger.info(f"Validating index: {args.name}")
-    
+
     builder = EnhancedIndexBuilder()
-    
+
     try:
         result = await builder.validate_vector_dimensions(
             index_name=args.name,
             expected=args.check_dimensions
         )
-        
+
         # Output JSON details if requested
         if args.json:
             import json
@@ -139,10 +147,10 @@ async def cmd_validate_index(args):
                     f"expected {result['expected']}, actual {result['actual']}"
                 )
             logger.info(result['message'])
-        
+
         # Return appropriate exit code
         return 0 if result['ok'] else 1
-        
+
     except Exception as e:
         if args.json:
             import json
@@ -160,9 +168,9 @@ async def cmd_validate_index(args):
 async def cmd_create_indexer(args):
     """Create Azure indexer."""
     logger.info(f"Creating indexer: {args.name}")
-    
+
     integration = IndexerIntegration()
-    
+
     try:
         indexer = await integration.create_code_repository_indexer(
             name=args.name,
@@ -176,20 +184,20 @@ async def cmd_create_indexer(args):
         logger.info(f"Successfully created indexer: {indexer.name}")
         logger.info(f"Target index: {indexer.target_index_name}")
         logger.info(f"Schedule: Every {args.schedule_minutes} minutes")
-        
+
     except Exception as e:
         logger.error(f"Failed to create indexer: {e}")
         return 1
-    
+
     return 0
 
 
 async def cmd_reindex(args):
     """Reindex content using various methods."""
     logger.info(f"Starting reindex with method: {args.method}")
-    
+
     reindex_ops = ReindexOperations()
-    
+
     try:
         if args.method == 'drop-rebuild':
             # Drop and rebuild index
@@ -197,12 +205,12 @@ async def cmd_reindex(args):
             if not success:
                 return 1
             logger.info("Index rebuilt. Use 'local-repo' command to repopulate.")
-            
+
         elif args.method == 'clear':
             # Clear documents
             count = await reindex_ops.clear_documents(args.filter)
             logger.info(f"Cleared {count} documents")
-            
+
         elif args.method == 'repository':
             # Reindex repository
             method = ReindexMethod.CLEAR_AND_RELOAD if args.clear_first else ReindexMethod.INCREMENTAL
@@ -214,7 +222,7 @@ async def cmd_reindex(args):
             )
             if not success:
                 return 1
-                
+
         elif args.method == 'status':
             # Get index status
             info = await reindex_ops.get_index_info()
@@ -223,7 +231,7 @@ async def cmd_reindex(args):
             print(f"Documents: {info.get('document_count', 0)}")
             print(f"Vector Search: {info.get('vector_search', False)}")
             print(f"Semantic Search: {info.get('semantic_search', False)}")
-            
+
         elif args.method == 'validate':
             # Validate schema
             validation = await reindex_ops.validate_index_schema()
@@ -236,7 +244,7 @@ async def cmd_reindex(args):
                 print("Warnings:")
                 for warning in validation['warnings']:
                     print(f"  - {warning}")
-                    
+
         elif args.method == 'backup':
             # Backup schema
             output_path = args.output or f"index_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -245,20 +253,20 @@ async def cmd_reindex(args):
                 logger.info(f"Schema backed up to {output_path}")
             else:
                 return 1
-                
+
     except Exception as e:
         logger.error(f"Reindex operation failed: {e}")
         return 1
-    
+
     return 0
 
 
 async def cmd_indexer_status(args):
     """Check indexer status."""
     logger.info(f"Checking indexer status: {args.name}")
-    
+
     reindex_ops = ReindexOperations()
-    
+
     try:
         status = await reindex_ops.get_indexer_status(args.name)
         if status:
@@ -277,11 +285,11 @@ async def cmd_indexer_status(args):
         else:
             logger.error(f"Indexer '{args.name}' not found")
             return 1
-            
+
     except Exception as e:
         logger.error(f"Failed to get indexer status: {e}")
         return 1
-    
+
     return 0
 
 
@@ -291,9 +299,9 @@ def main():
         description="Azure Integration CLI for Enhanced RAG",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     subparsers = parser.add_subparsers(dest='command', help='Commands')
-    
+
     # local-repo command
     repo_parser = subparsers.add_parser(
         'local-repo',
@@ -328,7 +336,7 @@ def main():
         action='store_true',
         help='Disable generation of embedding vectors'
     )
-    
+
     # changed-files command
     files_parser = subparsers.add_parser(
         'changed-files',
@@ -346,7 +354,7 @@ def main():
         required=True,
         help='Files to index'
     )
-    
+
     # create-enhanced-index command
     index_parser = subparsers.add_parser(
         'create-enhanced-index',
@@ -368,7 +376,12 @@ def main():
         action='store_true',
         help='Disable semantic search'
     )
-    
+    index_parser.add_argument(
+        '--recreate',
+        action='store_true',
+        help='Drop index if it already exists before creating'
+    )
+
     # validate-index command
     validate_parser = subparsers.add_parser(
         'validate-index',
@@ -391,7 +404,7 @@ def main():
         action='store_true',
         help='Output results as JSON'
     )
-    
+
     # create-indexer command
     indexer_parser = subparsers.add_parser(
         'create-indexer',
@@ -439,7 +452,7 @@ def main():
         action='store_true',
         help='Include git metadata extraction'
     )
-    
+
     # reindex command
     reindex_parser = subparsers.add_parser(
         'reindex',
@@ -483,7 +496,7 @@ def main():
         type=str,
         help='Output path for backup'
     )
-    
+
     # indexer-status command
     status_parser = subparsers.add_parser(
         'indexer-status',
@@ -495,13 +508,13 @@ def main():
         required=True,
         help='Indexer name'
     )
-    
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         return 1
-    
+
     # Command dispatch
     commands = {
         'local-repo': cmd_local_repo,
@@ -512,7 +525,7 @@ def main():
         'reindex': cmd_reindex,
         'indexer-status': cmd_indexer_status,
     }
-    
+
     if args.command in commands:
         try:
             # Run async command

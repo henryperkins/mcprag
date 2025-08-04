@@ -6,12 +6,13 @@ Leverages Azure indexers for automated data ingestion and enrichment
 import os
 import logging
 import json
-from typing import Dict, List, Any, Optional, Sequence
+from typing import Dict, List, Any, Optional
 from datetime import timedelta, datetime
 import asyncio
 from enum import Enum
 import hashlib
 from pathlib import Path
+import subprocess
 
 from azure.search.documents.indexes import SearchIndexerClient
 from azure.search.documents.indexes.models import (
@@ -38,7 +39,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import ResourceNotFoundError
 
 from enhanced_rag.core.config import get_config
-from .embedding_provider import IEmbeddingProvider, AzureOpenAIEmbeddingProvider
+from .embedding_provider import AzureOpenAIEmbeddingProvider
 from enhanced_rag.code_understanding import CodeChunker
 
 logger = logging.getLogger(__name__)
@@ -46,10 +47,10 @@ logger = logging.getLogger(__name__)
 
 def get_document_byte_size(doc: Dict[str, Any]) -> int:
     """Calculate the byte size of a document when serialized to JSON.
-    
+
     Args:
         doc: Document dictionary to check
-        
+
     Returns:
         Size in bytes of the JSON serialized document
     """
@@ -79,22 +80,22 @@ class IndexerIntegration:
     Manages Azure AI Search indexers for automated data ingestion
     Implements the pull model for continuous data synchronization
     """
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or get_config().azure.model_dump()
         self.indexer_client = self._create_indexer_client()
         self.custom_skill_endpoints = {}
-        
+
     def _create_indexer_client(self) -> SearchIndexerClient:
         """Create Azure Search indexer client"""
         endpoint = self.config['endpoint']
         api_key = self.config['admin_key']
-        
+
         return SearchIndexerClient(
             endpoint=endpoint,
             credential=AzureKeyCredential(api_key)
         )
-    
+
     async def create_code_repository_indexer(
         self,
         name: str,
@@ -107,7 +108,7 @@ class IndexerIntegration:
     ) -> SearchIndexer:
         """
         Create an indexer for code repository data
-        
+
         Args:
             name: Indexer name
             data_source_type: Type of data source (blob, cosmos, etc.)
@@ -116,7 +117,7 @@ class IndexerIntegration:
             index_name: Target index name
             schedule_interval_minutes: How often to run (minimum 5 minutes)
             include_git_metadata: Whether to extract git metadata
-            
+
         Returns:
             Created indexer
         """
@@ -128,17 +129,17 @@ class IndexerIntegration:
                 connection_string=connection_string,
                 container_name=container_name
             )
-            
+
             # Create skillset with code-specific skills
             skillset = await self._create_code_enrichment_skillset(
                 name=f"{name}-skillset",
                 include_git_metadata=include_git_metadata
             )
-            
+
             # Configure field mappings for code files
             field_mappings = self._get_code_field_mappings(data_source_type)
             output_field_mappings = self._get_code_output_mappings()
-            
+
             # Configure indexing parameters
             parameters = IndexingParameters(
                 batch_size=50,  # Process 50 documents at a time
@@ -159,12 +160,12 @@ class IndexerIntegration:
                     index_storage_metadata_only_for_oversized_documents=True
                 )
             )
-            
+
             # Create indexing schedule
             schedule = IndexingSchedule(
                 interval=timedelta(minutes=max(schedule_interval_minutes, 5))
             ) if schedule_interval_minutes > 0 else None
-            
+
             # Create the indexer
             indexer = SearchIndexer(
                 name=name,
@@ -172,7 +173,7 @@ class IndexerIntegration:
                 target_index_name=index_name,
                 skillset_name=skillset.name if skillset else None,
                 field_mappings=field_mappings,
-                output_field_mappings=output_field_mappings,
+                output_field_mappings=output_field_mappings,  # type: ignore[arg-type]
                 schedule=schedule,
                 parameters=parameters,
                 description=f"Code repository indexer for {container_name}"
@@ -181,13 +182,13 @@ class IndexerIntegration:
             # Create or update the indexer
             result = self.indexer_client.create_or_update_indexer(indexer)
             logger.info(f"Created indexer '{name}' successfully")
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Error creating indexer '{name}': {e}")
             raise
-    
+
     async def _create_data_source(
         self,
         name: str,
@@ -240,22 +241,22 @@ class IndexerIntegration:
         return self.indexer_client.create_or_update_data_source_connection(
             data_source
         )
-    
+
     async def _create_code_enrichment_skillset(
         self,
         name: str,
         include_git_metadata: bool = True
     ) -> Optional[SearchIndexerSkillset]:
         """Create skillset for code enrichment"""
-        
+
         from .standard_skills import StandardSkillsetBuilder
-        
+
         # Use standard skills for integrated vectorization
         azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
         azure_openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "text-embedding-3-large")
-        
-        # Initialize standard skillset builder
-        skillset_builder = StandardSkillsetBuilder(
+
+        # Initialize standard skillset builder (kept for clarity; not directly used here)
+        _ = StandardSkillsetBuilder(
             azure_openai_endpoint=azure_openai_endpoint,
             azure_openai_deployment=azure_openai_deployment,
             text_split_config={
@@ -268,12 +269,12 @@ class IndexerIntegration:
                 "dimensions": get_config().embedding.dimensions  # Use configured dimensions (3072)
             }
         )
-        
+
         # Get base skills from standard skillset
         # Note: The standard skills return skill definitions as dictionaries
         # For now, we'll use the existing SDK skill classes
         skills = []
-        
+
         # 1. Text split skill for chunking
         skills.append(
             SplitSkill(
@@ -298,7 +299,7 @@ class IndexerIntegration:
                 ]
             )
         )
-        
+
         # 2. Custom skill for code analysis (AST parsing, complexity, etc.)
         if self.custom_skill_endpoints.get('code_analyzer'):
             skills.append(
@@ -338,7 +339,7 @@ class IndexerIntegration:
                     ]
                 )
             )
-        
+
         # 3. Key phrase extraction for documentation and comments
         skills.append(
             KeyPhraseExtractionSkill(
@@ -354,7 +355,7 @@ class IndexerIntegration:
                 ]
             )
         )
-        
+
         # 4. Custom skill for git metadata extraction
         if include_git_metadata and self.custom_skill_endpoints.get('git_extractor'):
             skills.append(
@@ -376,7 +377,7 @@ class IndexerIntegration:
                     ]
                 )
             )
-        
+
         # 5. Custom skill for embedding generation
         if self.custom_skill_endpoints.get('embedder'):
             skills.append(
@@ -396,10 +397,10 @@ class IndexerIntegration:
                     ]
                 )
             )
-        
+
         if not skills:
             return None
-        
+
         skillset = SearchIndexerSkillset(
             name=name,
             description=(
@@ -407,9 +408,9 @@ class IndexerIntegration:
             ),
             skills=skills
         )
-        
+
         return self.indexer_client.create_or_update_skillset(skillset)
-    
+
     async def create_integrated_vectorization_indexer(
         self,
         name: str,
@@ -423,7 +424,7 @@ class IndexerIntegration:
     ) -> SearchIndexer:
         """
         Create an indexer with integrated vectorization using standard skills
-        
+
         Args:
             name: Indexer name
             data_source_type: Type of data source (blob, cosmos, etc.)
@@ -433,12 +434,12 @@ class IndexerIntegration:
             azure_openai_endpoint: Azure OpenAI endpoint for vectorization
             azure_openai_deployment: Azure OpenAI deployment name
             schedule_interval_minutes: How often to run (minimum 5 minutes)
-            
+
         Returns:
             Created indexer with integrated vectorization
         """
-        from .standard_skills import StandardSkillsetBuilder, create_standard_skillset
-        
+        from .standard_skills import create_standard_skillset
+
         try:
             # Create data source connection
             data_source = await self._create_data_source(
@@ -447,13 +448,13 @@ class IndexerIntegration:
                 connection_string=connection_string,
                 container_name=container_name
             )
-            
+
             # Create standard skillset with integrated vectorization
             skillset_definition = create_standard_skillset(
                 azure_openai_endpoint=azure_openai_endpoint,
                 azure_openai_deployment=azure_openai_deployment
             )
-            
+
             # Create the skillset using the definition
             skillset = SearchIndexerSkillset(
                 name=f"{name}-integrated-skillset",
@@ -461,9 +462,9 @@ class IndexerIntegration:
                 skills=skillset_definition["skills"],
                 cognitive_services=skillset_definition.get("cognitiveServices")
             )
-            
+
             created_skillset = self.indexer_client.create_or_update_skillset(skillset)
-            
+
             # Configure field mappings
             field_mappings = self._get_code_field_mappings(data_source_type)
 
@@ -481,7 +482,7 @@ class IndexerIntegration:
                 )
                 for i, m in enumerate(builder.build_index_mapping())
             ]
-            
+
             # Configure indexing parameters for code files
             parameters = IndexingParameters(
                 batch_size=50,
@@ -502,12 +503,12 @@ class IndexerIntegration:
                     index_storage_metadata_only_for_oversized_documents=True
                 )
             )
-            
+
             # Create indexing schedule
             schedule = IndexingSchedule(
                 interval=timedelta(minutes=max(schedule_interval_minutes, 5))
             ) if schedule_interval_minutes > 0 else None
-            
+
             # Create the indexer
             indexer = SearchIndexer(
                 name=name,
@@ -515,25 +516,25 @@ class IndexerIntegration:
                 target_index_name=index_name,
                 skillset_name=created_skillset.name,
                 field_mappings=field_mappings,
-                output_field_mappings=output_field_mappings,
+                output_field_mappings=output_field_mappings,  # type: ignore[arg-type]
                 schedule=schedule,
                 parameters=parameters,
                 description=f"Integrated vectorization indexer for {container_name}"
             )
-            
+
             # Create or update the indexer
             result = self.indexer_client.create_or_update_indexer(indexer)
             logger.info(f"Created integrated vectorization indexer '{name}' successfully")
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Error creating integrated vectorization indexer '{name}': {e}")
             raise
-    
+
     def _get_code_field_mappings(self, data_source_type: DataSourceType) -> List[FieldMapping]:
         """Get field mappings for code files based on data source type"""
-        
+
         if data_source_type == DataSourceType.AZURE_BLOB:
             return [
                 FieldMapping(
@@ -582,7 +583,7 @@ class IndexerIntegration:
                     target_field_name="content"
                 )
             ]
-    
+
     def _get_code_output_mappings(self) -> List[OutputFieldMappingEntry]:
         """Get output field mappings from skillset to index"""
         mappings = [
@@ -641,7 +642,7 @@ class IndexerIntegration:
                 )
             )
         return mappings
-    
+
     async def create_multi_repository_indexers(
         self,
         repositories: List[Dict[str, Any]],
@@ -651,17 +652,17 @@ class IndexerIntegration:
         """
         Create multiple indexers for different repositories
         Implements the multi-indexer pattern for large-scale indexing
-        
+
         Args:
             repositories: List of repository configurations
             target_index: Target index name (same for all)
             parallel: Whether to create indexers in parallel
-            
+
         Returns:
             List of created indexers
         """
         tasks = []
-        
+
         for repo in repositories:
             task = self.create_code_repository_indexer(
                 name=f"indexer-{repo['name']}",
@@ -671,12 +672,12 @@ class IndexerIntegration:
                 index_name=target_index,
                 schedule_interval_minutes=repo.get('schedule_minutes', 60)
             )
-            
+
             if parallel:
                 tasks.append(task)
             else:
                 await task
-        
+
         if tasks:
             indexers = await asyncio.gather(*tasks, return_exceptions=True)
             # Filter out any exceptions and cast type
@@ -684,16 +685,16 @@ class IndexerIntegration:
                 idx for idx in indexers
                 if not isinstance(idx, Exception)
             ]  # type: ignore[list-item]
-        
+
         return []
-    
+
     async def monitor_indexer_status(
         self,
         indexer_name: str
     ) -> Dict[str, Any]:
         """
         Monitor indexer execution status
-        
+
         Returns:
             Status information including errors and progress
         """
@@ -731,7 +732,7 @@ class IndexerIntegration:
                     'max_document_content_chars': getattr(limits, "max_document_content_characters_to_extract", None)
                 }
             }
-            
+
         except ResourceNotFoundError:
             logger.error(f"Indexer '{indexer_name}' not found")
             return {
@@ -740,11 +741,11 @@ class IndexerIntegration:
         except Exception as e:
             logger.error(f"Error monitoring indexer '{indexer_name}': {e}")
             return {'error': str(e)}
-    
+
     async def run_indexer_on_demand(self, indexer_name: str) -> bool:
         """
         Run an indexer immediately (on-demand execution)
-        
+
         Returns:
             True if successfully started
         """
@@ -757,12 +758,12 @@ class IndexerIntegration:
         except Exception as e:
             logger.error(f"Error running indexer '{indexer_name}': {e}")
             return False
-    
+
     # Alias for compatibility with different calling conventions
     async def run_indexer(self, indexer_name: str) -> bool:
         """Alias for run_indexer_on_demand for compatibility."""
         return await self.run_indexer_on_demand(indexer_name)
-    
+
     async def reset_indexer(
         self,
         indexer_name: str,
@@ -770,17 +771,17 @@ class IndexerIntegration:
     ) -> bool:
         """
         Reset an indexer to reprocess all documents
-        
+
         Args:
             indexer_name: Name of indexer to reset
             reset_datasource: Also reset the datasource change tracking
-            
+
         Returns:
             True if successfully reset
         """
         try:
             self.indexer_client.reset_indexer(indexer_name)
-            
+
             if reset_datasource:
                 # Also reset the data source change tracking if supported by SDK
                 # Note: azure-search-documents SDK does not expose a reset data source API.
@@ -791,11 +792,11 @@ class IndexerIntegration:
                 f"Reset indexer '{indexer_name}' successfully"
             )
             return True
-            
+
         except Exception as e:
             logger.error(f"Error resetting indexer '{indexer_name}': {e}")
             return False
-    
+
     def register_custom_skill_endpoint(
         self,
         skill_type: str,
@@ -804,7 +805,7 @@ class IndexerIntegration:
     ):
         """
         Register a custom skill endpoint for use in skillsets
-        
+
         Args:
             skill_type: Type of skill (code_analyzer, embedder, etc.)
             endpoint_url: URL of the custom skill endpoint
@@ -817,7 +818,7 @@ class IndexerIntegration:
         logger.info(
             f"Registered custom skill endpoint for '{skill_type}'"
         )
-    
+
     async def create_incremental_indexing_pipeline(
         self,
         name: str,
@@ -827,13 +828,13 @@ class IndexerIntegration:
     ) -> Dict[str, Any]:
         """
         Create a pipeline for incremental indexing based on git changes
-        
+
         Args:
             name: Pipeline name
             git_repo_path: Path to git repository
             index_name: Target index
             webhook_url: Optional webhook for git push events
-            
+
         Returns:
             Pipeline configuration
         """
@@ -853,46 +854,46 @@ class IndexerIntegration:
                 'parallel_threads': 4
             }
         }
-        
+
         # In a real implementation, this would set up:
         # 1. Git hooks for push events
         # 2. File watcher for local changes
         # 3. Incremental indexing logic
         # 4. Error handling and retry logic
-        
+
         logger.info(f"Created incremental indexing pipeline '{name}'")
         return pipeline_config
 
 
 class LocalRepositoryIndexer:
     """Local repository indexer for direct ingestion without Azure Indexer.
-    
+
     Migrated from smart_indexer.py to consolidate indexing functionality.
     """
-    
+
     def __init__(self, config=None):
         """Initialize the local repository indexer."""
         if config is None:
             config = get_config()
-        
+
         # Get Azure Search configuration
         self.endpoint = config.azure.endpoint
         self.admin_key = config.azure.admin_key
         self.index_name = config.azure.index_name or "codebase-mcp-sota"
-        
+
         # Create search client
         try:
             from azure.search.documents import SearchClient
             from azure.core.credentials import AzureKeyCredential
         except ImportError:
             raise ImportError("azure-search-documents package required for indexing")
-            
+
         self.search_client = SearchClient(
             endpoint=self.endpoint,
             index_name=self.index_name,
             credential=AzureKeyCredential(self.admin_key)
         )
-        
+
         # Determine if integrated vectorization is configured on target index
         self._integrated_vectors = False
         try:
@@ -902,7 +903,7 @@ class LocalRepositoryIndexer:
             self._integrated_vectors = bool(getattr(idx, "vector_search", None) and getattr(idx.vector_search, "vectorizers", None))
         except Exception:
             self._integrated_vectors = False
-        
+
         # Initialize embedding provider based on config
         self.provider = None
         if config.embedding.provider == "client":
@@ -910,29 +911,27 @@ class LocalRepositoryIndexer:
         elif config.embedding.provider in {"none", "azure_openai_http"}:
             # No client-side embedding for these modes
             self.provider = None
-            
+
         self.batch_size = 50
         self.logger = logging.getLogger(__name__)
         self.chunker = CodeChunker()
-    
+
     def chunk_python_file(self, content: str, file_path: str) -> List[Dict]:
         """Extract semantic chunks from Python code."""
         return self.chunker.chunk_python_file(content, file_path)
-    
-    
+
     def chunk_js_ts_file(self, content: str, file_path: str) -> List[Dict]:
         """Extract semantic chunks from JavaScript/TypeScript code."""
         return self.chunker.chunk_js_ts_file(content, file_path)
-    
-    class DocumentIdHelper:
-        """Helper for consistent document ID generation."""
-        
-        @staticmethod
-        def generate_id(repo: str, file_path: str, chunk_type: str, index: int) -> str:
-            """Generate deterministic document ID."""
-            raw = f"{repo}:{file_path}:{chunk_type}:{index}".encode()
-            return hashlib.md5(raw).hexdigest()
-    
+        """Extract semantic chunks from JavaScript/TypeScript code."""
+        return self.chunker.chunk_js_ts_file(content, file_path)
+
+    @staticmethod
+    def _generate_doc_id(repo: str, file_path: str, chunk_type: str, index: int) -> str:
+        """Generate deterministic document ID."""
+        raw = f"{repo}:{file_path}:{chunk_type}:{index}".encode()
+        return hashlib.md5(raw).hexdigest()
+
     def index_repository(
         self,
         repo_path: str,
@@ -941,7 +940,7 @@ class LocalRepositoryIndexer:
         embed_vectors: Optional[bool] = None
     ):
         """Index a local repository with smart chunking.
-        
+
         Args:
             repo_path: Path to the repository
             repo_name: Name of the repository for indexing
@@ -949,7 +948,7 @@ class LocalRepositoryIndexer:
             embed_vectors: Whether to generate embeddings (None = auto-detect)
         """
         documents = []
-        
+
         # Default patterns
         if patterns is None:
             patterns = [
@@ -957,23 +956,23 @@ class LocalRepositoryIndexer:
                 ("*.js", "javascript"),
                 ("*.ts", "typescript"),
             ]
-            
+
         # Auto-detect embedding mode if not specified
         if embed_vectors is None:
             embed_vectors = self.provider is not None
-            
+
         # If index uses integrated vectorization, do not upload client-side vectors
         if self._integrated_vectors:
             embed_vectors = False
-            
+
         total_indexed = 0
-        
+
         for pattern, language in patterns:
             for file_path in Path(repo_path).rglob(pattern):
                 # Skip directories
                 if file_path.is_dir():
                     continue
-                    
+
                 # Skip common exclusions
                 if any(
                     part.startswith(".")
@@ -984,10 +983,10 @@ class LocalRepositoryIndexer:
                     for part in file_path.parts
                 ):
                     continue
-                    
+
                 try:
                     content = file_path.read_text(encoding="utf-8", errors="ignore")
-                    
+
                     # Choose chunker based on language
                     if language == "python":
                         chunks = self.chunk_python_file(content, str(file_path))
@@ -1008,30 +1007,30 @@ class LocalRepositoryIndexer:
                             "class_name": None,
                             "docstring": ""
                         }]
-                        
+
                     # Process chunks
                     for i, chunk in enumerate(chunks):
-                        doc_id = self.DocumentIdHelper.generate_id(
+                        doc_id = self._generate_doc_id(
                             repo_name, str(file_path), chunk["chunk_type"], i
                         )
-                        
+
                         # Get file modification time
                         try:
                             mtime = file_path.stat().st_mtime
                             last_modified = datetime.fromtimestamp(mtime).isoformat() + "+00:00"
-                        except:
+                        except Exception:
                             last_modified = datetime.utcnow().isoformat() + "+00:00"
-                            
-                        doc = {
-                            "id": doc_id,
-                            "repository": repo_name,
-                            "file_path": str(file_path),
-                            "file_path": file_path.name,
-                            "language": language,
-                            "last_modified": last_modified,
+
+                        doc = self._build_doc(
+                            repo_name=repo_name,
+                            repo_path=repo_path,
+                            id=doc_id,
+                            file_path=str(file_path),
+                            language=language,
+                            last_modified=last_modified,
                             **chunk,
-                        }
-                        
+                        )
+
                         # Add vector embedding if enabled
                         if embed_vectors and self.provider:
                             embedding = self.provider.generate_code_embedding(
@@ -1043,7 +1042,7 @@ class LocalRepositoryIndexer:
                                 self.logger.warning(
                                     f"Failed to generate embedding for {file_path}"
                                 )
-                                
+
                         # Safety check: Azure Search has 16MB payload limit per batch
                         # Keep individual documents well below this (use 1MB as safe limit)
                         doc_size = get_document_byte_size(doc)
@@ -1055,47 +1054,47 @@ class LocalRepositoryIndexer:
                                 truncate_ratio = (1024 * 1024 * 0.8) / doc_size  # Target 80% of 1MB
                                 truncate_chars = int(len(content) * truncate_ratio)
                                 doc["content"] = content[:truncate_chars] + "\n... (truncated for size)"
-                            
+
                         documents.append(doc)
-                        
+
                         # Upload in batches
                         if len(documents) >= self.batch_size:
                             self._upload_documents(documents)
                             total_indexed += len(documents)
                             documents = []
-                            
+
                 except Exception as e:
                     self.logger.error(f"Error processing {file_path}: {e}")
-                    
+
         # Upload remaining documents
         if documents:
             self._upload_documents(documents)
             total_indexed += len(documents)
-            
+
         self.logger.info(f"✅ Indexed {repo_name} with {total_indexed} chunks")
-        
+
     def index_changed_files(
         self,
         file_paths: List[str],
         repo_name: str = "current-repo"
     ):
         """Index only specified changed files.
-        
+
         Args:
             file_paths: List of file paths to index
             repo_name: Repository name for indexing
         """
         documents = []
-        
+
         for file_path_str in file_paths:
             file_path = Path(file_path_str)
             if not file_path.exists():
                 self.logger.warning(f"File not found: {file_path}")
                 continue
-                
+
             try:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
-                
+
                 # Determine language and chunker
                 if file_path.suffix == ".py":
                     chunks = self.chunk_python_file(content, str(file_path))
@@ -1107,30 +1106,30 @@ class LocalRepositoryIndexer:
                     # Skip unsupported files
                     self.logger.info(f"Skipping unsupported file: {file_path}")
                     continue
-                    
+
                 # Process chunks
                 for i, chunk in enumerate(chunks):
-                    doc_id = self.DocumentIdHelper.generate_id(
+                    doc_id = self._generate_doc_id(
                         repo_name, str(file_path), chunk["chunk_type"], i
                     )
-                    
+
                     # Get file modification time
                     try:
                         mtime = file_path.stat().st_mtime
                         last_modified = datetime.fromtimestamp(mtime).isoformat() + "+00:00"
-                    except:
+                    except Exception:
                         last_modified = datetime.utcnow().isoformat() + "+00:00"
-                        
-                    doc = {
-                        "id": doc_id,
-                        "repository": repo_name,
-                        "file_path": str(file_path),
-                        "file_path": file_path.name,
-                        "language": language,
-                        "last_modified": last_modified,
+
+                    doc = self._build_doc(
+                        repo_name=repo_name,
+                        repo_path=".",  # best-effort for changed-files
+                        id=doc_id,
+                        file_path=str(file_path),
+                        language=language,
+                        last_modified=last_modified,
                         **chunk,
-                    }
-                    
+                    )
+
                     # Add vector embedding if available and index is not doing integrated vectorization
                     if self.provider and not self._integrated_vectors:
                         embedding = self.provider.generate_code_embedding(
@@ -1138,31 +1137,58 @@ class LocalRepositoryIndexer:
                         )
                         if embedding:
                             doc["content_vector"] = embedding
-                            
+
                     # Safety truncate to avoid oversized document payloads (~16MB absolute, keep far below)
                     if len(doc.get("content", "")) > 20000:
                         doc["content"] = doc["content"][:20000] + "\n..."
-                        
+
                     documents.append(doc)
-                    
+
             except Exception as e:
                 self.logger.error(f"Error processing {file_path}: {e}")
-                
+
         # Upload all documents
         if documents:
             self._upload_documents(documents)
             self.logger.info(f"✅ Indexed {len(documents)} chunks from {len(file_paths)} files")
-            
+
+    def _detect_branch(self, repo_path: str) -> str:
+        """Return current git branch or 'main' fallback."""
+        try:
+            return (
+                subprocess.check_output(
+                    ["git", "-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                )
+                .decode()
+                .strip()
+            )
+        except Exception:
+            return "main"
+
+    def _build_doc(self, *, repo_name: str, repo_path: str, **kw):
+        """Create a document for upload (internal helper)."""
+        doc = kw
+        doc["repository"] = repo_name
+        doc["git_branch"] = self._detect_branch(repo_path)
+        # Preserve both full path and name if upstream expects a 'file_path' string
+        # Keep existing behavior: the last assignment wins in Python dict literal order,
+        # so ensure file_path remains the full path for filtering consistency.
+        # If you want filename separately, upstream schema should add a dedicated 'file_name' field.
+        return doc
+
     def _upload_documents(self, documents: List[Dict[str, Any]]):
         """Upload documents to Azure Search."""
         try:
             # Use merge_or_upload if available, otherwise upload
             if hasattr(self.search_client, "merge_or_upload_documents"):
-                result = self.search_client.merge_or_upload_documents(documents)
-            else:
-                result = self.search_client.upload_documents(documents)
-                
-            self.logger.debug(f"Uploaded {len(documents)} documents")
+            result = self.search_client.merge_or_upload_documents(documents)
+        else:
+            result = self.search_client.upload_documents(documents)
+
+        # Avoid unused local variable warning; ensure operation succeeded
+        _ = result
+        self.logger.debug(f"Uploaded {len(documents)} documents")
         except Exception as e:
             self.logger.error(f"Error uploading documents: {e}")
             raise

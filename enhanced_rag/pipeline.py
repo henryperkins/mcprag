@@ -22,6 +22,10 @@ from .generation.response_generator import ResponseGenerator
 from .utils.performance_monitor import PerformanceMonitor
 from .utils.error_handler import ErrorHandler
 
+# Wire-in: Code understanding analyzers (AST + chunkers) for enhanced context/metadata
+from .code_understanding.ast_analyzer import ASTAnalyzer  # noqa: F401
+from .code_understanding.chunkers import CodeChunker      # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +81,10 @@ class RAGPipeline:
         # Initialize components
         self._initialize_components()
 
+        # Initialize code analyzers for downstream usage (context + metadata)
+        self._ast_analyzer = ASTAnalyzer(self.config.model_dump() if hasattr(self.config, "model_dump") else {})
+        self._code_chunker = CodeChunker()
+
         # Initialize vector search if enabled
         if self.config.retrieval.enable_vector_search:
             try:
@@ -90,8 +98,8 @@ class RAGPipeline:
         self._context_cache: Dict[str, CodeContext] = {}
         self._session_contexts: Dict[str, Dict[str, Any]] = {}
 
-        # Type annotation for ranker: either the improved ranker or the adaptive wrapper
-        self.ranker: Union[ImprovedContextualRanker, 'AdaptiveRanker']
+        # Type annotation for ranker uses base interface only to avoid forward-ref issues
+        self.ranker: ImprovedContextualRanker
 
     def _initialize_components(self):
         """Initialize all RAG pipeline components"""
@@ -118,11 +126,8 @@ class RAGPipeline:
             else:
                 self.ranking_monitor = None
 
-            # Create improved ranker at runtime; annotate as base interface for type checking
+            # Create improved ranker at runtime; use base type to keep type-checkers happy
             base_ranker = ImprovedContextualRanker(ranking_config)
-            # Help type checkers understand compatibility
-            if TYPE_CHECKING:
-                base_ranker_typed: 'ImprovedContextualRanker' = base_ranker  # type: ignore[assignment]
             learning_config = self.config.learning
 
             # Import AdaptiveRanker at module level for type checking
@@ -172,9 +177,34 @@ class RAGPipeline:
                     logger.warning("Learning module not available - feedback collection disabled")
                     self.feedback_collector = None
 
-                # Ensure ranker attribute is recognized as compatible base type by type checkers
-                if TYPE_CHECKING:
-                    _ranker_check: Union['ImprovedContextualRanker', 'AdaptiveRanker'] = self.ranker  # type: ignore[assignment]
+                # If AdaptiveRanker is enabled and available, wrap base_ranker but keep attribute typed as base
+                try:
+                    from .ranking.adaptive_ranker import AdaptiveRanker  # type: ignore
+                    if getattr(learning_config, 'enable_adaptive_ranking', False):
+                        try:
+                            from .learning.model_updater import ModelUpdater
+                            from typing import cast
+                            model_updater = ModelUpdater(
+                                update_frequency=getattr(learning_config, 'update_frequency', 'daily')
+                            )
+                            # Cast keeps the attribute typed as ImprovedContextualRanker for Pylance
+                            # Only wrap when a concrete FeedbackCollector is available
+                            if self.feedback_collector is not None:
+                                self.ranker = cast(ImprovedContextualRanker, AdaptiveRanker(
+                                    base_ranker=self.ranker,  # current base
+                                    model_updater=model_updater,
+                                    feedback_collector=self.feedback_collector,
+                                    config=learning_config.model_dump()
+                                ))
+                                logger.info("✅ AdaptiveRanker wrapper applied")
+                            else:
+                                logger.info("AdaptiveRanker wrapper skipped: feedback_collector is None")
+                            logger.info("✅ AdaptiveRanker wrapper applied")
+                        except Exception as e:
+                            logger.warning(f"AdaptiveRanker wrapping skipped: {e}")
+                except ImportError:
+                    # AdaptiveRanker not available; continue with base ranker
+                    pass
 
             self.result_explainer = ResultExplainer(ranking_config)
             self.response_generator = ResponseGenerator({})
@@ -201,9 +231,19 @@ class RAGPipeline:
 
             # Start ranking monitor if available
             if hasattr(self, 'ranking_monitor') and self.ranking_monitor is not None:
-                if hasattr(self.ranking_monitor, 'ensure_started'):
-                    await self.ranking_monitor.ensure_started()
-                    logger.info("✅ RankingMonitor started")
+                # Some implementations expose a sync start, others async
+                start_method = getattr(self.ranking_monitor, 'ensure_started', None)
+                if callable(start_method):
+                    maybe_awaitable = start_method()
+                    try:
+                        # If it returns an awaitable, await it
+                        import inspect as _inspect
+                        if _inspect.isawaitable(maybe_awaitable):
+                            await maybe_awaitable  # type: ignore[func-returns-value]
+                    except Exception:
+                        # Ignore if not awaitable
+                        pass
+                logger.info("✅ RankingMonitor started")
 
             logger.info("✅ RAG Pipeline async components started")
 
@@ -278,6 +318,55 @@ class RAGPipeline:
                 raw_results = await self.retriever.retrieve(search_query)
                 logger.debug(f"Retrieved {len(raw_results)} results from multi-stage retrieval")
 
+                # Wire-in: if results are dict-like without enriched code understanding,
+                # augment them using CodeChunker heuristics to improve ranking quality.
+                if raw_results:
+                    # Handle both dict-shaped results and SearchResult objects
+                    for r in raw_results:
+                        if isinstance(r, dict):
+                            content = r.get("content") or r.get("code_snippet") or ""
+                            file_path = r.get("file_path") or ""
+                            language = (r.get("language") or "").lower()
+                            # Chunk only when we don't already have signature/imports/dependencies
+                            if content and (not r.get("signature") or not r.get("imports")):
+                                try:
+                                    if language == "python":
+                                        chunks = CodeChunker.chunk_python_file(content, file_path)
+                                    else:
+                                        chunks = CodeChunker.chunk_js_ts_file(content, file_path)
+                                    if chunks:
+                                        # Use first chunk as representative metadata enrichment
+                                        c0 = chunks[0]
+                                        r.setdefault("signature", c0.get("signature", ""))
+                                        r.setdefault("imports", c0.get("imports", []))
+                                        r.setdefault("dependencies", c0.get("dependencies", []))
+                                        r.setdefault("semantic_context", c0.get("semantic_context", ""))
+                                except Exception as _e:
+                                    logger.debug(f"Chunk enrichment skipped: {_e}")
+                        else:
+                            # SearchResult object
+                            content = getattr(r, "code_snippet", "") or getattr(r, "content", "")
+                            file_path = getattr(r, "file_path", "")
+                            language = (getattr(r, "language", "") or "").lower()
+                            if content and (not getattr(r, "signature", None) or not getattr(r, "imports", None)):
+                                try:
+                                    if language == "python":
+                                        chunks = CodeChunker.chunk_python_file(content, file_path)
+                                    else:
+                                        chunks = CodeChunker.chunk_js_ts_file(content, file_path)
+                                    if chunks:
+                                        c0 = chunks[0]
+                                        if not getattr(r, "signature", None):
+                                            r.signature = c0.get("signature", "")
+                                        if not getattr(r, "imports", None):
+                                            r.imports = c0.get("imports", [])
+                                        if not getattr(r, "dependencies", None):
+                                            r.dependencies = c0.get("dependencies", [])
+                                        if not getattr(r, "semantic_context", None):
+                                            r.semantic_context = c0.get("semantic_context", "")
+                                except Exception as _e:
+                                    logger.debug(f"Chunk enrichment (object) skipped: {_e}")
+
                 # Normalize dict results to SearchResult instances
                 if raw_results and isinstance(raw_results[0], dict):
                     normalized = []
@@ -345,6 +434,22 @@ class RAGPipeline:
             if raw_results:
                 # Optional augmentation to fill missing metadata for better ranking
                 self._augment_code_understanding(raw_results)
+
+                # Wire-in: run AST analysis for current file when available to
+                # provide richer EnhancedContext signals (imports, functions, classes).
+                try:
+                    if code_context and code_context.current_file:
+                        analysis = await self._ast_analyzer.analyze_file(code_context.current_file)
+                        if analysis and analysis.get("language") != "unknown":
+                            # propagate high-signal fields into code_context where missing
+                            if not code_context.imports and analysis.get("imports"):
+                                code_context.imports = analysis.get("imports", [])
+                            if not code_context.functions and analysis.get("functions"):
+                                code_context.functions = analysis.get("functions", [])
+                            if not code_context.classes and analysis.get("classes"):
+                                code_context.classes = analysis.get("classes", [])
+                except Exception as e:
+                    logger.debug(f"AST context enrichment failed: {e}")
 
             if raw_results and code_context:
                 try:
