@@ -239,8 +239,11 @@ When MCP returns irrelevant results:
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the SOTA MCP server
-python mcp_server_sota.py
+# Run the MCP server from the mcprag package
+python -m mcprag
+
+# Or use the wrapper script
+./mcp_server_wrapper.sh
 ```
 
 ### Index Management and Reindexing
@@ -341,7 +344,7 @@ This is a **state-of-the-art code search solution** that combines Azure Cognitiv
      - Incremental indexing of changed files
      - Embedding cache with TTL and LRU eviction
 
-2. **SOTA MCP Server (`mcp_server_sota.py`)** - Advanced search API
+2. **MCP Server (`mcprag` package)** - Advanced search API
    - Intent-aware query enhancement (implement/debug/understand/refactor)
    - Multi-stage retrieval with semantic + hybrid search
    - Context-aware filtering based on current file/language
@@ -462,7 +465,9 @@ python setup/uninstall.py  # WARNING: Deletes all Azure resources
 
 1. **Start the MCP server**:
    ```bash
-   python mcp_server_sota.py
+   python -m mcprag
+   # Or use the wrapper script:
+   ./mcp_server_wrapper.sh
    ```
 
 2. **Register with Claude Code** (in a separate terminal):
@@ -470,16 +475,15 @@ python setup/uninstall.py  # WARNING: Deletes all Azure resources
    # Add the code search MCP server
    claude-code mcp add \
      --name azure-code-search \
-     --type http \
-     --url http://localhost:8001/mcp-query \
-     --method POST
+     --type stdio \
+     azure-code-search python -m mcprag
 
    # If using the config file directly, add to mcp-servers.json:
    # {
    #   "mcps": {
    #     "azure-code-search": {
    #       "command": "python",
-   #       "args": ["/path/to/mcp_server_sota.py"],
+   #       "args": ["-m", "mcprag"],
    #       "env": {
    #         "ACS_ENDPOINT": "your-endpoint",
    #         "ACS_ADMIN_KEY": "your-key"

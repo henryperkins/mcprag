@@ -9,6 +9,6 @@ claude mcp add azure-code-search \
     -e ACS_ADMIN_KEY=Ne3DXE0h6ZiYANoKTuJlcTP6TJaEiDOsT9iTA399nUAzSeAetXI3 \
     -e ACS_INDEX_NAME=codebase-mcp-sota \
     --transport stdio \
-    -- python /home/azureuser/mcprag/mcp_server_sota.py
+    -- python -m mcprag
 
 echo "MCP server configuration complete!"

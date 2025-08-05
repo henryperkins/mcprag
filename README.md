@@ -74,10 +74,12 @@ python create_index.py
 python smart_indexer.py
 ```
 
-### 6. Start SOTA MCP Server
+### 6. Start MCP Server
 
 ```bash
-python mcp_server_sota.py
+python -m mcprag
+# Or use the wrapper script:
+./mcp_server_wrapper.sh
 ```
 
 ## Usage
@@ -165,7 +167,7 @@ def chunk_javascript_file(self, content: str, file_path: str) -> List[Dict]:
 
 ### Customize Search Intents
 
-Modify intent enhancement in `mcp_server_sota.py`:
+Modify intent enhancement in the MCP server:
 
 ```python
 intent_prefixes = {

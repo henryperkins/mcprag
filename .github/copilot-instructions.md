@@ -16,7 +16,7 @@ Code Files → AST Parser → Semantic Chunks → Azure Search → MCP Server �
    - JS/TS: Uses Babel parser via `parse_js.mjs` Node.js subprocess
    - Creates semantic chunks with signatures, imports, function calls, docstrings
 
-2. **SOTA MCP Server (`mcp_server_sota.py`)** - Advanced search API
+2. **MCP Server (`mcprag` package)** - Advanced search API
    - Intent-aware query enhancement (implement/debug/understand/refactor)
    - Multi-stage retrieval with semantic + hybrid search
    - Context-aware filtering based on current file/language
@@ -50,8 +50,8 @@ python create_index.py
 # Index repository with smart chunking
 python smart_indexer.py --repo-path ./path/to/repo --repo-name project-name
 
-# Start SOTA MCP server (main entry point)
-python mcp_server_sota.py
+# Start MCP server (main entry point)
+python -m mcprag
 
 # Test MCP tools registration
 python tests/test_mcp_tools.py
@@ -111,7 +111,7 @@ except ImportError:
   "mcps": {
     "azure-code-search": {
       "command": "python",
-      "args": ["/path/to/mcp_server_sota.py"],
+      "args": ["-m", "mcprag"],
       "env": {"ACS_ENDPOINT": "...", "ACS_ADMIN_KEY": "..."}
     }
   }
@@ -125,7 +125,7 @@ except ImportError:
 
 ## Key Files for Understanding
 
-- `mcp_server_sota.py` - Main MCP server with intent-aware search
+- `mcprag` package - Main MCP server with intent-aware search
 - `smart_indexer.py` - AST-based code chunking and indexing
 - `parse_js.mjs` - JavaScript/TypeScript AST parsing via Babel
 - `vector_embeddings.py` - OpenAI embeddings with graceful fallback

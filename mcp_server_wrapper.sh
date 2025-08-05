@@ -15,5 +15,5 @@ if [ -z "$ACS_ENDPOINT" ] || [ -z "$ACS_ADMIN_KEY" ]; then
     exit 1
 fi
 
-# Run the MCP server
-exec python3 /home/azureuser/mcprag/mcp_server_sota.py "$@"
+# Run the MCP server from the mcprag package
+exec python3 -m mcprag "$@"

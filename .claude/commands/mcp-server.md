@@ -14,16 +14,16 @@ This command helps you start, test, and debug the MCP server that provides intel
 
 ## Starting the Server
 
-### Run the SOTA MCP Server
+### Run the MCP Server
 ```bash
-# Start the production server
-python mcp_server_sota.py
+# Start the production server (recommended)
+python -m mcprag
+
+# Run the wrapper script (loads environment variables)
+./mcp_server_wrapper.sh
 
 # Run with debug logging
-PYTHONPATH=. python -m mcprag.mcp_server_sota_compat
-
-# Run the wrapper script (recommended)
-./mcp_server_wrapper.sh
+PYTHONPATH=. python -m mcprag
 ```
 
 ### Alternative Server Modes

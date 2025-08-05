@@ -4,14 +4,14 @@ This guide explains how to integrate your Azure Cognitive Search MCP server with
 
 ## Option 1: HTTP API Server (Current Implementation)
 
-Your current `mcp_server_sota.py` is an HTTP API server. Here's how to use it:
+Your current MCP server runs from the `mcprag` package. Here's how to use it:
 
 ### 1. Start the Server
 
 ```bash
 cd /home/hperkins/mcprag
 source venv/bin/activate
-python mcp_server_sota.py
+python -m mcprag
 ```
 
 The server will start on `http://localhost:8001`
@@ -49,7 +49,7 @@ Create or edit the Claude Desktop configuration file:
   "mcpServers": {
     "azure-code-search": {
       "command": "python",
-      "args": ["/home/hperkins/mcprag/mcp_server_sota.py"],
+      "args": ["-m", "mcprag"],
       "env": {
         "ACS_ENDPOINT": "https://mcprag-search.search.windows.net",
         "ACS_ADMIN_KEY": "rLimu7VZq1P4j99xsStwqYjYQ4SqU9ydOK3hLVTq7qAzSeCsmXKD"

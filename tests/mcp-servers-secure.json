@@ -23,9 +23,8 @@
         "azure-code-search": {
             "command": "python3",
             "args": [
-                "mcp_server_sota.py",
-                "--mode",
-                "rpc"
+                "-m",
+                "mcprag"
             ],
             "env": {
                 "PYTHONPATH": "."

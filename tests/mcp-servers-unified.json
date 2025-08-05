@@ -33,9 +33,8 @@
         "azure-code-search": {
             "command": "/home/azureuser/mcprag/venv/bin/python",
             "args": [
-                "/home/azureuser/mcprag/mcp_server_sota.py",
-                "--mode",
-                "rpc"
+                "-m",
+                "mcprag"
             ],
             "env": {
                 "ACS_ENDPOINT": "https://oairesourcesearch.search.windows.net",
