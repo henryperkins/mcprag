@@ -1,4 +1,10 @@
+---
+description: index-management operations with specified parameters
+---
+
 # Azure Search Index Management
+
+Operations for $ARGUMENTS.
 
 Manage Azure Cognitive Search indices for the MCP server.
 

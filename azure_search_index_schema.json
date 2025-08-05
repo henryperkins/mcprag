@@ -1,0 +1,175 @@
+{
+  "name": "codebase-mcp-sota",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "searchable": false,
+      "filterable": true
+    },
+    {
+      "name": "content",
+      "type": "Edm.String",
+      "searchable": true,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "file_path",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "function_name",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "class_name",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "repository",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "language",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "tags",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "imports",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true
+    },
+    {
+      "name": "called_functions",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true
+    },
+    {
+      "name": "start_line",
+      "type": "Edm.Int32",
+      "searchable": false,
+      "filterable": true
+    },
+    {
+      "name": "end_line",
+      "type": "Edm.Int32",
+      "searchable": false,
+      "filterable": true
+    },
+    {
+      "name": "parent_context",
+      "type": "Edm.String",
+      "searchable": true
+    },
+    {
+      "name": "docstring",
+      "type": "Edm.String",
+      "searchable": true
+    },
+    {
+      "name": "context_type",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "chunking_metadata",
+      "type": "Edm.String",
+      "searchable": false
+    },
+    {
+      "name": "created_at",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true
+    },
+    {
+      "name": "semantic_context",
+      "type": "Edm.String",
+      "searchable": true
+    },
+    {
+      "name": "chunk_type",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "chunk_id",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true
+    },
+    {
+      "name": "last_modified",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true
+    },
+    {
+      "name": "file_extension",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "signature",
+      "type": "Edm.String",
+      "searchable": true
+    },
+    {
+      "name": "content_vector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "dimensions": 3072,
+      "vectorSearchProfile": "vector-profile"
+    }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "vector-algo",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "metric": "cosine",
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "vector-profile",
+        "algorithm": "vector-algo"
+      }
+    ]
+  }
+}

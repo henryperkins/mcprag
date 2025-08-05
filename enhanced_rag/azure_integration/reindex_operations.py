@@ -28,6 +28,7 @@ from azure.search.documents.indexes.models import (
 from enhanced_rag.core.config import get_config
 from .rest import AzureSearchClient, SearchOperations
 from .automation import DataAutomation
+from .processing import process_file as shared_process_file
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,9 @@ class ReindexOperations:
             
             # Step 3: Create new index
             logger.info(f"Creating new index '{self.index_name}'...")
-            new_index = SearchIndex.deserialize(schema)
-            self.index_client.create_index(new_index)
+            rest_client = AzureSearchClient(self.endpoint, self.api_key)
+            rest_ops = SearchOperations(rest_client)
+            await rest_ops.create_index(schema)
             
             logger.info("Drop and rebuild completed successfully")
             return True
@@ -301,62 +303,8 @@ class ReindexOperations:
         return chunks
 
     def _process_file(self, file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
-        """Process a single file and create document chunks."""
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-        except (IOError, OSError):
-            return []
-        
-        language = self._get_language_from_extension(file_path)
-        relative_path = os.path.relpath(file_path, repo_path)
-        
-        # Extract chunks based on language
-        if language == 'python':
-            chunks = self._extract_python_chunks(content, file_path)
-        else:
-            # For non-Python files, treat whole file as one chunk
-            chunks = [{
-                "chunk_type": "file",
-                "content": content,
-                "start_line": 1,
-                "end_line": len(content.split('\n'))
-            }]
-        
-        # Create documents for each chunk
-        documents = []
-        for i, chunk in enumerate(chunks):
-            doc_id = hashlib.sha256(f"{repo_name}:{relative_path}:{i}".encode()).hexdigest()[:16]
-            
-            doc = {
-                "id": doc_id,
-                "content": chunk.get('content', ''),
-                "file_path": relative_path,
-                "repository": repo_name,
-                "language": language,
-                "chunk_type": chunk.get('chunk_type', 'file'),
-                "chunk_id": f"{relative_path}:{i}",
-                "last_modified": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z",
-                "file_extension": Path(file_path).suffix
-            }
-            
-            # Add optional fields if they exist
-            if chunk.get('function_name'):
-                doc['function_name'] = chunk['function_name']
-            if chunk.get('class_name'):
-                doc['class_name'] = chunk['class_name']
-            if chunk.get('docstring'):
-                doc['docstring'] = chunk['docstring']
-            if chunk.get('signature'):
-                doc['signature'] = chunk['signature']
-            if chunk.get('start_line'):
-                doc['start_line'] = chunk['start_line']
-            if chunk.get('end_line'):
-                doc['end_line'] = chunk['end_line']
-            
-            documents.append(doc)
-        
-        return documents
+        """Deprecated: delegate to shared processing to avoid drift."""
+        return shared_process_file(file_path, repo_path, repo_name)
     
     async def reindex_repository(
         self,
@@ -408,7 +356,7 @@ class ReindexOperations:
                 for file in files:
                     if any(file.endswith(ext) for ext in extensions):
                         file_path = os.path.join(root, file)
-                        docs = self._process_file(file_path, repo_path, repo_name)
+                        docs = shared_process_file(file_path, repo_path, repo_name)
                         all_documents.extend(docs)
                         
                         if docs:

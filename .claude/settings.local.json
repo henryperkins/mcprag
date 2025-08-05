@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python:*)",
       "Bash(journalctl:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(source:*)"
     ],
     "deny": []
   },

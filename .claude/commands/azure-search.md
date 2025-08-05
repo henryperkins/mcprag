@@ -1,4 +1,10 @@
+---
+description: azure-search operations with specified parameters
+---
+
 # Azure Search Operations
+
+Operations for $ARGUMENTS.
 
 Interact with Azure Cognitive Search for testing and debugging.
 

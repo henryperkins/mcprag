@@ -29,141 +29,12 @@ from .automation import DataAutomation
 from .rest import AzureSearchClient, SearchOperations
 from mcprag.config import Config
 from .cli_schema_automation import add_schema_commands
+from .processing import get_language_from_extension, extract_python_chunks, process_file
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def get_language_from_extension(file_path: str) -> str:
-    """Determine language from file extension."""
-    ext_map = {
-        '.py': 'python',
-        '.js': 'javascript',
-        '.mjs': 'javascript',
-        '.ts': 'typescript',
-        '.jsx': 'javascript',
-        '.tsx': 'typescript',
-        '.java': 'java',
-        '.cpp': 'cpp',
-        '.c': 'c',
-        '.cs': 'csharp',
-        '.go': 'go',
-        '.rs': 'rust',
-        '.php': 'php',
-        '.rb': 'ruby',
-        '.swift': 'swift',
-        '.kt': 'kotlin',
-        '.scala': 'scala',
-        '.r': 'r',
-        '.md': 'markdown',
-        '.json': 'json',
-        '.yaml': 'yaml',
-        '.yml': 'yaml',
-        '.xml': 'xml',
-        '.html': 'html',
-        '.css': 'css',
-        '.scss': 'scss',
-        '.sass': 'sass'
-    }
-    
-    ext = Path(file_path).suffix.lower()
-    return ext_map.get(ext, 'text')
-
-
-def extract_python_chunks(content: str, file_path: str) -> List[Dict[str, Any]]:
-    """Extract semantic chunks from Python code."""
-    chunks = []
-    
-    try:
-        tree = ast.parse(content)
-        
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                chunk = {
-                    "chunk_type": "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class",
-                    "function_name": node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None,
-                    "class_name": node.name if isinstance(node, ast.ClassDef) else None,
-                    "start_line": node.lineno,
-                    "end_line": node.end_lineno or node.lineno,
-                    "docstring": ast.get_docstring(node) or "",
-                    "signature": f"def {node.name}" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else f"class {node.name}"
-                }
-                
-                # Extract code content
-                lines = content.split('\n')
-                chunk_content = '\n'.join(lines[chunk['start_line']-1:chunk['end_line']])
-                chunk['content'] = chunk_content
-                
-                chunks.append(chunk)
-    except (SyntaxError, ValueError):
-        # If AST parsing fails, return whole file as single chunk
-        chunks.append({
-            "chunk_type": "file",
-            "content": content,
-            "start_line": 1,
-            "end_line": len(content.split('\n'))
-        })
-    
-    return chunks
-
-
-def process_file(file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
-    """Process a single file and create document chunks."""
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-    except (IOError, OSError):
-        return []
-    
-    language = get_language_from_extension(file_path)
-    relative_path = os.path.relpath(file_path, repo_path)
-    
-    # Extract chunks based on language
-    if language == 'python':
-        chunks = extract_python_chunks(content, file_path)
-    else:
-        # For non-Python files, treat whole file as one chunk
-        chunks = [{
-            "chunk_type": "file",
-            "content": content,
-            "start_line": 1,
-            "end_line": len(content.split('\n'))
-        }]
-    
-    # Create documents for each chunk
-    documents = []
-    for i, chunk in enumerate(chunks):
-        doc_id = hashlib.sha256(f"{repo_name}:{relative_path}:{i}".encode()).hexdigest()[:16]
-        
-        doc = {
-            "id": doc_id,
-            "content": chunk.get('content', ''),
-            "file_path": relative_path,
-            "repository": repo_name,
-            "language": language,
-            "chunk_type": chunk.get('chunk_type', 'file'),
-            "chunk_id": f"{relative_path}:{i}",
-            "last_modified": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z",
-            "file_extension": Path(file_path).suffix
-        }
-        
-        # Add optional fields if they exist
-        if chunk.get('function_name'):
-            doc['function_name'] = chunk['function_name']
-        if chunk.get('class_name'):
-            doc['class_name'] = chunk['class_name']
-        if chunk.get('docstring'):
-            doc['docstring'] = chunk['docstring']
-        if chunk.get('signature'):
-            doc['signature'] = chunk['signature']
-        if chunk.get('start_line'):
-            doc['start_line'] = chunk['start_line']
-        if chunk.get('end_line'):
-            doc['end_line'] = chunk['end_line']
-        
-        documents.append(doc)
-    
-    return documents
 
 
 async def index_repository(repo_path: str, repo_name: str, patterns: Optional[List[Tuple[str, str]]] = None) -> int:
@@ -344,12 +215,27 @@ async def cmd_create_enhanced_index(args):
             enable_vectors=enable_vectors,
             enable_semantic=enable_semantic
         )
-        logger.info(f"Successfully created index: {index.name}")
-        logger.info(f"Fields: {len(index.fields)}")
-        if hasattr(index, 'vector_search') and index.vector_search:
-            logger.info(f"Vector profiles: {len(index.vector_search.profiles)}")
-        if hasattr(index, 'semantic_search') and index.semantic_search:
-            logger.info("Semantic search: Enabled")
+        logger.info(f"Successfully ensured index exists: {index.name}")
+        # EnhancedIndexBuilder returns SimpleNamespace(name=..., operation=...)
+        op = getattr(index, "operation", None)
+        if isinstance(op, dict):
+            if op.get("created"):
+                logger.info("Index was created")
+            elif op.get("updated"):
+                logger.info("Index was updated")
+            elif op.get("current"):
+                logger.info("Index already current")
+            # If the op payload includes a schema snapshot, log field count
+            schema = op.get("schema") or op.get("index") or {}
+            fields = schema.get("fields")
+            if isinstance(fields, list):
+                logger.info(f"Fields: {len(fields)}")
+            vs = schema.get("vectorSearch")
+            if isinstance(vs, dict):
+                profiles = vs.get("profiles") or []
+                logger.info(f"Vector profiles: {len(profiles)}")
+            if schema.get("semanticSearch"):
+                logger.info("Semantic search: Enabled")
     except Exception as e:
         logger.error(f"Failed to create index: {e}")
         return 1
@@ -374,17 +260,18 @@ async def cmd_validate_index(args):
             import json
             print(json.dumps(result, indent=2))
         else:
-            if result['ok']:
-                logger.info(f"✓ Vector dimensions match: {result['actual']}")
+            if result['valid']:
+                logger.info(f"✓ Vector dimensions match: {result['actual_dimensions']}")
             else:
                 logger.error(
                     f"✗ Vector dimension mismatch: "
-                    f"expected {result['expected']}, actual {result['actual']}"
+                    f"expected {result['expected_dimensions']}, actual {result['actual_dimensions']}"
                 )
-            logger.info(result['message'])
+            if 'error' in result:
+                logger.error(f"Error: {result['error']}")
 
         # Return appropriate exit code
-        return 0 if result['ok'] else 1
+        return 0 if result['valid'] else 1
 
     except Exception as e:
         if args.json:

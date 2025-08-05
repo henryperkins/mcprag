@@ -1,95 +1,94 @@
 {
   "mcpServers": {
-    "python-sdk": {
-      "name": "Python SDK",
-      "description": "Official Python SDK with FastMCP for rapid MCP development",
-      "command": "python3",
+    "typescript-sdk": {
+      "name": "TypeScript SDK",
+      "command": "node",
       "args": [
-        "-m",
-        "python_sdk.server"
+        "path/to/ts-sdk-server.js"
       ],
       "env": {}
     },
-    "docker": {
-      "name": "Docker MCP",
-      "description": "Isolated code execution via Docker containers",
-      "command": "python3",
+    "github": {
+      "name": "GitHub MCP",
+      "command": "node",
       "args": [
-        "-m",
-        "mcp_server_docker"
-      ],
-      "env": {}
-    },
-    "jupyter": {
-      "name": "Jupyter MCP",
-      "description": "MCP integration for interactive Jupyter notebooks",
-      "command": "python3",
-      "args": [
-        "-m",
-        "server_jupyter"
-      ],
-      "env": {}
-    },
-    "postgresql": {
-      "name": "PostgreSQL MCP",
-      "description": "Natural language queries to PostgreSQL databases",
-      "command": "python3",
-      "args": [
-        "-m",
-        "server_postgres"
+        "path/to/server-github"
       ],
       "env": {
-        "DATABASE_URL": "postgresql://user:pass@host/db"
+        "GITHUB_TOKEN": "..."
       }
     },
-    "opik": {
-      "name": "Opik MCP",
-      "description": "Observability for LLM apps with tracing and metrics",
-      "command": "python3",
+    "puppeteer": {
+      "name": "Puppeteer MCP",
+      "command": "node",
       "args": [
-        "-m",
-        "opik_mcp"
+        "path/to/server-puppeteer"
+      ],
+      "env": {}
+    },
+    "slack": {
+      "name": "Slack MCP",
+      "command": "node",
+      "args": [
+        "path/to/server-slack"
+      ],
+      "env": {
+        "SLACK_TOKEN": "..."
+      }
+    },
+    "filesystem": {
+      "name": "File System MCP",
+      "command": "node",
+      "args": [
+        "path/to/server-filesystem"
       ],
       "env": {}
     },
     "memory-bank": {
       "name": "Memory Bank MCP",
-      "description": "Centralized memory system for AI agents",
-      "command": "mcp-server-memory",
+      "command": "server-memory",
       "args": [],
       "env": {}
     },
     "sequential-thinking": {
       "name": "Sequential Thinking MCP",
-      "description": "Helps LLMs decompose complex tasks into logical steps",
-      "command": "mcp-server-sequential-thinking",
+      "command": "code-reasoning",
       "args": [],
       "env": {}
     },
     "brave-search": {
       "name": "Brave Search MCP",
-      "description": "Privacy-focused web search tool",
       "command": "server-brave-search",
       "args": [],
       "env": {}
     },
     "google-maps": {
       "name": "Google Maps MCP",
-      "description": "Integrates Google Maps for geolocation and directions",
-      "command": "mcp-server-google-maps",
+      "command": "server-google-maps",
       "args": [],
       "env": {
         "GOOGLE_MAPS_API_KEY": "..."
       }
     },
-    "deep-graph-mcp": {
+    "deep-graph": {
+      "name": "Deep Graph MCP (Code Graph)",
+      "command": "mcp-code-graph",
+      "args": [],
+      "env": {}
+    },
+    "DeepGraph React MCP": {
       "command": "npx",
       "args": [
         "-y",
         "mcp-code-graph@latest",
-        "sk-81cdfe89-d862-4f57-a9f5-63377ff74104",
-        "6a6405a3-460e-491d-9148-4df23d8be601",
-        "d54c0d72-4a3e-4842-8c8f-345eb40e4658"
+        "facebook/react"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
       ]
     }
   }

@@ -28,7 +28,19 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
     """REST-based index builder compatible with the legacy interface."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self._cfg = config or AzureSearchConfig.from_env().to_dict()
+        if config:
+            self._cfg = config
+        else:
+            try:
+                from enhanced_rag.core.config import get_config
+                core = get_config()
+                self._cfg = {
+                    "endpoint": core.azure.endpoint,
+                    "api_key": core.azure.admin_key,
+                    "api_version": getattr(core.azure, "api_version", "2025-05-01-preview"),
+                }
+            except Exception:
+                self._cfg = AzureSearchConfig.from_env().to_dict()
         self._index_automation = IndexAutomation(
             endpoint=self._cfg["endpoint"],
             api_key=self._cfg["api_key"],
@@ -117,7 +129,7 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
                     "actual_dimensions": None
                 }
             
-            actual_dimensions = field.get("dimensions")
+            actual_dimensions = vector_field.get("dimensions")
             
             return {
                 "valid": actual_dimensions == expected_dimensions,

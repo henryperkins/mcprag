@@ -115,6 +115,9 @@ class SchemaAutomation:
             "recommendations": []
         }
         
+        import os
+        if os.getenv("ACS_DETECT_CAPABILITIES", "true").lower() in ("0", "false", "no"):
+            return capabilities
         try:
             # Try to create a test index with various features to detect support
             test_index_name = f"test-capabilities-{int(datetime.utcnow().timestamp())}"

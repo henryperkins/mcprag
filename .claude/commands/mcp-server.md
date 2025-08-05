@@ -1,6 +1,10 @@
+---
+description: Run and manage the MCP server for Azure Search integration with specified options
+---
+
 # MCP Server Operations
 
-Run and manage the MCP (Model Context Protocol) server for Azure Search integration.
+Run and manage the MCP (Model Context Protocol) server for Azure Search integration with $ARGUMENTS.
 
 ## Purpose
 
