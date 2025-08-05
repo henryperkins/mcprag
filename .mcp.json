@@ -1,44 +1,5 @@
 {
   "mcpServers": {
-    "typescript-sdk": {
-      "command": "node",
-      "args": [
-        "path/to/ts-sdk-server.js"
-      ],
-      "env": {}
-    },
-    "github": {
-      "command": "node",
-      "args": [
-        "path/to/server-github"
-      ],
-      "env": {
-        "GITHUB_TOKEN": "..."
-      }
-    },
-    "puppeteer": {
-      "command": "node",
-      "args": [
-        "path/to/server-puppeteer"
-      ],
-      "env": {}
-    },
-    "slack": {
-      "command": "node",
-      "args": [
-        "path/to/server-slack"
-      ],
-      "env": {
-        "SLACK_TOKEN": "..."
-      }
-    },
-    "filesystem": {
-      "command": "node",
-      "args": [
-        "path/to/server-filesystem"
-      ],
-      "env": {}
-    },
     "DeepGraph React MCP": {
       "command": "npx",
       "args": [

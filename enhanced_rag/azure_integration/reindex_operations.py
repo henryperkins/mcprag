@@ -4,17 +4,13 @@ This module provides various strategies for reindexing content in Azure AI Searc
 including drop-and-rebuild, incremental updates, and indexer-based approaches.
 """
 
-import asyncio
 import json
 import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Literal
+from typing import Dict, List, Optional, Any
 from enum import Enum
-import os
-import hashlib
-import ast
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
@@ -25,10 +21,10 @@ from azure.search.documents.indexes.models import (
     SearchIndexerStatus
 )
 
-from enhanced_rag.core.config import get_config
 from .rest import AzureSearchClient, SearchOperations
 from .automation import DataAutomation
-from .processing import process_file as shared_process_file
+from .processing import FileProcessor
+from .config import AzureSearchConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +40,31 @@ class ReindexMethod(Enum):
 class ReindexOperations:
     """Handles various reindexing operations for Azure AI Search."""
     
-    def __init__(self):
-        """Initialize reindex operations with Azure Search clients."""
-        config = get_config()
-        self.endpoint = config.azure.endpoint
-        self.api_key = config.azure.admin_key
-        self.index_name = config.azure.index_name or "codebase-mcp-sota"
+    def __init__(self, config: Optional[AzureSearchConfig] = None, index_name: Optional[str] = None):
+        """Initialize reindex operations with Azure Search clients.
+        
+        Args:
+            config: Azure Search configuration (loads from env if not provided)
+            index_name: Target index name (defaults to codebase-mcp-sota)
+        """
+        if config is None:
+            # Fallback to legacy config loading for backward compatibility
+            try:
+                from enhanced_rag.core.config import get_config
+                legacy_config = get_config()
+                config = AzureSearchConfig(
+                    endpoint=legacy_config.azure.endpoint,
+                    api_key=legacy_config.azure.admin_key
+                )
+                if not index_name:
+                    index_name = legacy_config.azure.index_name
+            except ImportError:
+                # If legacy config is not available, load from env
+                config = AzureSearchConfig.from_env()
+        
+        self.endpoint = config.endpoint
+        self.api_key = config.api_key
+        self.index_name = index_name or "codebase-mcp-sota"
         
         credential = AzureKeyCredential(self.api_key)
         self.index_client = SearchIndexClient(self.endpoint, credential)
@@ -233,78 +248,9 @@ class ReindexOperations:
             logger.error(f"Failed to get indexer status: {e}")
             return None
     
-    def _get_language_from_extension(self, file_path: str) -> str:
-        """Determine language from file extension."""
-        ext_map = {
-            '.py': 'python',
-            '.js': 'javascript',
-            '.mjs': 'javascript',
-            '.ts': 'typescript',
-            '.jsx': 'javascript',
-            '.tsx': 'typescript',
-            '.java': 'java',
-            '.cpp': 'cpp',
-            '.c': 'c',
-            '.cs': 'csharp',
-            '.go': 'go',
-            '.rs': 'rust',
-            '.php': 'php',
-            '.rb': 'ruby',
-            '.swift': 'swift',
-            '.kt': 'kotlin',
-            '.scala': 'scala',
-            '.r': 'r',
-            '.md': 'markdown',
-            '.json': 'json',
-            '.yaml': 'yaml',
-            '.yml': 'yaml',
-            '.xml': 'xml',
-            '.html': 'html',
-            '.css': 'css'
-        }
-        
-        ext = Path(file_path).suffix.lower()
-        return ext_map.get(ext, 'text')
-
-    def _extract_python_chunks(self, content: str, file_path: str) -> List[Dict[str, Any]]:
-        """Extract semantic chunks from Python code."""
-        chunks = []
-        
-        try:
-            tree = ast.parse(content)
-            
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    chunk = {
-                        "chunk_type": "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class",
-                        "function_name": node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None,
-                        "class_name": node.name if isinstance(node, ast.ClassDef) else None,
-                        "start_line": node.lineno,
-                        "end_line": node.end_lineno or node.lineno,
-                        "docstring": ast.get_docstring(node) or "",
-                        "signature": f"def {node.name}" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else f"class {node.name}"
-                    }
-                    
-                    # Extract code content
-                    lines = content.split('\n')
-                    chunk_content = '\n'.join(lines[chunk['start_line']-1:chunk['end_line']])
-                    chunk['content'] = chunk_content
-                    
-                    chunks.append(chunk)
-        except (SyntaxError, ValueError):
-            # If AST parsing fails, return whole file as single chunk
-            chunks.append({
-                "chunk_type": "file",
-                "content": content,
-                "start_line": 1,
-                "end_line": len(content.split('\n'))
-            })
-        
-        return chunks
-
-    def _process_file(self, file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
-        """Deprecated: delegate to shared processing to avoid drift."""
-        return shared_process_file(file_path, repo_path, repo_name)
+    # REMOVED: Duplicated file processing methods
+    # These methods have been consolidated into processing.py 
+    # Use FileProcessor class instead
     
     async def reindex_repository(
         self,
@@ -333,34 +279,16 @@ class ReindexOperations:
                 logger.info(f"Cleared {deleted} existing documents")
             
             # Initialize REST client and operations
-            config = get_config()
             rest_client = AzureSearchClient(
-                endpoint=config.azure.endpoint,
-                api_key=config.azure.admin_key
+                endpoint=self.endpoint,
+                api_key=self.api_key
             )
             rest_ops = SearchOperations(rest_client)
             data_automation = DataAutomation(rest_ops)
             
-            # Collect all documents
-            all_documents = []
-            
-            # Default file extensions to process
-            extensions = {'.py', '.js', '.mjs', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', 
-                          '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
-                          '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'}
-            
-            for root, dirs, files in os.walk(repo_path):
-                # Skip hidden directories and common non-code directories
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv']]
-                
-                for file in files:
-                    if any(file.endswith(ext) for ext in extensions):
-                        file_path = os.path.join(root, file)
-                        docs = shared_process_file(file_path, repo_path, repo_name)
-                        all_documents.extend(docs)
-                        
-                        if docs:
-                            logger.info(f"Processed {file_path} ({len(docs)} chunks)")
+            # Use consolidated file processor
+            processor = FileProcessor()
+            all_documents = processor.process_repository(repo_path, repo_name)
             
             # Upload documents using async generator
             async def document_generator():

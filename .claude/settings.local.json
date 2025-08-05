@@ -24,6 +24,13 @@
     "sequential-thinking",
     "brave-search",
     "google-maps",
-    "deep-graph"
+    "deep-graph",
+    "typescript-sdk",
+    "github",
+    "puppeteer",
+    "slack",
+    "filesystem",
+    "DeepGraph React MCP",
+    "memory"
   ]
 }

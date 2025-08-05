@@ -6,15 +6,14 @@ and index management operations.
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple, AsyncIterator
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
 import os
-import hashlib
-import ast
 
 from ..rest import SearchOperations
 from ..embedding_provider import IEmbeddingProvider
+from ..processing import FileProcessor
 from .data_manager import DataAutomation
 from .embedding_manager import EmbeddingAutomation
 from .reindex_manager import ReindexAutomation
@@ -39,100 +38,11 @@ class CLIAutomation:
         self.embedding_automation = EmbeddingAutomation(operations, embedding_provider)
         self.reindex_automation = ReindexAutomation(operations, embedding_provider)
         
-        # File extension mapping
-        self.language_map = {
-            '.py': 'python',
-            '.js': 'javascript',
-            '.mjs': 'javascript',
-            '.ts': 'typescript',
-            '.jsx': 'javascript',
-            '.tsx': 'typescript',
-            '.java': 'java',
-            '.cpp': 'cpp',
-            '.c': 'c',
-            '.cs': 'csharp',
-            '.go': 'go',
-            '.rs': 'rust',
-            '.php': 'php',
-            '.rb': 'ruby',
-            '.swift': 'swift',
-            '.kt': 'kotlin',
-            '.scala': 'scala',
-            '.r': 'r',
-            '.md': 'markdown',
-            '.json': 'json',
-            '.yaml': 'yaml',
-            '.yml': 'yaml',
-            '.xml': 'xml',
-            '.html': 'html',
-            '.css': 'css',
-            '.scss': 'scss',
-            '.sass': 'sass'
-        }
-        
-        # Default extensions to process
-        self.default_extensions = {
-            '.py', '.js', '.mjs', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c',
-            '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
-            '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'
-        }
+        # Use consolidated file processor
+        self.file_processor = FileProcessor()
     
-    def _get_language_from_extension(self, file_path: str) -> str:
-        """Determine language from file extension."""
-        ext = Path(file_path).suffix.lower()
-        return self.language_map.get(ext, 'text')
-    
-    def _extract_python_chunks(self, content: str, file_path: str) -> List[Dict[str, Any]]:
-        """Extract semantic chunks from Python code."""
-        chunks = []
-        
-        try:
-            tree = ast.parse(content)
-            
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    chunk = {
-                        "chunk_type": "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class",
-                        "function_name": node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None,
-                        "class_name": node.name if isinstance(node, ast.ClassDef) else None,
-                        "start_line": node.lineno,
-                        "end_line": node.end_lineno or node.lineno,
-                        "docstring": ast.get_docstring(node) or "",
-                        "signature": self._get_signature(node)
-                    }
-                    
-                    # Extract code content
-                    lines = content.split('\n')
-                    chunk_content = '\n'.join(lines[chunk['start_line']-1:chunk['end_line']])
-                    chunk['content'] = chunk_content
-                    
-                    chunks.append(chunk)
-        except (SyntaxError, ValueError):
-            # If AST parsing fails, return whole file as single chunk
-            chunks.append({
-                "chunk_type": "file",
-                "content": content,
-                "start_line": 1,
-                "end_line": len(content.split('\n'))
-            })
-        
-        return chunks
-    
-    def _get_signature(self, node) -> str:
-        """Extract function/class signature."""
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            params = []
-            for arg in node.args.args:
-                params.append(arg.arg)
-            param_str = ", ".join(params)
-            prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
-            return f"{prefix} {node.name}({param_str})"
-        elif isinstance(node, ast.ClassDef):
-            bases = [base.id if hasattr(base, 'id') else str(base) for base in node.bases]
-            if bases:
-                return f"class {node.name}({', '.join(bases)})"
-            return f"class {node.name}"
-        return ""
+    # REMOVED: Duplicated file processing methods
+    # These methods have been consolidated into processing.py FileProcessor class
     
     async def process_file(
         self,
@@ -152,52 +62,8 @@ class CLIAutomation:
         Returns:
             List of document chunks
         """
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-        except (IOError, OSError):
-            logger.warning(f"Failed to read file: {file_path}")
-            return []
-        
-        language = self._get_language_from_extension(file_path)
-        relative_path = os.path.relpath(file_path, repo_path)
-        
-        # Extract chunks based on language
-        if language == 'python':
-            chunks = self._extract_python_chunks(content, file_path)
-        else:
-            # For non-Python files, treat whole file as one chunk
-            chunks = [{
-                "chunk_type": "file",
-                "content": content,
-                "start_line": 1,
-                "end_line": len(content.split('\n'))
-            }]
-        
-        # Create documents for each chunk
-        documents = []
-        for i, chunk in enumerate(chunks):
-            doc_id = hashlib.sha256(f"{repo_name}:{relative_path}:{i}".encode()).hexdigest()[:16]
-            
-            doc = {
-                "id": doc_id,
-                "content": chunk.get('content', ''),
-                "file_path": relative_path,
-                "repository": repo_name,
-                "language": language,
-                "chunk_type": chunk.get('chunk_type', 'file'),
-                "chunk_id": f"{relative_path}:{i}",
-                "last_modified": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z",
-                "file_extension": Path(file_path).suffix
-            }
-            
-            # Add optional fields if they exist
-            optional_fields = ['function_name', 'class_name', 'docstring', 'signature', 'start_line', 'end_line']
-            for field in optional_fields:
-                if chunk.get(field):
-                    doc[field] = chunk[field]
-            
-            documents.append(doc)
+        # Use consolidated file processor
+        documents = self.file_processor.process_file(file_path, repo_path, repo_name)
         
         # Generate embeddings if requested
         if generate_embeddings and documents:
@@ -239,46 +105,39 @@ class CLIAutomation:
         start_time = datetime.utcnow()
         logger.info(f"Starting repository indexing: {repo_name} from {repo_path}")
         
-        # Determine extensions to process
-        extensions = self.default_extensions
+        # Use consolidated file processor for repository processing
         if patterns:
+            # Convert patterns to extensions
             extensions = set()
             for pattern in patterns:
                 if pattern.startswith('*.'):
                     extensions.add(pattern[1:])
-        
-        # Collect all files to process
-        files_to_process = []
-        for root, dirs, files in os.walk(repo_path):
-            # Skip hidden directories and common non-code directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and 
-                      d not in ['node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build']]
+            processor = FileProcessor(extensions)
+        else:
+            processor = self.file_processor
             
-            for file in files:
-                if any(file.endswith(ext) for ext in extensions):
-                    files_to_process.append(os.path.join(root, file))
+        # Process entire repository
+        all_documents = processor.process_repository(repo_path, repo_name)
         
-        logger.info(f"Found {len(files_to_process)} files to process")
-        
-        # Process files and collect documents
-        all_documents = []
-        processed_files = 0
-        
-        for file_path in files_to_process:
-            docs = await self.process_file(file_path, repo_path, repo_name, generate_embeddings)
-            all_documents.extend(docs)
-            processed_files += 1
+        # Generate embeddings if requested
+        if generate_embeddings and all_documents:
+            context_fields = ['function_name', 'class_name', 'signature', 'docstring']
+            all_documents, stats = await self.embedding_automation.enrich_documents_with_embeddings(
+                documents=all_documents,
+                text_field='content',
+                embedding_field='content_vector',
+                context_fields=context_fields,
+                batch_size=batch_size
+            )
+            logger.info(f"Embedding stats for repository: {stats}")
             
-            if docs:
-                logger.info(f"Processed {file_path} ({len(docs)} chunks)")
-            
-            # Progress callback
-            if progress_callback and processed_files % 10 == 0:
-                await progress_callback({
-                    "files_processed": processed_files,
-                    "total_files": len(files_to_process),
-                    "documents_created": len(all_documents)
-                })
+        # Progress callback
+        if progress_callback:
+            await progress_callback({
+                "files_processed": "completed",
+                "total_files": "all",
+                "documents_created": len(all_documents)
+            })
         
         # Upload documents
         logger.info(f"Uploading {len(all_documents)} documents to index {index_name}")
@@ -295,6 +154,9 @@ class CLIAutomation:
         )
         
         elapsed = (datetime.utcnow() - start_time).total_seconds()
+        
+        # Calculate processed files from processor results
+        processed_files = len(set(doc.get('file_path', 'unknown') for doc in all_documents))
         
         return {
             "repository": repo_name,

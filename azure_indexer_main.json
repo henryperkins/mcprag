@@ -1,0 +1,59 @@
+{
+  "name": "mcprag-codebase-indexer",
+  "description": "Comprehensive indexer for mcprag repository code analysis",
+  "dataSourceName": "mcprag-codebase-datasource",
+  "targetIndexName": "codebase-mcp-sota",
+  "skillsetName": "mcprag-codebase-skillset",
+  "schedule": {
+    "interval": "PT2H",
+    "startTime": "2024-01-01T00:00:00Z"
+  },
+  "parameters": {
+    "batchSize": 100,
+    "maxFailedItems": 10,
+    "maxFailedItemsPerBatch": 5,
+    "configuration": {
+      "indexStorageMode": "default",
+      "parsingMode": "text",
+      "excludedFileNameExtensions": ".png,.jpg,.jpeg,.gif,.bmp,.zip,.rar,.7z,.tar,.gz,.exe,.msi,.dmg,.iso,.bin,.dat,.log,.tmp,.cache",
+      "indexedFileNameExtensions": ".py,.js,.ts,.jsx,.tsx,.java,.c,.cpp,.h,.hpp,.cs,.go,.rs,.php,.rb,.swift,.kt,.scala,.r,.sql,.html,.css,.json,.xml,.yaml,.yml,.md,.txt,.sh,.dockerfile",
+      "failOnUnsupportedContentType": false,
+      "failOnUnprocessableDocument": false,
+      "indexStorageMetadataOnlyForOversizedDocuments": true,
+      "dataToExtract": "contentAndMetadata",
+      "imageAction": "none",
+      "allowSkillsetToReadFileData": true
+    }
+  },
+  "fieldMappings": [
+    {
+      "sourceFieldName": "metadata_storage_path",
+      "targetFieldName": "file_path",
+      "mappingFunction": {
+        "name": "base64Decode"
+      }
+    },
+    {
+      "sourceFieldName": "metadata_storage_last_modified",
+      "targetFieldName": "last_modified"
+    },
+    {
+      "sourceFieldName": "content",
+      "targetFieldName": "content"
+    }
+  ],
+  "outputFieldMappings": [
+    {
+      "sourceFieldName": "/document/detected_language",
+      "targetFieldName": "language"
+    },
+    {
+      "sourceFieldName": "/document/chunks/*/key_concepts",
+      "targetFieldName": "tags"
+    },
+    {
+      "sourceFieldName": "/document/chunks/*",
+      "targetFieldName": "content"
+    }
+  ]
+}

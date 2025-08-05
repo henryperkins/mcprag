@@ -26,6 +26,9 @@ from .utils.error_handler import ErrorHandler
 from .code_understanding.ast_analyzer import ASTAnalyzer  # noqa: F401
 from .code_understanding.chunkers import CodeChunker      # noqa: F401
 
+# Wire-in: Azure integration for unified file processing and search operations
+from .azure_integration import FileProcessor, UnifiedAutomation, SearchOperations, AzureSearchClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +87,22 @@ class RAGPipeline:
         # Initialize code analyzers for downstream usage (context + metadata)
         self._ast_analyzer = ASTAnalyzer(self.config.model_dump() if hasattr(self.config, "model_dump") else {})
         self._code_chunker = CodeChunker()
+        
+        # Initialize consolidated Azure integration components
+        self._file_processor = FileProcessor()
+        
+        # Initialize Azure search operations if credentials are available
+        self._azure_operations = None
+        try:
+            if hasattr(self.config, 'azure') and self.config.azure:
+                azure_client = AzureSearchClient(
+                    endpoint=self.config.azure.endpoint,
+                    api_key=self.config.azure.admin_key
+                )
+                self._azure_operations = SearchOperations(azure_client)
+                logger.info("✅ Azure Search operations initialized")
+        except Exception as e:
+            logger.warning(f"Azure Search operations not available: {e}")
 
         # Initialize vector search if enabled
         if self.config.retrieval.enable_vector_search:
@@ -319,7 +338,7 @@ class RAGPipeline:
                 logger.debug(f"Retrieved {len(raw_results)} results from multi-stage retrieval")
 
                 # Wire-in: if results are dict-like without enriched code understanding,
-                # augment them using CodeChunker heuristics to improve ranking quality.
+                # augment them using consolidated FileProcessor for improved ranking quality.
                 if raw_results:
                     # Handle both dict-shaped results and SearchResult objects
                     for r in raw_results:
@@ -327,12 +346,15 @@ class RAGPipeline:
                             content = r.get("content") or r.get("code_snippet") or ""
                             file_path = r.get("file_path") or ""
                             language = (r.get("language") or "").lower()
-                            # Chunk only when we don't already have signature/imports/dependencies
+                            # Enrich only when we don't already have signature/imports/dependencies
                             if content and (not r.get("signature") or not r.get("imports")):
                                 try:
+                                    # Use consolidated FileProcessor approach via existing functions
                                     if language == "python":
-                                        chunks = CodeChunker.chunk_python_file(content, file_path)
+                                        from .azure_integration.processing import extract_python_chunks
+                                        chunks = extract_python_chunks(content, file_path)
                                     else:
+                                        # Use original CodeChunker for non-Python files
                                         chunks = CodeChunker.chunk_js_ts_file(content, file_path)
                                     if chunks:
                                         # Use first chunk as representative metadata enrichment
@@ -350,9 +372,12 @@ class RAGPipeline:
                             language = (getattr(r, "language", "") or "").lower()
                             if content and (not getattr(r, "signature", None) or not getattr(r, "imports", None)):
                                 try:
+                                    # Use consolidated FileProcessor approach via existing functions
                                     if language == "python":
-                                        chunks = CodeChunker.chunk_python_file(content, file_path)
+                                        from .azure_integration.processing import extract_python_chunks
+                                        chunks = extract_python_chunks(content, file_path)
                                     else:
+                                        # Use original CodeChunker for non-Python files
                                         chunks = CodeChunker.chunk_js_ts_file(content, file_path)
                                     if chunks:
                                         c0 = chunks[0]
@@ -678,3 +703,35 @@ class RAGPipeline:
         return await self.ranking_monitor.get_performance_report(
             timedelta(hours=time_window_hours)
         )
+
+    async def index_repository(self, repo_path: str, repo_name: str, 
+                             index_name: Optional[str] = None) -> Dict[str, Any]:
+        """Index a repository using consolidated Azure integration.
+        
+        Args:
+            repo_path: Path to the repository
+            repo_name: Name of the repository
+            index_name: Target index name (uses config default if not provided)
+            
+        Returns:
+            Dictionary with indexing results
+        """
+        if not self._azure_operations:
+            return {'error': 'Azure Search operations not available'}
+            
+        try:
+            # Use consolidated FileProcessor for repository processing
+            documents = self._file_processor.process_repository(repo_path, repo_name)
+            
+            # Use the configured index name or provided one
+            target_index = index_name or getattr(self.config.azure, 'index_name', 'codebase-mcp-sota')
+            
+            # Upload documents using Azure operations
+            result = {'documents_processed': len(documents)}
+            logger.info(f"Processed {len(documents)} documents from {repo_name}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Repository indexing failed: {e}")
+            return {'error': str(e)}

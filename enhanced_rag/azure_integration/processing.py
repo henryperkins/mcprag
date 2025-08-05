@@ -1,15 +1,88 @@
-"""Shared file processing utilities for Azure Search indexing."""
+"""Consolidated file processing utilities for Azure Search indexing.
+
+This module serves as the single source of truth for all file processing
+operations across the azure_integration package. It consolidates the
+previously duplicated implementations from:
+- processing.py (this file)
+- reindex_operations.py 
+- automation/cli_manager.py
+
+Usage:
+    from .processing import FileProcessor
+    
+    processor = FileProcessor()
+    documents = processor.process_file(file_path, repo_path, repo_name)
+"""
 from __future__ import annotations
 import ast
 import hashlib
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Set
 import os
+
+logger = logging.getLogger(__name__)
+
+
+class FileProcessor:
+    """Consolidated file processor for all Azure Search indexing operations."""
+    
+    # Language mapping - single source of truth
+    LANGUAGE_MAP = {
+        '.py': 'python',
+        '.js': 'javascript',
+        '.mjs': 'javascript',
+        '.ts': 'typescript',
+        '.jsx': 'javascript',
+        '.tsx': 'typescript',
+        '.java': 'java',
+        '.cpp': 'cpp',
+        '.c': 'c',
+        '.cs': 'csharp',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.php': 'php',
+        '.rb': 'ruby',
+        '.swift': 'swift',
+        '.kt': 'kotlin',
+        '.scala': 'scala',
+        '.r': 'r',
+        '.md': 'markdown',
+        '.json': 'json',
+        '.yaml': 'yaml',
+        '.yml': 'yaml',
+        '.xml': 'xml',
+        '.html': 'html',
+        '.css': 'css',
+        '.scss': 'scss',
+        '.sass': 'sass'
+    }
+    
+    # Default extensions to process
+    DEFAULT_EXTENSIONS = {
+        '.py', '.js', '.mjs', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c',
+        '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
+        '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'
+    }
+    
+    def __init__(self, extensions: Optional[Set[str]] = None):
+        """Initialize file processor."""
+        self.extensions = extensions or self.DEFAULT_EXTENSIONS
+        
+    def get_language_from_extension(self, file_path: str) -> str:
+        """Determine programming language from file extension."""
+        ext = Path(file_path).suffix.lower()
+        return self.LANGUAGE_MAP.get(ext, 'text')
+    
+    def should_process_file(self, file_path: str) -> bool:
+        """Check if file should be processed based on extension."""
+        ext = Path(file_path).suffix.lower()
+        return ext in self.extensions
 
 
 def get_language_from_extension(file_path: str) -> str:
-    """Determine programming language from file extension."""
+    """Legacy function - use FileProcessor.get_language_from_extension() instead."""
     ext_map = {
         '.py': 'python',
         '.js': 'javascript',

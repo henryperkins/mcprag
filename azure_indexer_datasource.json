@@ -1,0 +1,12 @@
+{
+  "name": "mcprag-codebase-datasource",
+  "type": "azureblob",
+  "credentials": {
+    "connectionString": "DefaultEndpointsProtocol=https;AccountName={STORAGE_ACCOUNT_NAME};AccountKey={STORAGE_ACCOUNT_KEY};EndpointSuffix=core.windows.net"
+  },
+  "container": {
+    "name": "codebase",
+    "query": "/mcprag"
+  },
+  "description": "Data source for mcprag codebase files"
+}

@@ -1,11 +1,15 @@
 """Reindexing automation for Azure AI Search.
 
-This module integrates reindexing operations into the automation framework,
-providing streamlined access to drop-and-rebuild, incremental updates,
-and repository-based reindexing strategies.
+This module provides the unified reindexing interface, consolidating the
+previously duplicated implementations. It uses REST operations primarily
+and falls back to legacy ReindexOperations only when needed.
+
+DEPRECATION NOTICE: This module consolidates functionality that was previously
+duplicated between ReindexOperations and ReindexAutomation.
 """
 
 import logging
+import warnings
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
