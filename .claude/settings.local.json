@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(journalctl:*)"
+      "Bash(journalctl:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   },
