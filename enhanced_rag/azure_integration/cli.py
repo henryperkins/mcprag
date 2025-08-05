@@ -28,6 +28,7 @@ from .reindex_operations import ReindexOperations, ReindexMethod
 from .automation import DataAutomation
 from .rest import AzureSearchClient, SearchOperations
 from mcprag.config import Config
+from .cli_schema_automation import add_schema_commands
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -755,6 +756,9 @@ def main():
         help='Indexer name'
     )
 
+    # Add schema automation commands
+    schema_commands = add_schema_commands(subparsers)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -771,6 +775,9 @@ def main():
         'reindex': cmd_reindex,
         'indexer-status': cmd_indexer_status,
     }
+    
+    # Add schema commands to dispatch
+    commands.update(schema_commands)
 
     if args.command in commands:
         try:

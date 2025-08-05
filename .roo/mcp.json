@@ -24,6 +24,16 @@
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
+    },
+    "oxylabs": {
+      "command": "uvx",
+      "args": [
+        "oxylabs-mcp"
+      ],
+      "env": {
+        "OXYLABS_USERNAME": "hperkins_56bGN",
+        "OXYLABS_PASSWORD": "Twiohmld1234+"
+      }
     }
   }
 }

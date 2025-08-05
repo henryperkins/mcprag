@@ -1,0 +1,122 @@
+[
+  {
+    "server": "python-sdk",
+    "type": "python-module",
+    "module": "python_sdk.server",
+    "functional": false,
+    "error": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'python_sdk'\n",
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "docker",
+    "type": "python-module",
+    "module": "mcp_server_docker",
+    "functional": false,
+    "error": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'mcp_server_docker'\n",
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "jupyter",
+    "type": "python-module",
+    "module": "server_jupyter",
+    "functional": false,
+    "error": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'server_jupyter'\n",
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "postgresql",
+    "type": "python-module",
+    "module": "server_postgres",
+    "functional": false,
+    "error": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'server_postgres'\n",
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "opik",
+    "type": "python-module",
+    "module": "opik_mcp",
+    "functional": false,
+    "error": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'opik_mcp'\n",
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "memory-bank",
+    "type": "direct-command",
+    "command": "mcp-server-memory",
+    "functional": true,
+    "error": null,
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "sequential-thinking",
+    "type": "direct-command",
+    "command": "mcp-server-sequential-thinking",
+    "functional": true,
+    "error": null,
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "brave-search",
+    "type": "direct-command",
+    "command": "server-brave-search",
+    "functional": false,
+    "error": "Command not found",
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "google-maps",
+    "type": "direct-command",
+    "command": "mcp-server-google-maps",
+    "functional": true,
+    "error": null,
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "deep-graph-mcp",
+    "type": "npx-package",
+    "package": "-y",
+    "functional": true,
+    "error": null,
+    "config_file": ".mcp.json"
+  },
+  {
+    "server": "azure-code-search",
+    "type": "python-module",
+    "module": "mcprag",
+    "functional": true,
+    "error": null,
+    "config_file": "mcp-servers.json"
+  },
+  {
+    "server": "context7",
+    "type": "npx-package",
+    "package": "-y",
+    "functional": true,
+    "error": null,
+    "config_file": ".roo/mcp.json"
+  },
+  {
+    "server": "youtube",
+    "type": "npx-package",
+    "package": "-y",
+    "functional": true,
+    "error": null,
+    "config_file": ".roo/mcp.json"
+  },
+  {
+    "server": "sequentialthinking",
+    "type": "npx-package",
+    "package": "-y",
+    "functional": true,
+    "error": null,
+    "config_file": ".roo/mcp.json"
+  },
+  {
+    "server": "oxylabs",
+    "type": "uvx-package",
+    "package": "oxylabs-mcp",
+    "functional": true,
+    "error": null,
+    "config_file": ".roo/mcp.json"
+  }
+]

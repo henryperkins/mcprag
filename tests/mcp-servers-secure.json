@@ -1,7 +1,7 @@
 {
     "mcpServers": {
         "azure-code-search-sdk": {
-            "command": "python",
+            "command": "python3",
             "args": [
                 "mcp_server_sdk_proper.py"
             ],
@@ -10,7 +10,7 @@
             }
         },
         "azure-code-search-unified": {
-            "command": "python",
+            "command": "python3",
             "args": [
                 "mcp_server_unified.py",
                 "--mode",
@@ -21,7 +21,7 @@
             }
         },
         "azure-code-search": {
-            "command": "python",
+            "command": "python3",
             "args": [
                 "mcp_server_sota.py",
                 "--mode",

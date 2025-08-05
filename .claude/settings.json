@@ -1,8 +1,36 @@
 {
   "permissions": {
     "allow": [
-      "search_code"
+      "mcp__azure-code-search__search_code",
+      "mcp__azure-code-search__search_code_raw",
+      "mcp__azure-code-search__preview_query_processing",
+      "mcp__azure-code-search__explain_ranking",
+      "mcp__azure-code-search__cache_stats",
+      "mcp__azure-code-search__cache_clear",
+      "Bash(python:*)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "post-file-change": [
+      {
+        "command": "python3 -m enhanced_rag.azure_integration.cli changed-files --files {files} --repo-name mcprag",
+        "description": "Re-index changed files for search"
+      }
+    ],
+    "pre-commit": [
+      {
+        "command": "bash scripts/pre-commit-index-check.sh",
+        "description": "Check for prohibited index creator files"
+      },
+      {
+        "command": "flake8 {staged_files}",
+        "description": "Lint Python files before commit"
+      },
+      {
+        "command": "mypy {staged_files}",
+        "description": "Type check Python files"
+      }
+    ]
   }
 }

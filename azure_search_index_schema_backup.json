@@ -265,7 +265,7 @@
       "filterable": false,
       "sortable": false,
       "facetable": false,
-      "dimensions": 3072,
+      "dimensions": 1536,
       "vectorSearchProfile": "vector-profile-hnsw"
     },
     {
@@ -366,7 +366,7 @@
     "profiles": [
       {
         "name": "vector-profile-hnsw",
-        "algorithm": "hnsw-config",
+        "algorithmConfigurationName": "hnsw-config",
         "vectorizerName": "text-embedding-3-large-vectorizer"
       }
     ],
@@ -382,7 +382,7 @@
       }
     ]
   },
-  "semanticConfiguration": {
+  "semantic": {
     "configurations": [
       {
         "name": "semantic-config",
