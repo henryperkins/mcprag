@@ -1,6 +1,9 @@
 #!/bin/bash
 # MCP Server wrapper script that loads environment variables
 
+# Activate virtual environment
+source /home/azureuser/mcprag/venv/bin/activate
+
 # Load from .env file if it exists
 if [ -f "/home/azureuser/mcprag/.env" ]; then
     export $(grep -v '^#' /home/azureuser/mcprag/.env | xargs)
@@ -16,4 +19,4 @@ if [ -z "$ACS_ENDPOINT" ] || [ -z "$ACS_ADMIN_KEY" ]; then
 fi
 
 # Run the MCP server from the mcprag package
-exec python3 -m mcprag "$@"
+exec python -m mcprag "$@"

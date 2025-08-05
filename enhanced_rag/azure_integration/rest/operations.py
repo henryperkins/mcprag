@@ -165,6 +165,9 @@ class SearchOperations:
             Document count
         """
         result = await self.client.request("GET", f"/indexes/{index_name}/docs/$count")
+        # The count endpoint returns a plain integer, not a dictionary
+        if isinstance(result, int):
+            return result
         return result.get("@odata.count", 0)
     
     async def search(
