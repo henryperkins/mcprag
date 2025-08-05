@@ -403,3 +403,278 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return ok({"skillset": name, "result": result})
         except Exception as e:
             return err(str(e))
+
+    @mcp.tool()
+    async def index_status() -> Dict[str, Any]:
+        """Get the current status of the Azure Search index."""
+        if not check_component(server.index_automation, "Index automation"):
+            return err("Index automation not available")
+
+        try:
+            from ...config import Config
+            index_name = Config.INDEX_NAME
+            
+            # Get index stats and definition using automation components
+            if server.index_automation is None:
+                return err("Index automation component is not initialized")
+                
+            stats = await server.index_automation.ops.get_index_stats(index_name)
+            index_def = await server.index_automation.ops.get_index(index_name)
+            
+            return ok({
+                "index_name": index_name,
+                "fields": len(index_def.get("fields", [])),
+                "documents": stats.get("documentCount", 0),
+                "storage_size_mb": round(stats.get("storageSize", 0) / (1024 * 1024), 2),
+                "vector_search": bool(index_def.get("vectorSearch")),
+                "semantic_search": bool(index_def.get("semanticSearch"))
+            })
+            
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def validate_index_schema(
+        expected_schema: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Validate the current index schema."""
+        if not check_component(server.index_automation, "Index automation"):
+            return err("Index automation not available")
+
+        try:
+            from ...config import Config
+            index_name = Config.INDEX_NAME
+                
+            if server.index_automation is None:
+                return err("Index automation component is not initialized")
+                
+            result = await server.index_automation.validate_index_schema(
+                index_name, expected_schema
+            )
+            return ok(result)
+            
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def index_repository(
+        repo_path: str = ".",
+        repo_name: str = "mcprag",
+        patterns: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Index a repository into Azure Search using the CLI automation.
+        
+        Args:
+            repo_path: Path to the repository to index (default: current directory)
+            repo_name: Name to use for the repository in the search index
+            patterns: File patterns to include (e.g., ["*.py", "*.js"])
+        """
+        try:
+            from ...config import Config
+            if not Config.ADMIN_MODE:
+                return err("Admin mode required for repository indexing")
+                
+            # Use the CLI automation to index repository
+            import subprocess
+            import os
+            
+            # Activate virtual environment and run indexing
+            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            
+            cmd = [
+                venv_python, "-m", "enhanced_rag.azure_integration.cli",
+                "local-repo", "--repo-path", repo_path, "--repo-name", repo_name
+            ]
+            
+            if patterns:
+                cmd.extend(["--patterns"] + patterns)
+            
+            # Set working directory to project root
+            cwd = "/home/azureuser/mcprag"
+            
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                cwd=cwd,
+                env=dict(os.environ, PYTHONPATH=cwd)
+            )
+            
+            if result.returncode != 0:
+                return err(f"Failed to index repository: {result.stderr}")
+            
+            return ok({
+                "indexed": True,
+                "repo_path": repo_path,
+                "repo_name": repo_name,
+                "patterns": patterns,
+                "output": result.stdout.strip()
+            })
+            
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def index_changed_files(
+        files: List[str],
+        repo_name: str = "mcprag"
+    ) -> Dict[str, Any]:
+        """Index specific changed files into Azure Search.
+        
+        Args:
+            files: List of file paths that have changed
+            repo_name: Name of the repository in the search index
+        """
+        try:
+            from ...config import Config
+            if not Config.ADMIN_MODE:
+                return err("Admin mode required for file indexing")
+                
+            import subprocess
+            import os
+            
+            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            cwd = "/home/azureuser/mcprag"
+            
+            cmd = [
+                venv_python, "-m", "enhanced_rag.azure_integration.cli",
+                "changed-files", "--files"
+            ] + files + ["--repo-name", repo_name]
+            
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                cwd=cwd,
+                env=dict(os.environ, PYTHONPATH=cwd)
+            )
+            
+            if result.returncode != 0:
+                return err(f"Failed to index changed files: {result.stderr}")
+            
+            return ok({
+                "indexed": True,
+                "files": files,
+                "repo_name": repo_name,
+                "output": result.stdout.strip()
+            })
+            
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def backup_index_schema(
+        output_file: str = "schema_backup.json"
+    ) -> Dict[str, Any]:
+        """Backup the current index schema to a file.
+        
+        Args:
+            output_file: Path where to save the schema backup
+        """
+        try:
+            from ...config import Config
+            if not Config.ADMIN_MODE:
+                return err("Admin mode required for schema backup")
+                
+            import subprocess
+            import os
+            
+            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            cwd = "/home/azureuser/mcprag"
+            
+            result = subprocess.run([
+                venv_python, "-m", "enhanced_rag.azure_integration.cli",
+                "reindex", "--method", "backup", "--output", output_file
+            ], capture_output=True, text=True, cwd=cwd,
+               env=dict(os.environ, PYTHONPATH=cwd))
+            
+            if result.returncode != 0:
+                return err(f"Failed to backup schema: {result.stderr}")
+            
+            return ok({
+                "backed_up": True,
+                "output_file": output_file,
+                "output": result.stdout.strip()
+            })
+            
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def clear_repository_documents(
+        repository_filter: str
+    ) -> Dict[str, Any]:
+        """Clear documents from a specific repository in the index.
+        
+        Args:
+            repository_filter: Filter to match repository documents (e.g., "repository eq 'old-repo'")
+        """
+        try:
+            from ...config import Config
+            if not Config.ADMIN_MODE:
+                return err("Admin mode required for document clearing")
+                
+            import subprocess
+            import os
+            
+            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            cwd = "/home/azureuser/mcprag"
+            
+            result = subprocess.run([
+                venv_python, "-m", "enhanced_rag.azure_integration.cli",
+                "reindex", "--method", "clear", "--filter", repository_filter
+            ], capture_output=True, text=True, cwd=cwd,
+               env=dict(os.environ, PYTHONPATH=cwd))
+            
+            if result.returncode != 0:
+                return err(f"Failed to clear documents: {result.stderr}")
+            
+            return ok({
+                "cleared": True,
+                "filter": repository_filter,
+                "output": result.stdout.strip()
+            })
+            
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
+    async def rebuild_index(
+        confirm: bool = False
+    ) -> Dict[str, Any]:
+        """Drop and rebuild the entire index. ⚠️ CAUTION: This deletes all data!
+        
+        Args:
+            confirm: Must be set to True to confirm this destructive operation
+        """
+        try:
+            from ...config import Config
+            if not Config.ADMIN_MODE:
+                return err("Admin mode required for index rebuild")
+                
+            if not confirm:
+                return err("Must set confirm=True to rebuild index. This operation deletes all data!")
+                
+            import subprocess
+            import os
+            
+            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            cwd = "/home/azureuser/mcprag"
+            
+            result = subprocess.run([
+                venv_python, "-m", "enhanced_rag.azure_integration.cli",
+                "reindex", "--method", "drop-rebuild"
+            ], capture_output=True, text=True, cwd=cwd,
+               env=dict(os.environ, PYTHONPATH=cwd))
+            
+            if result.returncode != 0:
+                return err(f"Failed to rebuild index: {result.stderr}")
+            
+            return ok({
+                "rebuilt": True,
+                "warning": "All previous data has been deleted",
+                "output": result.stdout.strip()
+            })
+            
+        except Exception as e:
+            return err(str(e))

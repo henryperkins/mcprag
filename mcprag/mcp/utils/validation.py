@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class ValidationError(Exception):
     """Exception raised when validation fails."""
     
-    def __init__(self, message: str, field: str = None, value: Any = None):
+    def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
         """Initialize validation error.
         
         Args:
@@ -30,7 +30,7 @@ class ValidationError(Exception):
 class ValidationRule:
     """Base validation rule."""
     
-    def validate(self, value: Any, field_name: str = None) -> Any:
+    def validate(self, value: Any, field_name: Optional[str] = None) -> Any:
         """Validate a value.
         
         Args:
@@ -50,7 +50,7 @@ class ValidationRule:
 class RequiredRule(ValidationRule):
     """Rule to ensure a field is present and not None."""
     
-    def validate(self, value: Any, field_name: str = None) -> Any:
+    def validate(self, value: Any, field_name: Optional[str] = None) -> Any:
         if value is None:
             raise ValidationError(f"Field '{field_name}' is required", field_name, value)
         return value
@@ -62,7 +62,7 @@ class TypeRule(ValidationRule):
     
     expected_type: Type
     
-    def validate(self, value: Any, field_name: str = None) -> Any:
+    def validate(self, value: Any, field_name: Optional[str] = None) -> Any:
         if value is None:
             return None  # Allow None values unless RequiredRule is also applied
         if not isinstance(value, self.expected_type):
@@ -82,7 +82,7 @@ class StringRule(ValidationRule):
     pattern: Optional[str] = None
     allowed_values: Optional[List[str]] = None
     
-    def validate(self, value: Any, field_name: str = None) -> Any:
+    def validate(self, value: Any, field_name: Optional[str] = None) -> Any:
         if value is None:
             return None  # Allow None values unless RequiredRule is also applied
         if not isinstance(value, str):
@@ -123,7 +123,10 @@ class NumberRule(ValidationRule):
     max_value: Optional[Union[int, float]] = None
     number_type: Type = int
     
-    def validate(self, value: Any, field_name: str = None) -> Any:
+    def validate(self, value: Any, field_name: Optional[str] = None) -> Any:
+        if value is None:
+            return None  # Allow None values unless RequiredRule is also applied
+        
         # Try to convert to the expected number type
         try:
             if self.number_type == int:
@@ -161,7 +164,7 @@ class ListRule(ValidationRule):
     max_items: Optional[int] = None
     item_rules: Optional[List[ValidationRule]] = None
     
-    def validate(self, value: Any, field_name: str = None) -> Any:
+    def validate(self, value: Any, field_name: Optional[str] = None) -> Any:
         if not isinstance(value, list):
             raise ValidationError(f"Field '{field_name}' must be a list", field_name, value)
         
@@ -192,7 +195,7 @@ class ListRule(ValidationRule):
 class Validator:
     """Schema-based validator for MCP tool inputs."""
     
-    def __init__(self, schema: Dict[str, List[ValidationRule]]):
+    def __init__(self, schema: Dict[str, List['ValidationRule']]):
         """Initialize validator with schema.
         
         Args:
@@ -235,7 +238,7 @@ class Validator:
         return validated_data
 
 
-def validate_input(schema: Dict[str, List[ValidationRule]]):
+def validate_input(schema: Dict[str, List['ValidationRule']]):
     """Decorator to validate function inputs.
     
     Args:
@@ -306,7 +309,7 @@ GENERATE_CODE_SCHEMA = {
 }
 
 
-def create_mcp_validator(tool_name: str) -> Optional[Validator]:
+def create_mcp_validator(tool_name: str) -> Optional['Validator']:
     """Create a validator for a specific MCP tool.
     
     Args:

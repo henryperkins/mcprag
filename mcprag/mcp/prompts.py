@@ -107,3 +107,66 @@ Please search_code with:
 3. Find usage examples
 
 Extract practical usage patterns from the test cases."""
+
+    @mcp.prompt()
+    async def manage_azure_search_index() -> str:
+        """Guide for managing Azure Search indices."""
+        return """# Azure Search Index Management
+
+## Available Index Management Tools
+
+### Status & Monitoring
+- **index_status()** - Get current index status (documents, fields, storage)
+- **validate_index_schema()** - Validate index schema for issues
+- **health_check()** - Check all system components health
+
+### Repository Indexing
+- **index_repository(repo_path=".", repo_name="mcprag", patterns=["*.py", "*.js"])** - Index entire repository
+- **index_changed_files(files=["file1.py", "file2.js"], repo_name="mcprag")** - Index specific files
+
+### Schema Management
+- **backup_index_schema(output_file="backup.json")** - Backup current schema
+- **manage_index(action="validate", index_name="my-index")** - Advanced index operations
+
+### Data Management
+- **clear_repository_documents(repository_filter="repository eq 'old-repo'")** - Clear specific repo docs
+- **manage_documents(action="count", index_name="my-index")** - Document operations
+- **rebuild_index(confirm=True)** - ⚠️ Drop and rebuild (DESTRUCTIVE!)
+
+### Advanced Operations
+- **manage_indexer(action="status", indexer_name="my-indexer")** - Indexer management
+- **create_datasource(name, datasource_type, connection_info)** - Create data sources
+
+## Common Workflows
+
+### 1. Check Index Health
+```
+1. index_status() - Get current stats
+2. validate_index_schema() - Check for issues
+3. health_check() - Verify components
+```
+
+### 2. Update Repository Index
+```
+1. index_repository(repo_path=".", repo_name="myproject")
+2. index_status() - Verify update
+```
+
+### 3. Incremental Updates
+```
+1. index_changed_files(["changed1.py", "changed2.js"])
+2. index_status() - Check document count
+```
+
+### 4. Schema Backup & Recovery
+```
+1. backup_index_schema("backup.json") - Before changes
+2. manage_index(action="validate") - After changes
+```
+
+## Security Notes
+- Most operations require ADMIN_MODE=true in environment
+- Destructive operations (rebuild_index) require explicit confirmation
+- All operations are logged for audit trail
+
+Use these tools to seamlessly manage your Azure Search index without manual CLI commands."""

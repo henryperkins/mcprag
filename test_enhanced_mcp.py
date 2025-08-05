@@ -21,7 +21,7 @@ async def search_code(query: str, max_results: int = 10, language: str = None):
     return {
         "results": [
             {"file": f"test_{i}.py", "line": i, "content": f"// {query} result {i}"}
-            for i in range(min(max_results, 3))
+            for i in range(min(max_results or 10, 3))
         ],
         "query": query,
         "language": language
@@ -112,9 +112,9 @@ async def test_input_sanitization():
     """Test input sanitization."""
     print("\n=== Testing Input Sanitization ===")
     
-    # Test with potentially dangerous input
-    dangerous_query = "<script>alert('xss')</script>SELECT * FROM users"
-    result = await search_code(query=dangerous_query)
+    # Test with potentially dangerous input (use analyze_context to avoid rate limit)
+    dangerous_path = "<script>alert('xss')</script>/path/to/malicious.js"
+    result = await analyze_context(file_path=dangerous_path)
     
     # Check if the dangerous content was sanitized
     if "<script>" not in str(result):

@@ -6,7 +6,10 @@
       "Bash(find:*)",
       "Bash(ls:*)",
       "Bash(source:*)",
-      "mcp__sequential-thinking__sequentialthinking"
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(pip3 install:*)",
+      "mcp__deep-graph-mcp__folder-tree-structure",
+      "mcp__deep-graph-mcp__get-code"
     ],
     "deny": []
   },

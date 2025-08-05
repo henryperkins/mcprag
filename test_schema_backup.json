@@ -1,0 +1,306 @@
+{
+  "name": "codebase-mcp-sota",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "content",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "analyzerName": "standard.lucene",
+      "synonymMapNames": []
+    },
+    {
+      "name": "file_path",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "function_name",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "class_name",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "repository",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "language",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "tags",
+      "type": "Collection(Edm.String)",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "imports",
+      "type": "Collection(Edm.String)",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "called_functions",
+      "type": "Collection(Edm.String)",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "start_line",
+      "type": "Edm.Int32",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "end_line",
+      "type": "Edm.Int32",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "parent_context",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "docstring",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "context_type",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "chunking_metadata",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "created_at",
+      "type": "Edm.DateTimeOffset",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "semantic_context",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "chunk_type",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "chunk_id",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "last_modified",
+      "type": "Edm.DateTimeOffset",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "file_extension",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "signature",
+      "type": "Edm.String",
+      "key": false,
+      "hidden": false,
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "synonymMapNames": []
+    },
+    {
+      "name": "content_vector",
+      "type": "Collection(Edm.Single)",
+      "key": false,
+      "hidden": true,
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "synonymMapNames": [],
+      "vectorSearchDimensions": 3072,
+      "vectorSearchProfile": "vector-profile"
+    }
+  ],
+  "scoringProfiles": [],
+  "suggesters": [],
+  "tokenFilters": [],
+  "charFilters": [],
+  "normalizers": [],
+  "similarity": {
+    "@odata.type": "#Microsoft.Azure.Search.BM25Similarity"
+  },
+  "vectorSearch": {
+    "profiles": [
+      {
+        "name": "vector-profile",
+        "algorithm": "vector-algo"
+      }
+    ],
+    "algorithms": [
+      {
+        "name": "vector-algo",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500,
+          "metric": "cosine"
+        }
+      }
+    ],
+    "vectorizers": []
+  },
+  "_backup_metadata": {
+    "timestamp": "2025-08-05T07:20:26.804877",
+    "index_name": "codebase-mcp-sota",
+    "document_count": 1672
+  }
+}
