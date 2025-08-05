@@ -5,7 +5,8 @@
       "Bash(journalctl:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "mcp__sequential-thinking__sequentialthinking"
     ],
     "deny": []
   },

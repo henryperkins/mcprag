@@ -1,7 +1,6 @@
 {
   "mcpServers": {
     "typescript-sdk": {
-      "name": "TypeScript SDK",
       "command": "node",
       "args": [
         "path/to/ts-sdk-server.js"
@@ -9,7 +8,6 @@
       "env": {}
     },
     "github": {
-      "name": "GitHub MCP",
       "command": "node",
       "args": [
         "path/to/server-github"
@@ -19,7 +17,6 @@
       }
     },
     "puppeteer": {
-      "name": "Puppeteer MCP",
       "command": "node",
       "args": [
         "path/to/server-puppeteer"
@@ -27,7 +24,6 @@
       "env": {}
     },
     "slack": {
-      "name": "Slack MCP",
       "command": "node",
       "args": [
         "path/to/server-slack"
@@ -37,43 +33,10 @@
       }
     },
     "filesystem": {
-      "name": "File System MCP",
       "command": "node",
       "args": [
         "path/to/server-filesystem"
       ],
-      "env": {}
-    },
-    "memory-bank": {
-      "name": "Memory Bank MCP",
-      "command": "server-memory",
-      "args": [],
-      "env": {}
-    },
-    "sequential-thinking": {
-      "name": "Sequential Thinking MCP",
-      "command": "code-reasoning",
-      "args": [],
-      "env": {}
-    },
-    "brave-search": {
-      "name": "Brave Search MCP",
-      "command": "server-brave-search",
-      "args": [],
-      "env": {}
-    },
-    "google-maps": {
-      "name": "Google Maps MCP",
-      "command": "server-google-maps",
-      "args": [],
-      "env": {
-        "GOOGLE_MAPS_API_KEY": "..."
-      }
-    },
-    "deep-graph": {
-      "name": "Deep Graph MCP (Code Graph)",
-      "command": "mcp-code-graph",
-      "args": [],
       "env": {}
     },
     "DeepGraph React MCP": {
@@ -90,6 +53,33 @@
         "-y",
         "@modelcontextprotocol/server-memory"
       ]
+    },
+    "memory-bank": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {}
+    },
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "env": {}
+    },
+    "brave-search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {}
     }
   }
 }
