@@ -183,6 +183,13 @@
   word-wrap: break-word;
   min-height: 1.2em;
   position: relative;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background 0.15s ease;
+}
+
+.terminal-input-field:hover:not(:focus) {
+  background: rgba(142, 234, 52, 0.03);
 }
 
 /* Terminal Output */
@@ -230,11 +237,20 @@
 
 .panel-resizer {
   background: rgba(128, 128, 128, 0.2);
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  position: relative;
+  cursor: col-resize;
 }
 
 .panel-resizer:hover {
-  background: rgba(128, 128, 128, 0.4);
+  background: var(--ansi-12);
+  opacity: 0.5;
+  width: 3px;
+}
+
+.panel-resizer:active {
+  background: var(--ansi-12);
+  opacity: 0.8;
 }
 
 .panel-content {
@@ -379,8 +395,14 @@
 }
 
 .file-tree-icon {
-  margin-right: 4px;
+  margin-right: 6px;
   font-size: 12px;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+
+.file-tree-item:hover .file-tree-icon {
+  transform: scale(1.1) translateX(2px);
 }
 
 /* ChatPane Styles */
@@ -418,13 +440,13 @@
 }
 
 .chat-message {
-  margin-bottom: 16px;
-  padding: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
   border-radius: 6px;
-  background: rgba(128, 128, 128, 0.08);
-  border: 1px solid rgba(128, 128, 128, 0.1);
+  background: rgba(128, 128, 128, 0.05);
+  border: 1px solid rgba(128, 128, 128, 0.15);
   position: relative;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   cursor: pointer;
 }
 
@@ -471,29 +493,33 @@
 }
 
 .chat-message-user {
-  border-left: 3px solid var(--ansi-3);
-  background: rgba(196, 160, 0, 0.1);
+  border-left: 4px solid var(--ansi-11);
+  background: linear-gradient(90deg, rgba(252, 233, 79, 0.08) 0%, transparent 100%);
+  padding-left: 16px;
 }
 
 .chat-message-assistant {
-  border-left: 3px solid var(--ansi-12);
-  background: rgba(114, 159, 207, 0.1);
+  border-left: 4px solid var(--ansi-12);
+  background: linear-gradient(90deg, rgba(114, 159, 207, 0.08) 0%, transparent 100%);
+  padding-left: 16px;
 }
 
 .chat-message-tool {
-  border-left: 3px solid var(--ansi-5);
-  background: rgba(117, 80, 123, 0.1);
+  border-left: 4px solid var(--ansi-13);
+  background: linear-gradient(90deg, rgba(173, 127, 168, 0.08) 0%, transparent 100%);
+  padding-left: 16px;
+  font-size: 0.95em;
 }
 
 .chat-message-role {
-  font-weight: 600;
-  margin-bottom: 8px;
-  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .chat-message-icon {
@@ -503,14 +529,17 @@
 
 .chat-message-user .chat-message-role {
   color: var(--ansi-11);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .chat-message-assistant .chat-message-role {
   color: var(--ansi-14);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .chat-message-tool .chat-message-role {
   color: var(--ansi-13);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .chat-message-text {
@@ -518,9 +547,11 @@
   word-wrap: break-word;
   overflow-wrap: break-word;
   word-break: break-word;
-  line-height: 1.4;
+  line-height: 1.5;
   max-width: 100%;
   overflow-x: auto;
+  color: var(--term-fg);
+  margin: 4px 0;
 }
 
 .chat-message-text code {
@@ -543,6 +574,8 @@
 
 .chat-message-footer {
   margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(128, 128, 128, 0.1);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -593,17 +626,41 @@
   font-family: var(--font-mono);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s;
-  color: inherit;
+  transition: all 0.15s ease;
+  color: var(--term-dim);
+  position: relative;
+  overflow: hidden;
+}
+
+.copy-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(114, 159, 207, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.3s, height 0.3s;
 }
 
 .copy-button:hover {
-  background: rgba(128, 128, 128, 0.1);
-  border-color: rgba(128, 128, 128, 0.5);
+  background: rgba(114, 159, 207, 0.1);
+  border-color: var(--ansi-12);
+  color: var(--term-fg);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.copy-button:hover::before {
+  width: 100%;
+  height: 100%;
 }
 
 .copy-button:active {
-  transform: scale(0.95);
+  transform: scale(0.95) translateY(0);
+  box-shadow: none;
 }
 
 /* PWA Install Prompt */
@@ -655,11 +712,21 @@
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 12px;
-  transition: opacity 0.2s;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .pwa-install-button:hover {
-  opacity: 0.8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(142, 234, 52, 0.3);
+  background: var(--ansi-10);
+  filter: brightness(1.1);
+}
+
+.pwa-install-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(142, 234, 52, 0.2);
 }
 
 .pwa-install-button.dismiss {
