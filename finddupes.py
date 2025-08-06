@@ -391,6 +391,7 @@ def main():
 
     # Write CSV and perform actions
     args.csv_out.parent.mkdir(parents=True, exist_ok=True)
+    permission_errors = 0
     with args.csv_out.open("w", newline="", encoding="utf-8") as csvfile:
         wr = csv.writer(csvfile)
         wr.writerow(["keeper", "duplicate", "distance"])
@@ -428,6 +429,9 @@ def main():
                             acted += 1
                             if args.verbose:
                                 print(f"Moved: {dupe} -> {new_path}")
+                        except PermissionError as e:
+                            permission_errors += 1
+                            print(f"Move failed for {dupe}: Permission denied", file=sys.stderr)
                         except Exception as e:
                             print(f"Move failed for {dupe}: {e}", file=sys.stderr)
 
@@ -441,6 +445,9 @@ def main():
                             acted += 1
                             if args.verbose:
                                 print(f"Deleted: {dupe} ({'trash' if args.trash else 'permanent'})")
+                        except PermissionError as e:
+                            permission_errors += 1
+                            print(f"Delete failed for {dupe}: Permission denied", file=sys.stderr)
                         except Exception as e:
                             print(f"Delete failed for {dupe}: {e}", file=sys.stderr)
 
@@ -452,10 +459,13 @@ def main():
             wrs.writerow(["path", "reason"])
             wrs.writerows(skipped_rows)
 
-    # Summary with actions performed
-    print(f"Done. Duplicate groups: {sum(1 for g in index_groups if len(g>1))}. Report: {args.csv_out}")
+    # Summary with actions performed - FIXED: len(g) > 1 instead of len(g>1)
+    print(f"Done. Duplicate groups: {sum(1 for g in index_groups if len(g) > 1)}. Report: {args.csv_out}")
     if dupes_found and args.action != "none":
         print(f"Duplicates acted on: {acted} ({'moved' if args.action=='move' else 'deleted'})")
+    if permission_errors > 0:
+        print(f"\n⚠️  Permission denied for {permission_errors} files.", file=sys.stderr)
+        print(f"    Try running with sudo: sudo python {__file__} ...", file=sys.stderr)
     if skipped_rows:
         print(f"Skipped files: {len(skipped_rows)}. See: {args.skipped_out}")
 
@@ -512,10 +522,20 @@ def main():
     #      /var/lib/plexmediaserver/Library/videos \
     #      --action delete --trash --verbose
     #
+    # 6) Delete with sudo for permission issues
+    #    sudo python /home/azureuser/mcprag/finddupes.py \
+    #      /var/lib/plexmediaserver/Library/videos \
+    #      --action delete \
+    #      --threshold 8 --n-frames 5 --workers 8 \
+    #      --csv-out /home/azureuser/mcprag/duplicates.csv \
+    #      --skipped-out /home/azureuser/mcprag/skipped.csv \
+    #      --verbose
+    #
     # Notes:
     # - Keep dupe-dir outside the scanned folder to avoid reprocessing moved files.
     # - Use --extensions ".mp4,.mkv" to restrict formats if needed.
     # - Tweak --threshold if too strict/lenient; typical range 6–12.
+    # - If you get permission errors, use sudo to run the script.
 
 
 if __name__ == "__main__":

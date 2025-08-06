@@ -1,36 +1,10 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(python:*)",
-      "Bash(journalctl:*)",
-      "Bash(find:*)",
-      "Bash(ls:*)",
-      "Bash(source:*)",
-      "mcp__sequential-thinking__sequentialthinking",
-      "Bash(pip3 install:*)",
-      "mcp__deep-graph-mcp__folder-tree-structure",
-      "mcp__deep-graph-mcp__get-code",
-      "Bash(printenv)"
-    ],
-    "deny": []
-  },
   "enabledMcpjsonServers": [
-    "python-sdk",
-    "docker",
-    "jupyter",
-    "postgresql",
-    "opik",
+    "DeepGraph React MCP",
+    "memory",
     "memory-bank",
     "sequential-thinking",
-    "brave-search",
-    "google-maps",
-    "deep-graph",
-    "typescript-sdk",
-    "github",
-    "puppeteer",
-    "slack",
-    "filesystem",
-    "DeepGraph React MCP",
-    "memory"
-  ]
+    "brave-search"
+  ],
+  "enableAllProjectMcpServers": true
 }
