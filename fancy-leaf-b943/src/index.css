@@ -188,10 +188,13 @@ button:focus-visible {
 .text-primary { color: var(--text-primary); }
 .text-secondary { color: var(--text-secondary); }
 .text-muted { color: var(--text-muted); }
-.text-success { color: var(--color-success); }
-.text-warning { color: var(--color-warning); }
-.text-error { color: var(--color-error); }
-.text-info { color: var(--color-info); }
+.text-success { color: var(--ansi-10); } /* Green */
+.text-warning { color: var(--ansi-11); } /* Yellow */
+.text-error { color: var(--ansi-9); } /* Bright Red */
+.text-info { color: var(--ansi-12); } /* Blue */
+.text-accent { color: var(--ansi-14); } /* Cyan */
+.text-prompt { color: var(--ansi-2); } /* Dark Green for terminal prompt */
+.text-brand { color: var(--ansi-10); } /* Brand green */
 
 .bg-primary { background-color: var(--bg-primary); }
 .bg-secondary { background-color: var(--bg-secondary); }

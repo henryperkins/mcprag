@@ -1,20 +1,31 @@
 import { useState, useEffect, useRef } from 'react'
+import { useUnifiedSession, usePerformanceMonitor } from '../store/unified.adapter'
 import { useSession } from '../store/session.state'
 import { ChevronDown, Terminal, Settings, RotateCcw } from 'lucide-react'
-import { usePerformanceMonitor } from '../store/unified.adapter'
 
 export function Header() {
+  // Use unified state for reading
+  const unifiedState = useUnifiedSession()
+  
+  // Still need original session for actions (until migrated)
   const {
-    initMeta,
-    runStats,
-    currentSessionId,
-    controls,
     setControls,
     recentSessions,
     setSession,
     clearSession,
-    isRunning,
   } = useSession()
+  
+  // Extract values from unified state
+  const initMeta = {
+    model: unifiedState.session.model,
+    cwd: unifiedState.session.cwd,
+    tools: unifiedState.session.tools,
+    mcpServers: unifiedState.session.mcpServers,
+  }
+  const runStats = unifiedState.session.stats
+  const currentSessionId = unifiedState.session.id
+  const isRunning = unifiedState.session.isRunning
+  const controls = useSession().controls // Keep for now as it's not in unified yet
   
   const [showSessionMenu, setShowSessionMenu] = useState(false)
   const [resumeId, setResumeId] = useState('')
@@ -252,7 +263,6 @@ export function Header() {
               <div className="flex items-center gap-3 text-xs text-white/60" role="group" aria-label="Session statistics">
                 <span aria-label={`Turns: ${runStats.numTurns}`}>Turns: {runStats.numTurns}</span>
                 <span aria-label={`Duration: ${runStats.durationMs} milliseconds`}>Time: {runStats.durationMs}ms</span>
-                <span aria-label={`API time: ${runStats.durationApiMs} milliseconds`}>API: {runStats.durationApiMs}ms</span>
                 <span className="text-emerald-400" aria-label={`Cost: ${runStats.totalCostUsd.toFixed(4)} dollars`}>
                   ${runStats.totalCostUsd.toFixed(4)}
                 </span>

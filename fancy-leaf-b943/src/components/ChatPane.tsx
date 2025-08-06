@@ -1,25 +1,27 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import { useSessionStore } from '../store/session';
+import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom';
 import { renderAnsiToSpans } from '../utils/ansi';
 
 export const ChatPane: React.FC = () => {
   const { transcript } = useSessionStore(state => state.terminal);
   const scrollRef = useRef<HTMLDivElement>(null);
   
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [transcript]);
+  // Auto-scroll only when near bottom
+  useAutoScrollNearBottom(
+    scrollRef,
+    [transcript],
+    40 // threshold in pixels
+  );
   
   return (
     <div className="chat-pane-container">
-      <div className="chat-pane-header fg-ansi-10">
+      <div className="chat-pane-header text-brand">
         Chat History
       </div>
       <div className="chat-pane-content" ref={scrollRef}>
         {transcript.length === 0 ? (
-          <div className="chat-empty fg-ansi-8">
+          <div className="chat-empty text-muted">
             No messages yet. Start typing in the terminal to begin.
           </div>
         ) : (
@@ -38,7 +40,7 @@ export const ChatPane: React.FC = () => {
                 }
               }}
             >
-              <div className="chat-message-role fg-ansi-14">
+              <div className="chat-message-role text-accent">
                 <span className="chat-message-icon">
                   {msg.role === 'user' ? '👤' : msg.role === 'assistant' ? '🤖' : '🔧'}
                 </span>
@@ -49,12 +51,12 @@ export const ChatPane: React.FC = () => {
               </div>
               <div className="chat-message-footer">
                 {msg.timestamp && (
-                  <div className="chat-message-time fg-ansi-8">
+                  <div className="chat-message-time text-muted">
                     {new Date(msg.timestamp).toLocaleTimeString()}
                   </div>
                 )}
                 <div className="chat-message-status">
-                  <span className="chat-message-status-icon fg-ansi-10">✓</span>
+                  <span className="chat-message-status-icon text-success">✓</span>
                 </div>
               </div>
             </div>

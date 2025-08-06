@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { Terminal } from './components/Terminal';
-import { FileTree } from './components/FileTree';
+import { Terminal } from './components/Terminal.optimized';
+import { FileTree } from './components/FileTree.accessible';
 import { ChatPane } from './components/ChatPane';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { OfflineIndicator } from './components/OfflineIndicator';

@@ -231,10 +231,10 @@ export const FileTree: React.FC = () => {
           aria-posinset={1}
           tabIndex={isFocused ? 0 : -1}
         >
-          <span className="file-tree-icon fg-ansi-8" aria-hidden="true">
+          <span className="file-tree-icon text-muted" aria-hidden="true">
             {node.type === 'folder' ? (isExpanded ? '▼' : '▶') : '○'}{' '}
           </span>
-          <span className={node.type === 'folder' ? 'fg-ansi-12' : 'fg-ansi-7'}>
+          <span className={node.type === 'folder' ? 'text-info' : 'text-secondary'}>
             {node.name}
           </span>
         </div>
@@ -276,7 +276,7 @@ export const FileTree: React.FC = () => {
   return (
     <div className="file-tree">
       <div className="file-tree-header">
-        <h2 className="file-tree-title fg-ansi-10">Files</h2>
+        <h2 className="file-tree-title text-brand">Files</h2>
       </div>
       <div
         ref={treeRef}

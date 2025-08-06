@@ -1,6 +1,9 @@
 // Note: The @anthropic-ai/claude-code package integration
 // This implementation handles both SDK availability and mock responses
 
+// Import type from Claude Code SDK when available
+// import type { SDKMessage as ClaudeSDKMessage } from '@anthropic-ai/claude-code'
+
 interface QueryBody {
   prompt: string
   outputFormat?: 'text' | 'json' | 'stream-json'
@@ -93,32 +96,27 @@ export default {
               if (hasApiKey) {
                 try {
                   // Dynamic import to handle cases where SDK might not be available
-                  const claudeCode = await import('@anthropic-ai/claude-code')
+                  const { query } = await import('@anthropic-ai/claude-code')
                   
                   // Build options object based on what the SDK accepts
-                  const queryOptions: any = {
+                  const queryOptions = {
                     prompt: body.prompt,
                     abortController,
+                    options: {} as any,
                   }
                   
-                  // Add optional parameters that might be supported
-                  const options: any = {}
-                  if (body.maxTurns !== undefined) options.maxTurns = body.maxTurns
-                  if (body.systemPrompt) options.systemPrompt = body.systemPrompt
-                  if (body.appendSystemPrompt) options.appendSystemPrompt = body.appendSystemPrompt
-                  if (body.allowedTools) options.allowedTools = body.allowedTools
-                  if (body.disallowedTools) options.disallowedTools = body.disallowedTools
-                  if (body.permissionMode) options.permissionMode = body.permissionMode
-                  if (body.verbose !== undefined) options.verbose = body.verbose
-                  if (mcpConfig) options.mcpConfig = mcpConfig
-                  
-                  // Only add options if there are any
-                  if (Object.keys(options).length > 0) {
-                    queryOptions.options = options
-                  }
+                  // Add optional parameters based on SDK documentation
+                  if (body.maxTurns !== undefined) queryOptions.options.maxTurns = body.maxTurns
+                  if (body.systemPrompt) queryOptions.options.systemPrompt = body.systemPrompt
+                  if (body.appendSystemPrompt) queryOptions.options.appendSystemPrompt = body.appendSystemPrompt
+                  if (body.allowedTools) queryOptions.options.allowedTools = body.allowedTools
+                  if (body.disallowedTools) queryOptions.options.disallowedTools = body.disallowedTools
+                  if (body.permissionMode) queryOptions.options.permissionMode = body.permissionMode
+                  if (body.verbose !== undefined) queryOptions.options.verbose = body.verbose
+                  if (mcpConfig) queryOptions.options.mcpConfig = mcpConfig
                   
                   // Use the SDK's query function - it returns an async iterator
-                  const queryResult = claudeCode.query(queryOptions)
+                  const queryResult = query(queryOptions)
                   
                   // Stream messages from the async iterator
                   for await (const message of queryResult) {

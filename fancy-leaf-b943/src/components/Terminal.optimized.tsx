@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import type { KeyboardEvent } from 'react';
 import { useSessionStore } from '../store/session';
 import { usePerformanceMonitor } from '../store/unified.adapter';
+import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom';
 import { renderAnsiToSpans } from '../utils/ansi';
 
 const MAX_VISIBLE_LINES = 2000;
@@ -101,20 +102,12 @@ Type your prompt and press Enter to submit.
     }
   }, [flushBatch]);
   
-  // Auto-scroll with debouncing
-  const scrollToBottom = useCallback(() => {
-    if (outputRef.current) {
-      requestAnimationFrame(() => {
-        if (outputRef.current) {
-          outputRef.current.scrollTop = outputRef.current.scrollHeight;
-        }
-      });
-    }
-  }, []);
-  
-  useEffect(() => {
-    scrollToBottom();
-  }, [visibleTranscript, scrollToBottom]);
+  // Auto-scroll only when near bottom
+  useAutoScrollNearBottom(
+    outputRef,
+    [visibleTranscript],
+    40 // threshold in pixels
+  );
   
   // Update input from history navigation
   useEffect(() => {
@@ -322,7 +315,7 @@ Type your prompt and press Enter to submit.
   return (
     <div className="terminal-root">
       <div className="terminal-header">
-        <span className="terminal-header-title fg-ansi-10">Claude Code Terminal</span>
+        <span className="terminal-header-title text-brand">Claude Code Terminal</span>
         <div className="terminal-header-session">
           <span className="terminal-header-session-id" title={`Session ID: ${sessionId}`}>
             {sessionId}
@@ -356,7 +349,7 @@ Type your prompt and press Enter to submit.
       </div>
       
       <div className="terminal-input">
-        <span className="terminal-prompt fg-ansi-2">
+        <span className="terminal-prompt text-prompt">
           ➜ ~Claude_Code:model-session
         </span>
         <div
@@ -375,7 +368,7 @@ Type your prompt and press Enter to submit.
         {!isStreaming && <span ref={cursorRef} className="cursor block" />}
       </div>
       
-      <div className="terminal-footer fg-ansi-8">
+      <div className="terminal-footer text-muted">
         {isStreaming ? (
           <span>Streaming... Press Ctrl+C to interrupt</span>
         ) : (

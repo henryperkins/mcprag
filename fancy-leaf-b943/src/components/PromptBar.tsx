@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { KeyboardEvent } from 'react'
+import { useUnifiedSession } from '../store/unified.adapter'
 import { useSession } from '../store/session.state'
 import { useHistory } from '../store/history.state'
 import { useMessages } from '../store/messages.state'
@@ -14,7 +15,14 @@ export function PromptBar({ onSubmit, onInterrupt }: PromptBarProps) {
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   
-  const { currentSessionId, controls, isRunning } = useSession()
+  // Use unified state for reading
+  const unifiedState = useUnifiedSession()
+  
+  // Extract values from unified state
+  const currentSessionId = unifiedState.session.id
+  const isRunning = unifiedState.session.isRunning
+  const controls = useSession().controls // Keep for now as it's not in unified yet
+  
   const { push, prev, next, reset } = useHistory()
   const { clearMessages } = useMessages()
   
