@@ -27,6 +27,55 @@ export default {
       return new Response(null, { headers: corsHeaders })
     }
 
+    // Stream endpoint for terminal
+    if (url.pathname === '/api/stream' && request.method === 'POST') {
+      try {
+        const body: any = await request.json()
+        const prompt = body.prompt || ''
+        
+        // Mock streaming response with ANSI colors
+        const encoder = new TextEncoder()
+        const stream = new ReadableStream({
+          async start(controller) {
+            // Simulate different types of responses based on prompt
+            const responses = prompt.toLowerCase().includes('help') 
+              ? [`Available commands:\n• help - Show this help\n• test - Run tests\n• clear - Clear terminal\n`]
+              : [
+                  `\x1b[35m🔧 Tool:\x1b[0m Analyzing request for: ${prompt}\n`,
+                  `\x1b[32m✓\x1b[0m Operation completed successfully\n`,
+                  `\x1b[90mTelemetry: ${Math.floor(Math.random() * 100)}ms | Tokens: ${Math.floor(Math.random() * 500)}\x1b[0m\n`
+                ]
+            
+            // Stream each character with small delay for effect
+            for (const response of responses) {
+              for (let i = 0; i < response.length; i += 3) {
+                const chunk = response.slice(i, i + 3)
+                controller.enqueue(encoder.encode(`data: ${chunk}\n\n`))
+                await new Promise(resolve => setTimeout(resolve, 10))
+              }
+            }
+            
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            controller.close()
+          },
+        })
+
+        return new Response(stream, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        })
+      } catch (error) {
+        return Response.json(
+          { error: 'Invalid request' },
+          { status: 400, headers: corsHeaders }
+        )
+      }
+    }
+
     // Query endpoint - main Claude Code interaction
     if (url.pathname === '/api/query' && request.method === 'POST') {
       try {
