@@ -1,0 +1,14 @@
+# Copy this file to .dev.vars and fill in your actual values
+# This file is for local development only
+
+# Required: Your Anthropic API key
+ANTHROPIC_API_KEY=sk-ant-api03-YOUR-KEY-HERE
+
+# Optional: MCP servers configuration (JSON string)
+# MCP_CONFIG='{"servers":[{"name":"example","url":"http://localhost:3000"}]}'
+
+# Optional: Use AWS Bedrock instead of Anthropic API
+# CLAUDE_CODE_USE_BEDROCK=true
+
+# Optional: Use Google Vertex AI instead of Anthropic API  
+# CLAUDE_CODE_USE_VERTEX=true

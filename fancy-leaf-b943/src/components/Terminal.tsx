@@ -147,6 +147,12 @@ Type your prompt and press Enter to submit.
         await new Promise(resolve => setTimeout(resolve, 20));
         setStreamBuffer(prev => prev + mockResponse.slice(i, i + 5));
       }
+      
+      // Ensure streaming state is reset after mock response
+      setTimeout(() => {
+        setIsStreaming(false);
+        setStreamBuffer('');
+      }, 1000);
     }
   };
   
@@ -227,8 +233,20 @@ Type your prompt and press Enter to submit.
   return (
     <div className="terminal-root">
       <div className="terminal-header">
-        <span className="fg-ansi-10">Claude Code Terminal</span>
-        <span className="fg-ansi-8"> - {sessionId}</span>
+        <span className="terminal-header-title fg-ansi-10">Claude Code Terminal</span>
+        <div className="terminal-header-session">
+          <span className="terminal-header-session-id" title={`Session ID: ${sessionId}`}>
+            {sessionId}
+          </span>
+          <button 
+            className="terminal-header-copy"
+            onClick={() => navigator.clipboard.writeText(sessionId)}
+            title="Copy session ID"
+            aria-label="Copy session ID"
+          >
+            📋
+          </button>
+        </div>
       </div>
       
       <div ref={outputRef} className="terminal-output" style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>

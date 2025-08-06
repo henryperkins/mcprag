@@ -68,7 +68,12 @@ self.addEventListener('fetch', event => {
                 // Skip caching HTML to avoid staleness
                 return;
               }
-              cache.put(request, responseToCache);
+              // Only cache supported schemes (http/https)
+              if (request.url.startsWith('http://') || request.url.startsWith('https://')) {
+                cache.put(request, responseToCache).catch(err => {
+                  console.warn('Cache put failed:', err);
+                });
+              }
             });
           
           return response;

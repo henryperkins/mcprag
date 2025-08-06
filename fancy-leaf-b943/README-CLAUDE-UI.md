@@ -98,76 +98,48 @@ npm run deploy
 
 ## Integration with Claude Code SDK
 
-### Option 1: Direct SDK Integration
-Replace the mock Worker implementation with actual Claude Code SDK calls:
+This UI now integrates with the official `@anthropic-ai/claude-code` SDK for real Claude interactions.
 
-```typescript
-import { query, type SDKMessage } from "@anthropic-ai/claude-code"
+### Configuration
 
-// In worker/index.ts
-const messages: SDKMessage[] = []
-for await (const message of query({
-  prompt: body.prompt,
-  options: {
-    maxTurns: body.maxTurns,
-    outputFormat: body.outputFormat,
-    sessionId: body.sessionId,
-  },
-})) {
-  // Stream to client via SSE
-  controller.enqueue(encoder.encode(`data: ${JSON.stringify(message)}\n\n`))
-}
-```
+1. **Install the SDK**: Already included in package.json
+   ```bash
+   npm install @anthropic-ai/claude-code
+   ```
 
-### Option 2: CLI Process Spawning
-For environments with CLI access:
+2. **Set up API Key**: 
+   ```bash
+   # For local development
+   echo "ANTHROPIC_API_KEY=your-api-key" > .dev.vars
+   
+   # For production
+   wrangler secret put ANTHROPIC_API_KEY
+   ```
 
-```typescript
-import { spawn } from 'child_process'
+3. **Optional MCP Configuration**: 
+   ```jsonc
+   // In wrangler.jsonc vars section
+   "MCP_CONFIG": "{\"servers\":[{...}]}"
+   ```
 
-const child = spawn('claude', [
-  '-p',
-  '--output-format', 'stream-json',
-  '--max-turns', String(body.maxTurns),
-  body.sessionId && '--resume', body.sessionId,
-].filter(Boolean))
+### SDK Features
 
-child.stdout.on('data', (chunk) => {
-  // Parse and stream JSONL to client
-})
-```
+- **Real Streaming**: Direct SDK message streaming via Server-Sent Events
+- **Tool Execution**: Full support for all Claude Code tools (file operations, bash, etc.)
+- **MCP Support**: Native Model Context Protocol server integration
+- **Session Management**: Automatic session ID handling
+- **Interrupt Support**: AbortController-based operation cancellation
+- **Error Handling**: Proper error messages streamed as result messages
+- **Telemetry**: Real cost, duration, and API time tracking
 
-## Configuration
+### Testing
 
-### Environment Variables
+Run the integration test suite:
 ```bash
-# API configuration
-ANTHROPIC_API_KEY=your-api-key
-
-# Optional: MCP server configuration
-MCP_CONFIG_PATH=/path/to/mcp-servers.json
+./test-integration.sh
 ```
 
-### MCP Server Configuration
-Create `mcp-servers.json`:
-```json
-{
-  "servers": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "mcp-server-filesystem",
-      "args": ["--readonly"]
-    },
-    "github": {
-      "type": "stdio", 
-      "command": "mcp-server-github",
-      "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
-      }
-    }
-  }
-}
-```
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for full deployment instructions.
 
 ## Customization
 

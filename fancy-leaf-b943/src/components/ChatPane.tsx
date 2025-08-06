@@ -24,18 +24,39 @@ export const ChatPane: React.FC = () => {
           </div>
         ) : (
           transcript.map((msg, idx) => (
-            <div key={idx} className={`chat-message chat-message-${msg.role}`}>
+            <div 
+              key={idx} 
+              className={`chat-message chat-message-${msg.role}`}
+              tabIndex={0}
+              role="button"
+              aria-label={`${msg.role} message from ${msg.timestamp ? new Date(msg.timestamp).toLocaleString() : 'unknown time'}`}
+              onClick={() => console.log('Message clicked:', idx)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  console.log('Message selected:', idx);
+                }
+              }}
+            >
               <div className="chat-message-role fg-ansi-14">
+                <span className="chat-message-icon">
+                  {msg.role === 'user' ? '👤' : msg.role === 'assistant' ? '🤖' : '🔧'}
+                </span>
                 {msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Claude' : 'Tool'}
               </div>
               <div className="chat-message-text">
                 {renderAnsiToSpans(msg.text)}
               </div>
-              {msg.timestamp && (
-                <div className="chat-message-time fg-ansi-8">
-                  {new Date(msg.timestamp).toLocaleTimeString()}
+              <div className="chat-message-footer">
+                {msg.timestamp && (
+                  <div className="chat-message-time fg-ansi-8">
+                    {new Date(msg.timestamp).toLocaleTimeString()}
+                  </div>
+                )}
+                <div className="chat-message-status">
+                  <span className="chat-message-status-icon fg-ansi-10">✓</span>
                 </div>
-              )}
+              </div>
             </div>
           ))
         )}

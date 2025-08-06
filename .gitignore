@@ -130,3 +130,5 @@ local/
 scratch/
 
 enhanced_rag/github_integration/__pycache__/
+fancy-leaf-b943/.dev.vars.example
+.dev.vars

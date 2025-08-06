@@ -1,0 +1,30 @@
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "/path/to/workspace"],
+      "env": {}
+    },
+    {
+      "name": "github",
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "your-github-token"
+      }
+    },
+    {
+      "name": "memory",
+      "command": "npx", 
+      "args": ["@modelcontextprotocol/server-memory"],
+      "env": {}
+    },
+    {
+      "name": "postgres",
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+      "env": {}
+    }
+  ]
+}

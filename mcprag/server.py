@@ -234,12 +234,31 @@ class MCPServer:
             self.context_aware = None
 
         # Initialize basic Azure Search as fallback
-        if AZURE_SDK_AVAILABLE and Config.ADMIN_KEY and Config.ENDPOINT:
-            self.search_client = SearchClient(
-                endpoint=Config.ENDPOINT,
-                index_name=Config.INDEX_NAME,
-                credential=AzureKeyCredential(Config.ADMIN_KEY),
-            )  # type: ignore[call-arg]
+        # Guard against partially available Azure SDK imports where AzureKeyCredential could be None
+        if (
+            AZURE_SDK_AVAILABLE
+            and AzureKeyCredential is not None
+            and SearchClient is not None
+            and isinstance(getattr(Config, "ADMIN_KEY", None), str)
+            and bool(str(Config.ADMIN_KEY).strip())
+            and isinstance(getattr(Config, "ENDPOINT", None), str)
+            and bool(str(Config.ENDPOINT).strip())
+        ):
+            try:
+                # Construct credential only after verifying the symbol is available
+                azure_key_credential = AzureKeyCredential(str(Config.ADMIN_KEY))  # type: ignore[call-arg]
+                self.search_client = SearchClient(
+                    endpoint=str(Config.ENDPOINT),
+                    index_name=str(Config.INDEX_NAME),
+                    credential=azure_key_credential,
+                )  # type: ignore[call-arg]
+            except TypeError as e:
+                # Common in type-checkers when symbol resolution fails; hard-disable SDK path
+                logger.warning(f"Azure SDK credential construction failed (TypeError). Disabling SDK fallback. Error: {e}")
+                self.search_client = None
+            except Exception as e:
+                logger.warning(f"Azure SearchClient initialization failed, disabling SDK fallback: {e}")
+                self.search_client = None
         else:
             self.search_client = None
 

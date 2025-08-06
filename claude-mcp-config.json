@@ -1,0 +1,19 @@
+{
+    "mcpServers": {
+        "azure-code-search": {
+            "command": "python",
+            "args": [
+                "-m",
+                "mcprag"
+            ],
+            "cwd": "/home/azureuser/mcprag",
+            "env": {
+                "ACS_ENDPOINT": "${ACS_ENDPOINT}",
+                "ACS_ADMIN_KEY": "${ACS_ADMIN_KEY}",
+                "AZURE_OPENAI_ENDPOINT": "${AZURE_OPENAI_ENDPOINT}",
+                "AZURE_OPENAI_KEY": "${AZURE_OPENAI_KEY}",
+                "AZURE_OPENAI_DEPLOYMENT": "${AZURE_OPENAI_DEPLOYMENT}"
+            }
+        }
+    }
+}
