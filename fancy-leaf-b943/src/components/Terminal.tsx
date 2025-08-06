@@ -136,7 +136,7 @@ Type your prompt and press Enter to submit.
           }
         }
       }
-    } catch (error) {
+    } catch {
       // Fallback mock response for development
       const mockResponse = `\x1b[35m🔧 Tool:\x1b[0m Executing command...
 \x1b[32m✓\x1b[0m Operation completed successfully
@@ -249,7 +249,7 @@ Type your prompt and press Enter to submit.
         </div>
       </div>
       
-      <div ref={outputRef} className="terminal-output" style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+      <div ref={outputRef} className="terminal-output" style={{ flex: 1, overflowY: 'auto' }}>
         {transcript.map((msg, idx) => (
           <div key={idx} className="terminal-line">
             {renderAnsiToSpans(msg.text)}
@@ -257,7 +257,7 @@ Type your prompt and press Enter to submit.
         ))}
       </div>
       
-      <div className="terminal-input" style={{ padding: '0 12px 12px 12px' }}>
+      <div className="terminal-input">
         <span className="terminal-prompt fg-ansi-2">
           ➜ ~Claude_Code:model-session
         </span>

@@ -102,6 +102,15 @@
   box-sizing: border-box;
 }
 
+/* Consistent spacing variables */
+.terminal-root {
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+}
+
 /* Block Cursor */
 .cursor.block {
   display: inline-block;
@@ -164,6 +173,8 @@
   display: flex;
   align-items: baseline;
   position: relative;
+  padding: 0 var(--spacing-md) var(--spacing-md) var(--spacing-md);
+  min-height: 32px;
 }
 
 .terminal-prompt {
@@ -194,9 +205,10 @@
 
 /* Terminal Output */
 .terminal-output {
-  margin-bottom: 8px;
+  margin-bottom: var(--spacing-sm);
   white-space: pre-wrap;
   word-wrap: break-word;
+  padding: var(--spacing-md);
 }
 
 .terminal-line {
@@ -260,7 +272,7 @@
 
 /* Terminal Header */
 .terminal-header {
-  padding: 8px 12px;
+  padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid rgba(128, 128, 128, 0.2);
   display: flex;
   justify-content: space-between;
@@ -322,7 +334,7 @@
 
 /* Terminal Footer */
 .terminal-footer {
-  padding: 8px 12px;
+  padding: var(--spacing-sm) var(--spacing-md);
   border-top: 1px solid rgba(128, 128, 128, 0.2);
   display: flex;
   justify-content: space-between;
@@ -344,19 +356,23 @@
 }
 
 .file-tree-header {
-  padding: 12px;
+  padding: var(--spacing-md);
   border-bottom: 1px solid rgba(128, 128, 128, 0.2);
   font-weight: bold;
+  display: flex;
+  align-items: center;
+  height: 48px;
 }
 
 .file-tree-content {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: var(--spacing-sm) 0;
 }
 
 .file-tree-item {
-  padding: 4px 8px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  min-height: 28px;
   cursor: pointer;
   user-select: none;
   display: flex;
@@ -417,20 +433,23 @@
 }
 
 .chat-pane-header {
-  padding: 12px;
+  padding: var(--spacing-md);
   border-bottom: 1px solid rgba(128, 128, 128, 0.2);
   font-weight: bold;
+  display: flex;
+  align-items: center;
+  height: 48px;
 }
 
 .chat-pane-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
+  padding: var(--spacing-md);
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 
 .chat-empty {
@@ -440,8 +459,8 @@
 }
 
 .chat-message {
-  margin-bottom: 12px;
-  padding: 10px 12px;
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   border-radius: 6px;
   background: rgba(128, 128, 128, 0.05);
   border: 1px solid rgba(128, 128, 128, 0.15);

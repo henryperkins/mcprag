@@ -34,6 +34,13 @@
         "OXYLABS_USERNAME": "hperkins_56bGN",
         "OXYLABS_PASSWORD": "Twiohmld1234+"
       }
+    },
+    "cloudflare": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://docs.mcp.cloudflare.com/sse"
+      ]
     }
   }
 }
