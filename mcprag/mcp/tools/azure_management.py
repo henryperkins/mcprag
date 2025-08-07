@@ -1,4 +1,5 @@
 """Azure AI Search management MCP tools."""
+import sys
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from ...utils.response_helpers import ok, err
 from .base import check_component
@@ -556,7 +557,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import os
             
             # Activate virtual environment and run indexing
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             
             cmd = [
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
@@ -610,7 +611,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             cmd = [
@@ -656,7 +657,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             result = subprocess.run([
@@ -694,7 +695,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             result = subprocess.run([
@@ -735,7 +736,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             result = subprocess.run([

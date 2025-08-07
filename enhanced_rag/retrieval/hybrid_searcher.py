@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 
 from enhanced_rag.azure_integration.rest.operations import SearchOperations
-from enhanced_rag.azure_integration.rest.client import AzureSearchClient
+from mcprag.enhanced_rag.azure_integration.rest.client_pool import get_azure_search_client
 from azure.search.documents.models import (
     VectorizedQuery,
     VectorizableTextQuery,
@@ -134,7 +134,7 @@ class HybridSearcher:
             self._index_name = index_name
             self.search_client = None
             if self.rest_ops is None:
-                self._rest_client = AzureSearchClient(endpoint=endpoint, api_key=admin_key)
+                self._rest_client = get_azure_search_client(endpoint=endpoint, admin_key=admin_key, index_name=index_name)
                 self.rest_ops = SearchOperations(self._rest_client)
         except Exception as e:
             logger.error("Failed to initialize Azure Search client for HybridSearcher")

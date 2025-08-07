@@ -241,9 +241,9 @@ class MCPServer:
             and AzureKeyCredential is not None
             and SearchClient is not None
             and isinstance(getattr(Config, "ADMIN_KEY", None), str)
-            and bool(str(Config.ADMIN_KEY).strip())
+            and bool(Config.ADMIN_KEY and Config.ADMIN_KEY.strip())
             and isinstance(getattr(Config, "ENDPOINT", None), str)
-            and bool(str(Config.ENDPOINT).strip())
+            and bool(Config.ENDPOINT and Config.ENDPOINT.strip())
         ):
             try:
                 # Construct credential only after verifying the symbol is available
@@ -445,33 +445,43 @@ class MCPServer:
 
         logger.info(f"Starting MCP server in {transport} mode")
 
-        # Start async components in background when event loop is available
+        # For stdio mode, start async components synchronously to ensure they're ready
         import asyncio
-
-        async def _startup_task():
-            """Start async components after event loop is running"""
+        
+        if transport == "stdio":
+            # In stdio mode, ensure components are started before handling requests
             try:
-                await self.start_async_components()
+                asyncio.run(self.start_async_components())
+                logger.info("Async components started successfully in stdio mode")
             except Exception as e:
                 logger.error(f"Failed to start async components: {e}")
+                # Continue anyway as some functionality may still work
+        else:
+            # For other transports, schedule async startup
+            async def _startup_task():
+                """Start async components after event loop is running"""
+                try:
+                    await self.start_async_components()
+                except Exception as e:
+                    logger.error(f"Failed to start async components: {e}")
 
-        # Schedule the startup task to run after the event loop starts
-        def schedule_startup():
+            # Schedule the startup task to run after the event loop starts
+            def schedule_startup():
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(_startup_task())
+                except RuntimeError:
+                    # No event loop running yet, try to schedule for later
+                    logger.warning(
+                        "No event loop available yet for async component startup"
+                    )
+
+            # Try to schedule startup immediately, or wait for event loop
             try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(_startup_task())
-            except RuntimeError:
-                # No event loop running yet, try to schedule for later
-                logger.warning(
-                    "No event loop available yet for async component startup"
-                )
-
-        # Try to schedule startup immediately, or wait for event loop
-        try:
-            schedule_startup()
-        except Exception:
-            # If we can't schedule immediately, we'll try during the first tool call
-            logger.debug("Will start async components on first tool usage")
+                schedule_startup()
+            except Exception:
+                # If we can't schedule immediately, we'll try during the first tool call
+                logger.debug("Will start async components on first tool usage")
 
         self.mcp.run(transport=transport)
 
