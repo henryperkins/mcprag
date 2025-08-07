@@ -86,7 +86,10 @@ async def search_code_impl(
 
             # Pick correct list of items based on requested detail level
             items = _get_items_by_detail_level(result, detail_level)
-            total = result.get("total_count", len(items))
+            # Different versions of the enhanced_search backend expose total
+            # hits under either "total_count" or "total" – fall back to the
+            # length of the returned collection if neither is present.
+            total = result.get("total_count", result.get("total", len(items)))
 
         # Fallback to basic Azure Search
         elif server.search_client:
@@ -166,12 +169,36 @@ async def search_code_impl(
 
 def _get_items_by_detail_level(result: Dict[str, Any], detail_level: str) -> List[Any]:
     """Get items based on detail level."""
+    # The Enhanced RAG search service has evolved its response schema a few
+    # times.  Older versions used keys like "results", newer ones prefer
+    # "items" while also exposing format-specific variants such as
+    # "results_compact".  To stay compatible we fall back through the possible
+    # spellings instead of assuming one concrete field exists.  This guarantees
+    # that we always return the underlying list of hits, even when the backend
+    # version changes, and prevents the empty-result symptom that forced users
+    # to switch to the bm25_only fallback.
+
+    # Helper that checks a sequence of candidate keys and returns the first
+    # non-empty value (or an empty list as final default).
+    def _first_available(keys):
+        for k in keys:
+            if k in result and result[k]:
+                return result[k]
+        return []
+
     if detail_level == "compact":
-        return result.get("results_compact", result.get("results", []))
+        return _first_available(["results_compact", "items_compact", "results", "items"])
     elif detail_level == "ultra":
-        return result.get("results_ultra_compact", result.get("results", []))
-    else:
-        return result.get("results", [])
+        return _first_available([
+            "results_ultra_compact",
+            "items_ultra_compact",
+            "results_compact",
+            "items_compact",
+            "results",
+            "items",
+        ])
+    else:  # full
+        return _first_available(["results", "items"])
 
 
 def _build_compact(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

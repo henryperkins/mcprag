@@ -1,34 +1,39 @@
 """
 MCP tool, resource and prompt registration.
-
 """
 
-from typing import TYPE_CHECKING, Any, Union, Protocol, Callable, overload
+from typing import Any, Callable, Protocol, TYPE_CHECKING, runtime_checkable
 
-# Define a minimal structural type for FastMCP-like objects to satisfy type checkers
-class _FastMCPLike(Protocol):
+
+# A structural type describing only what we use from FastMCP.
+@runtime_checkable
+class FastMCPLike(Protocol):
     def tool(self) -> Callable[..., Any]: ...
     def resource(self) -> Callable[..., Any]: ...
     def prompt(self) -> Callable[..., Any]: ...
     def run(self, transport: str = "stdio") -> None: ...
 
-FastMCPType = _FastMCPLike | Any
-try:
-    from .server import MCPServer  # for type context
-except Exception:
+
+if TYPE_CHECKING:
+    # Avoid runtime import cycles; only for typing
+    from .server import MCPServer
+else:
     MCPServer = Any  # type: ignore
 
-def register_tools(mcp: FastMCPType, server: Any) -> None:
+
+def register_tools(mcp: FastMCPLike, server: MCPServer) -> None:
     """Register MCP tools."""
     # ...existing tool registration code...
-    pass
+    return None
 
-def register_resources(mcp: FastMCPType, server: Any) -> None:
-    """Register MCP resources.""" 
+
+def register_resources(mcp: FastMCPLike, server: MCPServer) -> None:
+    """Register MCP resources."""
     # ...existing resource registration code...
-    pass
+    return None
 
-def register_prompts(mcp: FastMCPType) -> None:
+
+def register_prompts(mcp: FastMCPLike) -> None:
     """Register MCP prompts."""
     # ...existing prompt registration code...
-    pass
+    return None

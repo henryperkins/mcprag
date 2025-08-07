@@ -37,7 +37,14 @@ def require_confirmation(func):
         from ...utils.response_helpers import ok
 
         # Check if confirm parameter is present and True
-        confirm = kwargs.get('confirm', False)
+        # The "confirm" flag may arrive as a string when the call originates
+        # from an HTTP/CLI transport.  Treat common truthy strings as
+        # confirmation as well to avoid confusing users.
+        confirm_raw = kwargs.get('confirm', False)
+        confirm = confirm_raw
+        if isinstance(confirm_raw, str):
+            confirm = confirm_raw.lower() in {"1", "true", "yes", "y"}
+
         if not confirm:
             # Extract operation name from function name or first argument
             operation = func.__name__.replace('_', ' ')

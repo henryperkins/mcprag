@@ -3,15 +3,18 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 from ...utils.response_helpers import ok, err
 from .base import check_component
 
+
 # Helper functions that were referenced but not found in original
 def validate_rating(rating: int) -> bool:
     """Validate rating is between 1 and 5."""
     return isinstance(rating, int) and 1 <= rating <= 5
 
+
 def validate_feedback_kind(kind: str) -> bool:
     """Validate feedback kind."""
     valid_kinds = {"positive", "negative", "neutral", "bug", "feature", "other"}
     return kind.lower() in valid_kinds
+
 
 async def track_interaction(
     server: "MCPServer",
@@ -25,34 +28,60 @@ async def track_interaction(
 ) -> Dict[str, Any]:
     """Common tracking implementation for clicks and outcomes."""
     # Try enhanced_search first
-    if server.enhanced_search and hasattr(server.enhanced_search, "track_interaction"):
+    if server.enhanced_search:
         try:
-            await server.enhanced_search.track_interaction(
-                interaction_type=interaction_type,
-                query_id=query_id,
-                doc_id=doc_id,
-                rank=rank,
-                outcome=outcome,
-                score=score,
-                context=context,
-            )
-            return ok({"tracked": True, "backend": "enhanced"})
+            if interaction_type == "click":
+                if doc_id is None:
+                    return err("doc_id is required for click interaction")
+                if rank is None:
+                    return err("rank is required for click interaction")
+                await server.enhanced_search.track_click(
+                    query_id=query_id,
+                    doc_id=doc_id,
+                    rank=rank,
+                    context=context,
+                )
+                return ok({"tracked": True, "backend": "enhanced"})
+            elif interaction_type == "outcome":
+                if outcome is None:
+                    return err("outcome is required for outcome interaction")
+                await server.enhanced_search.track_outcome(
+                    query_id=query_id,
+                    outcome=outcome,
+                    score=score,
+                    context=context,
+                )
+                return ok({"tracked": True, "backend": "enhanced"})
         except Exception:
             pass
 
     # Try feedback_collector
-    if server.feedback_collector and hasattr(server.feedback_collector, "record_interaction"):
+    if server.feedback_collector:
         try:
-            await server.feedback_collector.record_interaction(
-                interaction_type=interaction_type,
-                query_id=query_id,
-                doc_id=doc_id,
-                rank=rank,
-                outcome=outcome,
-                score=score,
-                context=context,
-            )
-            return ok({"tracked": True, "backend": "feedback_collector"})
+            if interaction_type == "click":
+                if doc_id is None:
+                    return err("doc_id is required for click interaction")
+                if rank is None:
+                    return err("rank is required for click interaction")
+                # Use record_result_selection
+                # We need an interaction_id, but we don't have one here.
+                # Use query_id as interaction_id, and doc_id as selected_result_ids
+                await server.feedback_collector.record_result_selection(
+                    interaction_id=query_id,
+                    selected_result_ids=[doc_id],
+                    time_to_selection_ms=None
+                )
+                return ok({"tracked": True, "backend": "feedback_collector"})
+            if interaction_type == "outcome":
+                if outcome is None:
+                    return err("outcome is required for outcome interaction")
+                # Use record_explicit_feedback
+                await server.feedback_collector.record_explicit_feedback(
+                    interaction_id=query_id,
+                    satisfaction=int(score) if score is not None else 3,
+                    comment=outcome
+                )
+                return ok({"tracked": True, "backend": "feedback_collector"})
         except Exception:
             pass
 

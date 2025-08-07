@@ -1,9 +1,9 @@
-#\!/usr/bin/env python3
+#!/usr/bin/env python3
 """Deploy Azure Search Indexer Configuration.
 
 This script creates a complete indexing pipeline with:
 - Data source configuration
-- Skillset for text processing  
+- Skillset for text processing
 - Main indexer configuration
 - Deployment validation
 """
@@ -11,12 +11,12 @@ This script creates a complete indexing pipeline with:
 import json
 import asyncio
 import os
-from enhanced_rag.azure_integration import UnifiedConfig, ClientFactory
-from enhanced_rag.azure_integration.rest.operations import SearchOperations
+from typing import Any, Dict, Optional
 
-async def deploy_indexer_pipeline():
+from enhanced_rag.azure_integration import UnifiedConfig, ClientFactory
+
+async def deploy_indexer_pipeline() -> bool:
     """Deploy the complete indexer pipeline."""
-    
     # Load configuration
     config = UnifiedConfig.from_env()
     operations = ClientFactory.create_operations(config.azure_search)
@@ -68,7 +68,7 @@ async def deploy_indexer_pipeline():
         status = await operations.get_indexer_status(indexer_config['name'])
         print(f"✓ Indexer status: {status.get('status', 'unknown')}")
         
-        print("\n🎉 Indexer pipeline deployed successfully\!")
+        print("\n🎉 Indexer pipeline deployed successfully!")
         print("\nNext steps:")
         print("- Monitor indexer execution: Check Azure Portal or use status API")
         print("- Upload data: Place files in the configured Azure Storage container")
@@ -80,10 +80,12 @@ async def deploy_indexer_pipeline():
         print(f"❌ Deployment failed: {e}")
         return False
 
-async def validate_prerequisites():
+async def validate_prerequisites() -> bool:
     """Validate that all prerequisites are met."""
     print("Validating prerequisites...")
-    
+
+    # Keep backward compatibility with prior var names
+    # Prefer ACS_* but allow Azure SDK style names if present
     required_env_vars = [
         'ACS_ENDPOINT',
         'ACS_ADMIN_KEY',
@@ -135,10 +137,9 @@ async def main():
     success = await deploy_indexer_pipeline()
     
     if success:
-        print("\n✅ Deployment completed successfully\!")
+        print("\n✅ Deployment completed successfully!")
     else:
         print("\n❌ Deployment failed. Check the errors above.")
 
 if __name__ == "__main__":
     asyncio.run(main())
-EOF < /dev/null

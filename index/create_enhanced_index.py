@@ -11,11 +11,12 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+
 async def main():
     try:
         print("Creating Enhanced RAG Index...")
         builder = EnhancedIndexBuilder()
-        
+
         # Create the main index
         index = await builder.create_enhanced_rag_index(
             index_name="codebase-mcp-sota",
@@ -23,15 +24,15 @@ async def main():
             enable_vectors=True,
             enable_semantic=True
         )
-        
+
         print(f"✅ Created index: {index.name}")
-        
+
         # Validate schema
         validation = await builder.validate_index_schema(
             "codebase-mcp-sota",
             ["content", "function_name", "repository", "language", "content_vector"]
         )
-        
+
         if validation['valid']:
             print("✅ Schema validation passed")
             print(f"   Total fields: {validation['total_fields']}")
@@ -40,7 +41,7 @@ async def main():
             print(f"   Scoring profiles: {', '.join(validation['scoring_profiles'])}")
         else:
             print(f"⚠️  Missing fields: {validation['missing_fields']}")
-            
+
     except Exception as e:
         print(f"❌ Error creating index: {e}")
         sys.exit(1)

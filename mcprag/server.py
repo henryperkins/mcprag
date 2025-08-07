@@ -203,7 +203,8 @@ class MCPServer:
         # Register MCP endpoints
         from .mcp import register_tools, register_resources, register_prompts
 
-        register_tools(self.mcp, self)
+        # Structural cast to satisfy type checkers without importing the protocol
+        register_tools(cast(Any, self.mcp), self)
         register_resources(self.mcp, self)
         register_prompts(self.mcp)
 

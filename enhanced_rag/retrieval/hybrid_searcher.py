@@ -102,26 +102,30 @@ class HybridSearcher:
 
             # Case 1 – Pydantic config object
             if hasattr(self.config, "azure"):
-                endpoint = getattr(self.config.azure, "endpoint", None)
-                admin_key = getattr(self.config.azure, "admin_key", None)
-                index_name = getattr(self.config.azure, "index_name", None)
+                endpoint = (getattr(self.config.azure, "endpoint", None) or "").strip() or None
+                admin_key = (getattr(self.config.azure, "admin_key", None) or "").strip() or None
+                index_name = (getattr(self.config.azure, "index_name", None) or "").strip() or None
 
             # Case 2 – dict coming from ``model_dump`` or handcrafted
             elif isinstance(self.config, dict):
                 azure_section = self.config.get("azure", {}) if isinstance(self.config, dict) else {}
-                endpoint = azure_section.get("endpoint")
-                admin_key = azure_section.get("admin_key")
-                index_name = azure_section.get("index_name")
+                endpoint = (azure_section.get("endpoint") or "").strip() or None
+                admin_key = (azure_section.get("admin_key") or "").strip() or None
+                index_name = (azure_section.get("index_name") or "").strip() or None
 
             # Case 3 – final fallback to singleton env-driven config
             if not all([endpoint, admin_key, index_name]):
                 fallback = get_config()
-                endpoint = endpoint or getattr(fallback.azure, "endpoint", None)
-                admin_key = admin_key or getattr(fallback.azure, "admin_key", None)
-                index_name = index_name or getattr(fallback.azure, "index_name", None)
+                endpoint = endpoint or (getattr(fallback.azure, "endpoint", None) or "").strip() or None
+                admin_key = admin_key or (getattr(fallback.azure, "admin_key", None) or "").strip() or None
+                index_name = index_name or (getattr(fallback.azure, "index_name", None) or "").strip() or None
 
             # Absolute last-chance default to preserve historical behaviour
             index_name = index_name or "codebase-mcp-sota"
+
+            # Validate required values and fail fast with clear error
+            if not endpoint or not admin_key:
+                raise ValueError("Azure Search endpoint/admin_key not configured (empty or missing)")
 
             credential = AzureKeyCredential(admin_key)
             self.search_client = SearchClient(
@@ -147,6 +151,7 @@ class HybridSearcher:
         except Exception as e:
             logger.error(f"Failed to initialize embedder: {e}")
             self.embedder = None
+
 
     # ------------------------------------------------------------------ #
     #  NEW  – unified hybrid entry-point with semantic + vector + keyword
@@ -300,9 +305,9 @@ class HybridSearcher:
         return fused
 
 
-# ------------------------------------------------------------------ #
-#  (legacy) vector_search / keyword_search wrappers kept for callers
-# ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------ #
+    #  (legacy) vector_search / keyword_search wrappers kept for callers
+    # ------------------------------------------------------------------ #
 
     async def vector_search(
         self,

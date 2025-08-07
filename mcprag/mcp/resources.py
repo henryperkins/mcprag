@@ -74,7 +74,15 @@ def register_resources(mcp: Any, server: "MCPServer") -> None:
                     "ranking_tools": server.result_explainer is not None,
                     "cache_manager": server.cache_manager is not None,
                     "learning": server.feedback_collector is not None,
-                    "admin_tools": server.index_ops is not None,
+                    # Reflect availability of admin tooling via the unified REST
+                    # operations client.  The previous attribute name
+                    # `index_ops` was a leftover from an early refactor and is
+                    # no longer present on the MCPServer class which now uses
+                    # `rest_ops`.  Accessing the non-existent attribute would
+                    # raise an AttributeError and break the statistics
+                    # endpoint.  Using `rest_ops` correctly reports the admin
+                    # functionality without risking a runtime failure.
+                    "admin_tools": server.rest_ops is not None,
                     "github_integration": server.github_client is not None,
                 },
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -119,7 +127,8 @@ def register_resources(mcp: Any, server: "MCPServer") -> None:
                     "ranking": server.result_explainer is not None,
                     "cache": server.cache_manager is not None,
                     "learning": server.feedback_collector is not None,
-                    "admin": server.index_ops is not None,
+                    # Same bug as above – switch to the correct attribute name.
+                    "admin": server.rest_ops is not None,
                     "github": server.github_client is not None,
                 },
                 "python": {
