@@ -35,11 +35,21 @@
         "OXYLABS_PASSWORD": "Twiohmld1234+"
       }
     },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "BSAWBhyyBo2etrHn20-CTj4xplPEx7-"
+      }
+    },
     "cloudflare": {
       "command": "npx",
       "args": [
         "mcp-remote",
-        "https://docs.mcp.cloudflare.com/sse"
+        "https://browser.mcp.cloudflare.com/sse"
       ]
     }
   }
