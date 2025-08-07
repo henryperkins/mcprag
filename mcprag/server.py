@@ -195,20 +195,45 @@ class MCPServer:
         _log_level: str = str(Config.LOG_LEVEL or "").upper()
         _resolved_level = getattr(logging, _log_level, logging.INFO)
 
+        # Defensive logging setup: avoid reconfiguring if already configured elsewhere
+        root = logging.getLogger()
+        already_configured = len(root.handlers) > 0
+
         if getattr(logging, _log_level, None) is None:
-            # Warn the user once – keep at WARNING so CI/jobs notice but do not
-            # spam every subsequent log record.
-            logging.basicConfig(level=logging.INFO)
+            if not already_configured:
+                logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             logging.getLogger(__name__).warning(
                 "Unknown LOG_LEVEL '%s' – falling back to INFO", Config.LOG_LEVEL
             )
-            # Reconfigure with the fallback level.
-            logging.getLogger().setLevel(logging.INFO)
+            root.setLevel(logging.INFO)
         else:
-            logging.basicConfig(
-                level=_resolved_level,
-                format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            )
+            if not already_configured:
+                logging.basicConfig(
+                    level=_resolved_level,
+                    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                )
+            else:
+                root.setLevel(_resolved_level)
+
+        # Install safe LogRecordFactory here as well (in case enhanced_rag not imported yet)
+        try:
+            import logging as _pylogging
+            current_factory = _pylogging.getLogRecordFactory()
+            # If factory doesn't exist or isn't our safe wrapper, install a guard that prevents 'message' overwrite
+            def _guard_factory(*args, **kwargs):
+                rec = current_factory(*args, **kwargs) if current_factory else logging.LogRecord(*args, **kwargs)  # type: ignore[arg-type]
+                # Ensure 'message' is consistent with msg/args
+                try:
+                    rec.message = rec.getMessage()
+                except Exception:
+                    rec.message = str(getattr(rec, "msg", ""))
+                return rec
+            # Only set if not already a guard (simple duck check)
+            if getattr(current_factory, "__name__", "") != "_guard_factory":
+                _pylogging.setLogRecordFactory(_guard_factory)
+        except Exception:
+            # Never fail startup due to logging factory issues
+            pass
 
         # Initialize MCP
         self.mcp = FastMCP(self.name)

@@ -3,7 +3,8 @@
     "allow": [
       "mcp__mcprag__search_code",
       "mcp__mcprag__search_microsoft_docs",
-      "mcp__mcprag__generate_code"
+      "mcp__mcprag__generate_code",
+      "mcp__mcprag__health_check"
     ]
   },
   "enableAllProjectMcpServers": true,

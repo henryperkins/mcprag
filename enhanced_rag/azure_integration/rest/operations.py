@@ -6,6 +6,21 @@ from .client import AzureSearchClient
 
 logger = logging.getLogger(__name__)
 
+# Enforce a conservative content character limit for uploads (to prevent 32KB string overflows)
+_CONTENT_CHAR_LIMIT = 32000
+
+def _sanitize_documents_for_upload(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Clamp content field and strip oversized strings defensively before upload."""
+    sanitized: List[Dict[str, Any]] = []
+    for doc in documents:
+        d = dict(doc)
+        content = d.get("content")
+        if isinstance(content, str) and len(content) > _CONTENT_CHAR_LIMIT:
+            d["content"] = content[: _CONTENT_CHAR_LIMIT - 3] + "..."
+            d["truncated"] = True
+        sanitized.append(d)
+    return sanitized
+
 
 class SearchOperations:
     """Simple operations for Azure AI Search automation."""
@@ -112,10 +127,11 @@ class SearchOperations:
             Upload result with status for each document
         """
         action = "merge" if merge else "upload"
+        safe_docs = _sanitize_documents_for_upload(documents)
         batch = {
             "value": [
-                {"@search.action": action, **doc} 
-                for doc in documents
+                {"@search.action": action, **doc}
+                for doc in safe_docs
             ]
         }
         return await self.client.request("POST", f"/indexes/{index_name}/docs/index", json=batch)

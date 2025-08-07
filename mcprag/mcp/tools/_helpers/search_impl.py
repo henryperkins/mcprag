@@ -15,6 +15,23 @@ from .formatting import (
     truncate_snippets,
 )
 from .validation import check_component
+from .input_validation import (
+    validate_all_search_params,
+    validate_query,
+    validate_max_results,
+    validate_skip,
+    validate_language,
+    validate_detail_level,
+    validate_orderby,
+    validate_snippet_lines,
+    validate_exact_terms,
+)
+from .data_consistency import (
+    ensure_consistent_fields,
+    ensure_consistent_response,
+    fix_pagination_consistency,
+    deduplicate_results,
+)
 
 if TYPE_CHECKING:
     from ...server import MCPServer
@@ -47,6 +64,39 @@ async def search_code_impl(
     
     start_time = time.time()
 
+    # Validate all parameters first
+    is_valid, validation_errors, validated_params = validate_all_search_params(
+        query=query,
+        intent=intent,
+        language=language,
+        repository=repository,
+        max_results=max_results,
+        skip=skip,
+        orderby=orderby,
+        detail_level=detail_level,
+        snippet_lines=snippet_lines,
+        exact_terms=exact_terms
+    )
+    
+    if not is_valid:
+        return err(f"Validation failed: {validation_errors}")
+    
+    # Use validated parameters
+    query = validated_params["query"]
+    intent = validated_params["intent"]
+    language = validated_params["language"]
+    repository = validated_params["repository"]
+    max_results = validated_params["max_results"]
+    skip = validated_params["skip"]
+    orderby = validated_params["orderby"]
+    detail_level = validated_params["detail_level"]
+    snippet_lines = validated_params["snippet_lines"]
+    exact_terms = validated_params["exact_terms"]
+    
+    # Log validation warnings if any
+    if validation_errors:
+        logger.warning(f"Search parameter warnings: {validation_errors}")
+
     # Ensure async components are started
     await server.ensure_async_components_started()
 
@@ -55,10 +105,6 @@ async def search_code_impl(
         exact_terms = extract_exact_terms(query)
 
     try:
-        # Normalize detail level
-        detail_level = (detail_level or "full").lower().strip()
-        if detail_level not in {"full", "compact", "ultra"}:
-            return err("detail_level must be one of 'full', 'compact', or 'ultra'")
 
         # Use enhanced search if available
         if server.enhanced_search and not bm25_only:
@@ -125,16 +171,17 @@ async def search_code_impl(
 
         # Normalize to a stable schema for presentation
         items = normalize_items(items)
+        
+        # Ensure data consistency for each item
+        items = [ensure_consistent_fields(item) for item in items]
 
-        # Optional dedupe by (file, start_line)
-        _seen = {}
-        deduped = []
-        for e in items:
-            key = (e["file"], e.get("start_line"))
-            if key not in _seen or e.get("relevance", 0) > _seen[key].get("relevance", 0):
-                _seen[key] = e
-        deduped = list(_seen.values())
-        items = deduped
+        # Deduplicate results
+        items = deduplicate_results(items)
+        
+        # Fix pagination consistency
+        items, total, has_more, next_skip_value = fix_pagination_consistency(
+            items, skip, max_results, total
+        )
 
         # Apply snippet truncation only for full
         if snippet_lines > 0 and detail_level == "full":
@@ -154,13 +201,17 @@ async def search_code_impl(
             "exact_terms": exact_terms,
             "detail_level": detail_level,
             "backend": backend,
-            "has_more": skip + len(items) < total,
-            "next_skip": skip + len(items) if skip + len(items) < total else None,
+            "has_more": has_more,
+            "next_skip": next_skip_value,
         }
         if include_timings:
             response["timings_ms"] = {
                 "total": took_ms
             }
+        
+        # Ensure overall response consistency
+        response = ensure_consistent_response(response)
+        
         return ok(response)
 
     except Exception as e:
@@ -205,18 +256,22 @@ def _build_compact(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Build compact result format."""
     out = []
     for i, e in enumerate(entries, start=1):
+        # Ensure fields are consistent first
+        from .data_consistency import ensure_consistent_fields
+        e = ensure_consistent_fields(e)
+        
         line_ref = f":{e['start_line']}" if e.get('start_line') else ""
         compact_entry = {
-            "id": e.get("id"),
+            "id": e.get("id", ""),
             "rank": i,
-            "file": f"{e['file']}{line_ref}",
-            "repo": e.get("repository"),
-            "language": e.get("language"),
-            "lines": [e.get("start_line"), e.get("end_line")],
+            "file": f"{e['file']}{line_ref}" if e.get('file') else "unknown",
+            "repo": e.get("repository", ""),
+            "language": e.get("language", ""),
+            "lines": [e.get("start_line"), e.get("end_line")] if e.get("start_line") is not None else [None, None],
             "score": round(float(e.get("relevance", 0) or 0), 4),
             "match": e.get("function_name") or e.get("class_name") or first_highlight(e) or "Code match",
             "context_type": "implementation" if "def " in (e.get("content","")) or "class " in (e.get("content","")) else "general",
-            "headline": headline_from_content(e.get("content", ""))
+            "headline": headline_from_content(e.get("content", "")) or "No content"
         }
 
         # Add highlight information if available

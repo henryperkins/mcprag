@@ -19,15 +19,84 @@ import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 import os
 
 logger = logging.getLogger(__name__)
+
+# Content truncation limits aligned with Azure Search string constraints (~32KB bytes for some analyzers/fields)
+CONTENT_CHAR_LIMIT = 32000
+
+# Lightweight extension-to-MIME map with overrides for common code types
+EXT_MIME_MAP = {
+    ".py": "text/x-python",
+    ".sh": "application/x-sh",
+    ".bash": "application/x-sh",
+    ".zsh": "application/x-sh",
+    ".js": "application/javascript",
+    ".mjs": "application/javascript",
+    ".ts": "text/typescript",
+    ".tsx": "text/tsx",
+    ".jsx": "text/jsx",
+    ".json": "application/json",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".html": "text/html",
+    ".css": "text/css",
+    ".yaml": "text/yaml",
+    ".yml": "text/yaml",
+    ".xml": "application/xml",
+    ".java": "text/x-java-source",
+    ".c": "text/x-c",
+    ".cpp": "text/x-c++",
+    ".h": "text/x-c",
+    ".hpp": "text/x-c++",
+    ".rs": "text/rust",
+    ".go": "text/x-go",
+    ".rb": "text/x-ruby",
+    ".php": "application/x-php",
+    ".cs": "text/x-csharp",
+    ".kt": "text/x-kotlin",
+    ".scala": "text/x-scala",
+    ".r": "text/x-r-source",
+    ".dockerfile": "text/x-dockerfile",
+}
 
 
 class FileProcessor:
     """Consolidated file processor for all Azure Search indexing operations."""
     
+    @staticmethod
+    def truncate_content(content: str, limit: int = CONTENT_CHAR_LIMIT) -> Tuple[str, bool]:
+        """Truncate content to a safe character limit with ellipsis.
+        
+        Returns:
+            (possibly_truncated_content, was_truncated)
+        """
+        if content is None:
+            return "", False
+        if len(content) <= limit:
+            return content, False
+        # Reserve a small suffix for marker
+        truncated = content[: max(0, limit - 3)] + "..."
+        return truncated, True
+
+    @staticmethod
+    def detect_mime(file_path: str, fallback_content: Optional[bytes] = None) -> str:
+        """Detect MIME type using extension map first, with optional python-magic fallback."""
+        ext = Path(file_path).suffix.lower()
+        if ext in EXT_MIME_MAP:
+            return EXT_MIME_MAP[ext]
+        # Optional python-magic if available
+        try:
+            import magic  # type: ignore
+            if fallback_content is not None:
+                return magic.from_buffer(fallback_content, mime=True) or "application/octet-stream"
+            return magic.from_file(str(file_path), mime=True) or "application/octet-stream"
+        except Exception:
+            # Fallback to generic text for unknown code-like files
+            return "application/octet-stream"
+
     # Language mapping - single source of truth
     LANGUAGE_MAP = {
         '.py': 'python',

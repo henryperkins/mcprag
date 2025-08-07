@@ -176,6 +176,9 @@ class RemoteIndexer:
                         f"{owner}/{repo}", file_info["path"], chunk["chunk_type"], i
                     )
 
+                    raw_content = chunk["content"]
+                    # Enforce 32k char limit for safety
+                    content = raw_content[:31997] + "..." if isinstance(raw_content, str) and len(raw_content) > 32000 else raw_content
                     doc = {
                         "id": doc_id,
                         "repository": f"{owner}/{repo}",
@@ -183,7 +186,7 @@ class RemoteIndexer:
                         "file_name": Path(file_info["path"]).name,
                         "language": language,
                         "last_modified": datetime.utcnow().isoformat() + "+00:00",
-                        "content": chunk["content"],
+                        "content": content,
                         "semantic_context": chunk["semantic_context"],
                         "signature": chunk["signature"],
                         "imports": chunk["imports"],
@@ -195,6 +198,8 @@ class RemoteIndexer:
                         "class_name": chunk.get("class_name"),
                         "docstring": chunk.get("docstring", "")
                     }
+                    if content is not raw_content:
+                        doc["truncated"] = True
 
                     # Add vector embedding if enabled
                     if self.provider and not self._integrated_vectors:
@@ -294,6 +299,9 @@ class RemoteIndexer:
                         f"{owner}/{repo}", file_path, chunk["chunk_type"], i
                     )
 
+                    raw_content = chunk["content"]
+                    # Enforce 32k char limit for safety
+                    content = raw_content[:31997] + "..." if isinstance(raw_content, str) and len(raw_content) > 32000 else raw_content
                     doc = {
                         "id": doc_id,
                         "repository": f"{owner}/{repo}",
@@ -301,7 +309,7 @@ class RemoteIndexer:
                         "file_name": Path(file_path).name,
                         "language": language,
                         "last_modified": datetime.utcnow().isoformat() + "+00:00",
-                        "content": chunk["content"],
+                        "content": content,
                         "semantic_context": chunk["semantic_context"],
                         "signature": chunk["signature"],
                         "imports": chunk["imports"],
@@ -313,6 +321,8 @@ class RemoteIndexer:
                         "class_name": chunk.get("class_name"),
                         "docstring": chunk.get("docstring", "")
                     }
+                    if content is not raw_content:
+                        doc["truncated"] = True
 
                     # Add vector embedding if enabled
                     if self.provider and not self._integrated_vectors:
