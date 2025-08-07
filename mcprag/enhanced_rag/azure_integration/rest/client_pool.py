@@ -66,8 +66,7 @@ class AzureSearchClientPool:
             logger.info(f"Creating new client for {endpoint}/{index_name}")
             client = AzureSearchClient(
                 endpoint=endpoint,
-                admin_key=admin_key,
-                index_name=index_name
+                api_key=admin_key
             )
             cls._clients[client_key] = client
             return client

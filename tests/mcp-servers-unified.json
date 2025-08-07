@@ -1,7 +1,7 @@
 {
     "mcpServers": {
         "azure-code-search-sdk": {
-            "command": "/home/azureuser/mcprag/venv/bin/python",
+            "command": "python",
             "args": [
                 "/home/azureuser/mcprag/mcp_server_sdk_proper.py"
             ],
@@ -15,7 +15,7 @@
             }
         },
         "azure-code-search-unified": {
-            "command": "/home/azureuser/mcprag/venv/bin/python",
+            "command": "python",
             "args": [
                 "/home/azureuser/mcprag/mcp_server_unified.py",
                 "--mode",
@@ -31,7 +31,7 @@
             }
         },
         "azure-code-search": {
-            "command": "/home/azureuser/mcprag/venv/bin/python",
+            "command": "python",
             "args": [
                 "-m",
                 "mcprag"

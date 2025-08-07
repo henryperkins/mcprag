@@ -109,6 +109,14 @@ class HierarchicalContextAnalyzer(ContextProvider):
                 open_files=open_files or [],
             )
     
+    async def analyze(
+        self,
+        file_path: str,
+        depth: int = 3
+    ) -> EnhancedContext:
+        """Alias for get_hierarchical_context for MCP tool compatibility"""
+        return await self.get_hierarchical_context(file_path, depth)
+
     async def get_hierarchical_context(
         self,
         file_path: str,

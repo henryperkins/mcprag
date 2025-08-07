@@ -14,7 +14,6 @@ from azure.search.documents.models import (
     QueryType,
 )
 # Note: Azure SDK SearchClient and AzureKeyCredential removed - using REST API only
-from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.config import get_config
 from enhanced_rag.utils.performance_monitor import PerformanceMonitor
@@ -136,9 +135,34 @@ class HybridSearcher:
             if self.rest_ops is None:
                 self._rest_client = get_azure_search_client(endpoint=endpoint, admin_key=admin_key, index_name=index_name)
                 self.rest_ops = SearchOperations(self._rest_client)
+
+            # Log successful initialization with connection details for debugging
+            logger.info(
+                "Azure Search client initialized successfully",
+                extra={
+                    "endpoint_host": self._endpoint.split('://')[-1] if hasattr(self, "_endpoint") else None,
+                    "index_name": self._index_name,
+                    "component": "enhanced_rag.retrieval.hybrid_searcher",
+                },
+            )
         except Exception as e:
-            logger.error("Failed to initialize Azure Search client for HybridSearcher")
+            try:
+                ep = (endpoint or "").split("://")[-1]
+            except Exception:
+                ep = None
+            logger.error(
+                "Failed to initialize Azure Search client for HybridSearcher",
+                exc_info=True,
+                extra={
+                    "endpoint_host": ep,
+                    "index_name": index_name,
+                    "has_admin_key": bool(admin_key),
+                    "component": "enhanced_rag.retrieval.hybrid_searcher",
+                },
+            )
             self.search_client = None
+            self._rest_client = None
+            self.rest_ops = None
 
     def _setup_embedder(self):
         """Setup vector embedder if available"""
@@ -179,6 +203,13 @@ class HybridSearcher:
 
         Adds exact-term fallback boosting for numeric tokens and quoted phrases.
         """
+        if not self.rest_ops:
+            logger.error(
+                "REST SearchOperations not initialized; hybrid search unavailable",
+                extra={"endpoint_host": getattr(self, "_endpoint", None), "index_name": getattr(self, "_index_name", None)}
+            )
+            return []
+
         # Detect exact-match tokens: quoted phrases and numeric literals
         import re as _re
         quoted = _re.findall(r'"([^"]+)"|\'([^\']+)\'', query)
@@ -232,7 +263,25 @@ class HybridSearcher:
                 # Build a strict filter using search.ismatch for each term over key text fields
                 # We OR the fields for a term and AND across terms to enforce presence of all exact terms.
                 def _term_filter(term: str) -> str:
+                    # Properly escape and validate the term to prevent injection
+                    # First, escape single quotes for OData string literals
                     safe = term.replace("'", "''")
+
+                    # Additional validation to detect and reject suspicious patterns
+                    suspicious_patterns = [
+                        ' or ', ' and ', ' eq ', ' ne ', ' gt ', ' lt ',
+                        ' ge ', ' le ', '(', ')', '--', '/*', '*/', ';'
+                    ]
+                    for pattern in suspicious_patterns:
+                        if pattern in safe.lower():
+                            logger.warning(f"Suspicious term detected and rejected: {term}")
+                            # Return a safe no-op filter that matches nothing
+                            return "(1 eq 0)"
+
+                    # Limit term length to prevent buffer-based attacks
+                    if len(safe) > 200:
+                        safe = safe[:200]
+
                     return "(" + " or ".join([
                         f"search.ismatch('{safe}', 'content')",
                         f"search.ismatch('{safe}', 'function_name')",
@@ -279,7 +328,7 @@ class HybridSearcher:
             options = {"top": vec_kwargs.get("top", top_k * 2)}
             if vq and emb:
                 options["vectorQueries"] = [{"vector": emb, "k": top_k * 2, "fields": "content_vector"}]
-            resp = await self.rest_ops.search(self._index_name, query="*", **options)
+            resp = await self.rest_ops.search(self._index_name, query="", **options)
             vec_results = self._process_results(resp.get("value", []))
         except Exception as e:
             logger.warning("Vector path failed – %s", e)
@@ -356,7 +405,7 @@ class HybridSearcher:
                 options["vectorQueries"] = [{"vector": vector_query.vector, "k": top_k, "fields": "content_vector"}]
             if filter_expr:
                 options["filter"] = filter_expr
-            resp = await self.rest_ops.search(self._index_name, query="*", **options)
+            resp = await self.rest_ops.search(self._index_name, query="", **options)
             return self._process_results(resp.get("value", []))
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
@@ -376,17 +425,17 @@ class HybridSearcher:
         try:
             # Execute keyword/semantic search with advanced params and retries
             # Select scoring profile with safe defaults
-            scoring_profile = "code_quality_boost"
+            scoring_profile = None  # Don't use scoring profile as it doesn't exist
             try:
                 if hasattr(self.config, "azure") and getattr(self.config, "azure"):
                     scoring_profile = getattr(
                         self.config.azure,
                         "default_scoring_profile",
-                        "code_quality_boost",
+                        None,  # Default to None if not configured
                     )
             except Exception:
-                scoring_profile = "code_quality_boost"
-            enable_semantic = True
+                scoring_profile = None
+            enable_semantic = False  # Disable semantic search as config doesn't exist
             kw_kwargs = self._sanitize_search_kwargs({
                 "search_text": query,
                 "query_type": QueryType.SEMANTIC if enable_semantic else QueryType.SIMPLE,
