@@ -182,11 +182,33 @@ class MCPServer:
         if errors:
             raise ValueError(f"Configuration errors: {errors}")
 
+        # ------------------------------------------------------------------
         # Setup logging
-        logging.basicConfig(
-            level=getattr(logging, Config.LOG_LEVEL),
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
+        # ------------------------------------------------------------------
+        # The log level is read from the MCP_LOG_LEVEL environment variable via
+        # Config.LOG_LEVEL.  Users occasionally provide values that are not
+        # valid `logging` symbols (for example "TRACE" or lowercase strings).
+        # `getattr(logging, invalid_level)` would raise an AttributeError and
+        # abort the server start-up.  To make the server more robust we fall
+        # back to INFO when the supplied value is unknown.
+
+        _log_level: str = str(Config.LOG_LEVEL or "").upper()
+        _resolved_level = getattr(logging, _log_level, logging.INFO)
+
+        if getattr(logging, _log_level, None) is None:
+            # Warn the user once – keep at WARNING so CI/jobs notice but do not
+            # spam every subsequent log record.
+            logging.basicConfig(level=logging.INFO)
+            logging.getLogger(__name__).warning(
+                "Unknown LOG_LEVEL '%s' – falling back to INFO", Config.LOG_LEVEL
+            )
+            # Reconfigure with the fallback level.
+            logging.getLogger().setLevel(logging.INFO)
+        else:
+            logging.basicConfig(
+                level=_resolved_level,
+                format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            )
 
         # Initialize MCP
         self.mcp = FastMCP(self.name)

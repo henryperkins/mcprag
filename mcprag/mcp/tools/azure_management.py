@@ -269,7 +269,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 await server.rest_ops.reset_indexer(indexer_name)
                 # Optionally run after reset
                 run_res = None
-                if wait or True:
+                if wait:
                     run_res = await server.rest_ops.run_indexer(indexer_name, wait=wait)
                 return ok({"indexer": indexer_name, "reset": True, "run_result": run_res})
 
