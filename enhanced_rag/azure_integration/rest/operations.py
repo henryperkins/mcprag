@@ -240,14 +240,31 @@ class SearchOperations:
         result = await self.client.request("GET", "/indexers", params=params)
         return result.get("value", [])
     
-    async def run_indexer(self, name: str) -> None:
+    async def run_indexer(self, name: str, wait: bool = False, poll_interval: float = 2.0, timeout: float = 300.0) -> Dict[str, Any]:
         """Run an indexer on demand.
         
         Args:
             name: Indexer name to run
+            wait: Whether to wait for completion
+            poll_interval: Seconds between status checks when waiting
+            timeout: Maximum seconds to wait for completion
+            
+        Returns:
+            Status dictionary with run result
         """
         logger.info(f"Running indexer: {name}")
         await self.client.request("POST", f"/indexers/{name}/run")
+        if not wait:
+            return {"started": True}
+        import asyncio, time
+        start = time.time()
+        while time.time() - start < timeout:
+            status = await self.get_indexer_status(name)
+            last = (status.get("lastResult") or {}).get("status") or (status.get("executionStatus") or "")
+            if str(last).lower() in {"success", "transientfailure", "error"}:
+                return {"completed": True, "status": status}
+            await asyncio.sleep(poll_interval)
+        return {"timeout": True}
     
     async def reset_indexer(self, name: str) -> None:
         """Reset an indexer.

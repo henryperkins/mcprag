@@ -6,13 +6,14 @@ import logging
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 
-from azure.search.documents import SearchClient
+from enhanced_rag.azure_integration.rest.operations import SearchOperations
+from enhanced_rag.azure_integration.rest.client import AzureSearchClient
 from azure.search.documents.models import (
     VectorizedQuery,
     VectorizableTextQuery,
     QueryType,
 )
-from azure.core.credentials import AzureKeyCredential
+# Note: Azure SDK SearchClient and AzureKeyCredential removed - using REST API only
 from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.config import get_config
@@ -75,10 +76,12 @@ class HybridSearcher:
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
-        performance_monitor: Optional[PerformanceMonitor] = None
+        performance_monitor: Optional[PerformanceMonitor] = None,
+        rest_ops: Optional[SearchOperations] = None
     ):
         self.performance_monitor = performance_monitor or PerformanceMonitor()
         self.config = config or get_config()
+        self.rest_ops = rest_ops
         self._initialize_client()
         self.embedder = None
         self._setup_embedder()
@@ -127,14 +130,14 @@ class HybridSearcher:
             if not endpoint or not admin_key:
                 raise ValueError("Azure Search endpoint/admin_key not configured (empty or missing)")
 
-            credential = AzureKeyCredential(admin_key)
-            self.search_client = SearchClient(
-                endpoint=endpoint,
-                index_name=index_name,
-                credential=credential
-            )
+            self._endpoint = endpoint
+            self._index_name = index_name
+            self.search_client = None
+            if self.rest_ops is None:
+                self._rest_client = AzureSearchClient(endpoint=endpoint, api_key=admin_key)
+                self.rest_ops = SearchOperations(self._rest_client)
         except Exception as e:
-            logger.error(f"Failed to initialize search client: {e}")
+            logger.error("Failed to initialize Azure Search client for HybridSearcher")
             self.search_client = None
 
     def _setup_embedder(self):
@@ -182,6 +185,12 @@ class HybridSearcher:
         quoted_terms = [q for pair in quoted for q in pair if q]
         numeric_terms = _re.findall(r'(?<![\w.])(\d{2,})(?![\w.])', query)
         exact_terms = [t.strip() for t in (quoted_terms + numeric_terms) if t.strip()]
+        
+        # Clamp length and ASCII range to avoid malformed filters
+        def _clamp_term(t: str) -> str:
+            t = t[:200]
+            return "".join(ch for ch in t if 32 <= ord(ch) <= 126)
+        exact_terms = [_clamp_term(t) for t in exact_terms]
 
         # ------------------------------------------------------------------
         # 1.  Build keyword/semantic request
@@ -200,8 +209,17 @@ class HybridSearcher:
                 "disable_randomization": True,  # deterministic
                 "timeout": (deadline_ms / 1000) if deadline_ms else None,
             })
-            kw_sem = with_retry(op_name="acs.semantic")(self.search_client.search)(**kw_sem_kwargs)
-            kw_sem_results = self._process_results(kw_sem)
+            body = {
+                "queryType": "semantic",
+                "semanticConfiguration": "semantic-config",
+                "queryCaption": "extractive",
+                "queryAnswer": "extractive",
+                "filter": kw_sem_kwargs.get("filter"),
+                "top": kw_sem_kwargs.get("top", top_k * 2),
+                "includeTotalCount": kw_sem_kwargs.get("include_total_count", include_total_count),
+            }
+            resp = await self.rest_ops.search(self._index_name, query=kw_sem_kwargs.get("search_text", query), **body)
+            kw_sem_results = self._process_results(resp.get("value", []))
         except Exception as e:
             logger.warning("Keyword/Semantic path failed – %s", e)
 
@@ -233,8 +251,8 @@ class HybridSearcher:
                     "disable_randomization": True,
                     "timeout": (deadline_ms / 1000) if deadline_ms else None,
                 })
-                ex = with_retry(op_name="acs.exact")(self.search_client.search)(**exact_kwargs)
-                exact_results = self._process_results(ex)
+                resp = await self.rest_ops.search(self._index_name, query="*", filter=combined_filter, top=exact_kwargs.get("top", top_k * 2))
+                exact_results = self._process_results(resp.get("value", []))
             except Exception as e:
                 logger.warning("Exact-match fallback pass failed – %s", e)
 
@@ -258,8 +276,11 @@ class HybridSearcher:
                 "include_total_count": False,
                 "timeout": (deadline_ms / 1000) if deadline_ms else None,
             })
-            vec = with_retry(op_name="acs.vector")(self.search_client.search)(**vec_kwargs)
-            vec_results = self._process_results(vec)
+            options = {"top": vec_kwargs.get("top", top_k * 2)}
+            if vq and emb:
+                options["vectorQueries"] = [{"vector": emb, "k": top_k * 2, "fields": "content_vector"}]
+            resp = await self.rest_ops.search(self._index_name, query="*", **options)
+            vec_results = self._process_results(resp.get("value", []))
         except Exception as e:
             logger.warning("Vector path failed – %s", e)
 
@@ -317,9 +338,9 @@ class HybridSearcher:
         top_k: int = 50
     ) -> List[HybridSearchResult]:
         """Execute vector similarity search (wrapper keeps old API)"""
-        if not self.search_client:
+        if not self.rest_ops:
             logger.warning(
-                "Vector search not available, search client not initialized."
+                "Vector search not available, REST client not initialized."
             )
             return []
 
@@ -329,14 +350,14 @@ class HybridSearcher:
             return []
 
         try:
-            # Execute vector search with retries
-            results = with_retry(op_name="acs.vector")(self.search_client.search)(
-                search_text=None,
-                vector_queries=[vector_query],
-                filter=filter_expr,
-                top=top_k
-            )
-            return self._process_results(results)
+            # Execute vector search using REST API
+            options = {"top": top_k}
+            if isinstance(vector_query, VectorizedQuery) and vector_query.vector:
+                options["vectorQueries"] = [{"vector": vector_query.vector, "k": top_k, "fields": "content_vector"}]
+            if filter_expr:
+                options["filter"] = filter_expr
+            resp = await self.rest_ops.search(self._index_name, query="*", **options)
+            return self._process_results(resp.get("value", []))
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
             return []
@@ -348,7 +369,7 @@ class HybridSearcher:
         top_k: int = 50
     ) -> List[HybridSearchResult]:
         """Execute keyword-based search"""
-        if not self.search_client:
+        if not self.rest_ops:
             logger.warning("Keyword search not available")
             return []
 
@@ -380,8 +401,18 @@ class HybridSearcher:
                 "top": top_k,
                 "search_fields": ["content", "function_name", "class_name", "docstring"],
             })
-            results = with_retry(op_name="acs.keyword")(self.search_client.search)(**kw_kwargs)
-            return self._process_results(results)
+            body = {
+                "queryType": kw_kwargs.get("query_type", "semantic"),
+                "filter": kw_kwargs.get("filter"),
+                "top": kw_kwargs.get("top", top_k),
+                "includeTotalCount": kw_kwargs.get("include_total_count", True),
+            }
+            if kw_kwargs.get("query_type") == QueryType.SEMANTIC:
+                body["semanticConfiguration"] = kw_kwargs.get("semantic_configuration_name", "semantic-config")
+                body["queryCaption"] = kw_kwargs.get("query_caption", "extractive")
+                body["queryAnswer"] = kw_kwargs.get("query_answer", "extractive")
+            resp = await self.rest_ops.search(self._index_name, query=query, **body)
+            return self._process_results(resp.get("value", []))
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")
             return []
