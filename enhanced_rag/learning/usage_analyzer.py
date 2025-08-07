@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter
-import numpy as np
+import statistics
 
 from .feedback_collector import FeedbackCollector
 
@@ -343,8 +343,8 @@ class UsageAnalyzer:
             if 'time_to_selection_ms' in record and record['time_to_selection_ms']:
                 response_times.append(record['time_to_selection_ms'])
         
-        avg_response_time = np.mean(response_times) if response_times else 0
-        median_response_time = np.median(response_times) if response_times else 0
+        avg_response_time = statistics.mean(response_times) if response_times else 0
+        median_response_time = statistics.median(response_times) if response_times else 0
         
         # Click-through rate by position
         position_clicks = defaultdict(int)

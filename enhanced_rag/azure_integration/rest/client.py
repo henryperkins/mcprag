@@ -84,13 +84,8 @@ class AzureSearchClient:
             return response.json() if response.text else {}
             
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
-            # Try to parse error details
-            try:
-                error_detail = e.response.json()
-                logger.error(f"Error details: {error_detail}")
-            except:
-                pass
+            status = getattr(e.response, "status_code", "unknown")
+            logger.error(f"HTTP error {status} during Azure Search request")
             raise
         except Exception as e:
             logger.error(f"Request failed: {e}")

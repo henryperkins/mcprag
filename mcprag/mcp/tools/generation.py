@@ -20,6 +20,9 @@ def register_generation_tools(mcp, server: "MCPServer") -> None:
         workspace_root: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate code using enhanced RAG pipeline."""
+        # Ensure async components are started
+        await server.ensure_async_components_started()
+        
         if server.code_gen is None or not check_component(
             server.code_gen, "Code generation"
         ):

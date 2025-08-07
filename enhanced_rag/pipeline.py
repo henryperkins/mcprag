@@ -259,9 +259,15 @@ class RAGPipeline:
             # Cleanup feedback collector if available
             if hasattr(self, 'feedback_collector') and self.feedback_collector is not None:
                 await self.feedback_collector.cleanup()
-                logger.info("✅ RAG Pipeline cleanup completed")
-        except Exception as e:
-            logger.error(f"❌ Error during RAG Pipeline cleanup: {e}")
+            # Close Azure REST client if initialized
+            if self._azure_operations and hasattr(self._azure_operations, "client"):
+                try:
+                    await self._azure_operations.client.close()
+                except Exception:
+                    pass
+            logger.info("✅ RAG Pipeline cleanup completed")
+        except Exception:
+            logger.error("❌ Error during RAG Pipeline cleanup")
 
     async def process_query(
         self,

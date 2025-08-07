@@ -1,10 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__mcprag__search_code",
+      "mcp__mcprag__search_microsoft_docs",
+      "mcp__mcprag__generate_code"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "DeepGraph React MCP",
     "memory",
     "memory-bank",
     "sequential-thinking",
     "brave-search"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

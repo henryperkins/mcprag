@@ -286,54 +286,31 @@ async def search_microsoft_docs_impl(query: str, max_results: int) -> Dict[str, 
     from ....utils.response_helpers import ok, err
     
     try:
-        # Try to import the client
-        try:
-            from microsoft_docs_mcp_client import MicrosoftDocsMCPClient
-        except ImportError:
-            return err("Microsoft Docs MCP client not installed")
-
-        async with MicrosoftDocsMCPClient() as client:
-            results = await client.search_docs(query=query, max_results=max_results)
-
-        if not results:
-            return ok(
-                {
-                    "query": query,
-                    "count": 0,
-                    "results": [],
-                    "formatted": f"No Microsoft documentation found for '{query}'.",
-                }
-            )
-
-        formatted_results = []
-        formatted_lines = [f"📚 Found {len(results)} Microsoft Docs:\n"]
-
-        for i, doc in enumerate(results, 1):
-            formatted_results.append(
-                {
-                    "title": doc.get("title", "Untitled"),
-                    "url": doc.get("url", ""),
-                    "snippet": doc.get("content", "")[:300],
-                }
-            )
-
-            formatted_lines.append(
-                f"{i}. {doc.get('title', 'Untitled')}\n"
-                f"   {doc.get('url', '')}\n"
-                f"   {doc.get('content', '')[:300]}...\n"
-            )
-
+        # For now, return a helpful message indicating the service is temporarily unavailable
+        # TODO: Implement proper MCP client for Microsoft Learn MCP server
+        # According to https://learn.microsoft.com/en-us/training/support/mcp-developer-reference
+        # Microsoft Docs MCP requires an agent framework, not direct API calls
+        
         return ok(
             {
                 "query": query,
-                "count": len(results),
-                "results": formatted_results,
-                "formatted": "\n".join(formatted_lines),
+                "count": 0,
+                "results": [],
+                "status": "unavailable",
+                "message": (
+                    "Microsoft Docs MCP search is temporarily unavailable. "
+                    "Microsoft Learn MCP server requires an agent framework integration "
+                    "that is currently being implemented. Use web search or the Microsoft "
+                    "Learn website directly for now."
+                ),
+                "alternative": "Try using the WebSearch tool or browse https://learn.microsoft.com directly",
+                "formatted": f"Microsoft Docs search for '{query}' is temporarily unavailable. Use WebSearch tool instead.",
             }
         )
 
     except Exception as e:
-        return err(f"Microsoft Docs search unavailable: {str(e)}")
+        logger.exception("Error in Microsoft Docs search")
+        return err(f"Microsoft Docs search error: {str(e)}")
 
 
 async def explain_ranking_impl(

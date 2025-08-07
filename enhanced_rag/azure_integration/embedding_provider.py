@@ -112,10 +112,8 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             or ""
         )
 
-        if not self.api_key:
-            raise ValueError(
-                "API key for OpenAI or Azure OpenAI must be provided via environment variables"
-            )
+        # Move validation to first use, not init
+        self._api_key_validated = False
 
         self.api_version = _get_env("AZURE_OPENAI_API_VERSION") or "2024-10-21"
 
@@ -154,8 +152,22 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
 
         self.logger = logging.getLogger(__name__)
 
+    def _validate_api_key(self):
+        """Validate API key on first use."""
+        if not self._api_key_validated:
+            if not self.api_key:
+                self.enabled = False
+                self.logger.warning(
+                    "API key for OpenAI or Azure OpenAI not provided. Embeddings disabled."
+                )
+                return False
+            self._api_key_validated = True
+        return self.enabled
+    
     def generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate a single embedding vector for text."""
+        if not text or not self._validate_api_key():
+            return None
         try:
             kwargs = {
                 "input": text,
@@ -173,8 +185,8 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
 
     def generate_embeddings_batch(self, texts: Sequence[str]) -> List[Optional[List[float]]]:
         """Generate embeddings for texts in a single batch request."""
-        if not texts:
-            return []
+        if not texts or not self._validate_api_key():
+            return [None] * len(texts) if texts else []
 
         try:
             kwargs = {
@@ -206,6 +218,10 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
         return self.generate_embedding(combined)
 
     def is_enabled(self) -> bool:
+        """Check if embeddings are enabled (lazy validation)."""
+        if not self._api_key_validated and self.api_key:
+            # API key exists but not validated yet, assume enabled
+            return True
         return bool(self.enabled)
 
 

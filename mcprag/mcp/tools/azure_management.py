@@ -1,10 +1,64 @@
 """Azure AI Search management MCP tools."""
+import sys
+import json
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from ...utils.response_helpers import ok, err
 from .base import check_component
 
 if TYPE_CHECKING:
     from ...server import MCPServer
+
+
+def _truncate_indexer_status(status: Dict[str, Any], max_size: int = 20000) -> Dict[str, Any]:
+    """Truncate indexer status response to prevent token limit issues."""
+    # Convert to JSON to estimate size
+    status_json = json.dumps(status, default=str)
+    
+    # If status is small enough, return as-is
+    if len(status_json) <= max_size:
+        return status
+    
+    # Create truncated version keeping most important fields
+    truncated = {}
+    
+    # Always keep these top-level fields
+    important_fields = ["name", "status", "lastResult", "limits", "executionHistory"]
+    for field in important_fields:
+        if field in status:
+            truncated[field] = status[field]
+    
+    # Handle executionHistory specially - keep only recent entries
+    if "executionHistory" in status and isinstance(status["executionHistory"], list):
+        # Keep only the 5 most recent execution history entries
+        truncated["executionHistory"] = status["executionHistory"][:5]
+        
+        # Further truncate each history entry if needed
+        for i, history in enumerate(truncated["executionHistory"]):
+            if isinstance(history, dict):
+                # Keep important fields from each history entry
+                history_truncated = {}
+                history_important = ["status", "startTime", "endTime", "itemsProcessed", "itemsFailed", "errorMessage"]
+                for field in history_important:
+                    if field in history:
+                        # Truncate long error messages
+                        if field == "errorMessage" and isinstance(history[field], str) and len(history[field]) > 1000:
+                            history_truncated[field] = history[field][:1000] + "... [truncated]"
+                        else:
+                            history_truncated[field] = history[field]
+                
+                truncated["executionHistory"][i] = history_truncated
+    
+    # Check final size and add truncation notice
+    final_json = json.dumps(truncated, default=str)
+    if len(final_json) > max_size:
+        # Further truncate execution history if still too large
+        if "executionHistory" in truncated:
+            truncated["executionHistory"] = truncated["executionHistory"][:2]
+            truncated["_truncation_notice"] = "Response truncated due to size limits. Use Azure Portal for full details."
+    else:
+        truncated["_truncation_notice"] = "Some fields truncated due to size limits."
+    
+    return truncated
 
 
 def register_azure_tools(mcp, server: "MCPServer") -> None:
@@ -251,7 +305,10 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 if server.rest_ops is None:
                     return err("REST operations component is not initialized")
                 st = await server.rest_ops.get_indexer_status(indexer_name)
-                return ok({"indexer": indexer_name, "status": st})
+                
+                # Truncate large status responses to prevent token limit issues
+                truncated_status = _truncate_indexer_status(st)
+                return ok({"indexer": indexer_name, "status": truncated_status})
 
             elif action == "run":
                 if not indexer_name:
@@ -556,7 +613,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import os
             
             # Activate virtual environment and run indexing
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             
             cmd = [
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
@@ -610,7 +667,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             cmd = [
@@ -656,7 +713,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             result = subprocess.run([
@@ -694,7 +751,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             result = subprocess.run([
@@ -735,7 +792,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             import subprocess
             import os
             
-            venv_python = "/home/azureuser/mcprag/venv/bin/python"
+            venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
             
             result = subprocess.run([

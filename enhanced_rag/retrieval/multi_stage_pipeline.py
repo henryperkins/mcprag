@@ -99,13 +99,19 @@ class MultiStageRetriever(Retriever):
                 clients[key] = SearchClient(
                     endpoint=endpoint,
                     index_name=index_name,
-                    credential=credential
+                    credential=credential,
+                    api_version="2024-07-01"
                 )
             except Exception as e:
                 logger.warning(
                     "Failed to initialize client for %s: %s",
                     index_name,
                     e,
+                    extra={
+                        "endpoint_host": (endpoint or "").split("://")[-1],
+                        "index_name": index_name,
+                        "component": "enhanced_rag.retrieval.multi_stage_pipeline",
+                    },
                 )
 
         return clients
@@ -150,11 +156,11 @@ class MultiStageRetriever(Retriever):
     def _select_stages_by_intent(self, intent: SearchIntent) -> List[SearchStage]:
         """Select appropriate search stages based on intent"""
         intent_stages = {
-            SearchIntent.IMPLEMENT: [SearchStage.VECTOR, SearchStage.PATTERN, SearchStage.DEPENDENCY],
-            SearchIntent.DEBUG: [SearchStage.KEYWORD, SearchStage.SEMANTIC, SearchStage.VECTOR],
-            SearchIntent.UNDERSTAND: [SearchStage.SEMANTIC, SearchStage.DEPENDENCY, SearchStage.PATTERN],
-            SearchIntent.REFACTOR: [SearchStage.PATTERN, SearchStage.DEPENDENCY, SearchStage.VECTOR],
-            SearchIntent.TEST: [SearchStage.PATTERN, SearchStage.KEYWORD],
+            SearchIntent.IMPLEMENT: [SearchStage.VECTOR, SearchStage.KEYWORD],  # Removed PATTERN as it returns fake IDs
+            SearchIntent.DEBUG: [SearchStage.KEYWORD, SearchStage.VECTOR],  # Removed SEMANTIC due to missing scoring profile
+            SearchIntent.UNDERSTAND: [SearchStage.KEYWORD, SearchStage.VECTOR],  # Simplified to working stages
+            SearchIntent.REFACTOR: [SearchStage.KEYWORD, SearchStage.VECTOR],  # Simplified to working stages
+            SearchIntent.TEST: [SearchStage.KEYWORD, SearchStage.VECTOR],  # Simplified to working stages
             SearchIntent.DOCUMENT: [SearchStage.SEMANTIC, SearchStage.KEYWORD]
         }
         return intent_stages.get(intent, [SearchStage.VECTOR, SearchStage.KEYWORD])
@@ -211,7 +217,7 @@ class MultiStageRetriever(Retriever):
             search_text=query.query,
             query_type=QueryType.SEMANTIC,
             semantic_configuration_name="semantic-config",
-            scoring_profile="code_quality_boost",
+            # scoring_profile="code_quality_boost",  # Commented out - profile doesn't exist
             filter=self._build_filter(query),
             facets=["language,count:20", "repository,count:20", "tags,count:20"],
             query_caption="extractive",

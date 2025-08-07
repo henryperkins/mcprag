@@ -154,8 +154,8 @@ class CodeGenerationTool:
                         "file": r.file_path,
                         "function": r.function_name,
                         "snippet": (
-                            (getattr(r, "code_snippet", None) or getattr(r, "content", "") or "")[:200]
-                            + ("..." if len((getattr(r, "code_snippet", None) or getattr(r, "content", "") or "")) > 200 else "")
+                            (r.code_snippet or "")[:200]
+                            + ("..." if len(r.code_snippet or "") > 200 else "")
                         ),
                         "relevance": r.score,
                         "start_line": getattr(r, "start_line", None),
@@ -210,7 +210,7 @@ class CodeGenerationTool:
 
             # Analyze style of original code
             original_style = await self.style_matcher.analyze_style(
-                [type('MockResult', (), {'content': code, 'language': language})()],
+                [type('MockResult', (), {'code_snippet': code, 'language': language})()],
                 language
             )
 
@@ -308,7 +308,7 @@ class CodeGenerationTool:
         imports = set()
         
         for result in results[:10]:  # Top 10 results
-            code = result.content
+            code = result.code_snippet
             
             # Extract Python imports
             if result.language == 'python':
@@ -429,7 +429,7 @@ class CodeGenerationTool:
         }
 
         for res in results[:10]:
-            text = res.content.lower()
+            text = res.code_snippet.lower()
             for pattern, keys in keywords_map.items():
                 if any(k in text for k in keys):
                     patterns.add(pattern)

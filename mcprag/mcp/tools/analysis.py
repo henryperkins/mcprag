@@ -20,6 +20,9 @@ def register_analysis_tools(mcp, server: "MCPServer") -> None:
         include_git_history: bool = False,
     ) -> Dict[str, Any]:
         """Analyze file context using enhanced RAG."""
+        # Ensure async components are started
+        await server.ensure_async_components_started()
+        
         if not check_component(server.context_aware, "Context analysis"):
             return err("Context analysis not available")
 
@@ -67,6 +70,9 @@ def register_analysis_tools(mcp, server: "MCPServer") -> None:
         repository: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Show intent classification and query enhancements."""
+        # Ensure async components are started
+        await server.ensure_async_components_started()
+        
         try:
             response = {
                 "input_query": query,
