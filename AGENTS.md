@@ -50,7 +50,11 @@ Node tooling: `npm ci && node parse_js.mjs` (optional AST parsing).
 ## Security & Configuration
 - Secrets live in `.env` (git-ignored). Mirror new keys to `.env.example`.
 - Required vars: `ACS_ENDPOINT`, `ACS_ADMIN_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_KEY`.
-- `mcprag/config.py` centralises env validation (keyring fallback).
+- Configuration layers:
+  - `mcprag/config.py` — thin runtime shim; validates base env vars and forwards a subset to the pipeline.
+  - `enhanced_rag/core/config.py` — Pydantic model with hundreds of tunables; env overrides or JSON via `ENHANCED_RAG_CONFIG`.
+  - `enhanced_rag/azure_integration/config.py` — REST-API automation settings for index/schema tasks.
+- Keyring fallback: if `ACS_ADMIN_KEY`/`AZURE_OPENAI_KEY` are absent, the server checks your OS keyring.
 
 ## Architecture Overview
 `mcprag/server.py` bootstraps the server and conditionally imports **enhanced_rag** tools.
@@ -62,6 +66,14 @@ To add a new tool:
 3. Expose config via `Config` and document any new env vars.
 4. Add unit tests and update this guide.
 
+### Tool Registration Flow
+`mcprag/mcp/tools/__init__.py` aggregates category-specific helpers (`register_search_tools`, `register_generation_tools`, …).  To expose a new tool:
+1. Add a sub-module under `mcprag/mcp/tools/`.
+2. Provide `register_<your_tool>_tools(mcp, server)` that calls `mcp.tool` decorators.
+3. Import that function in `__init__.py` so it joins the registry on server start.
+
+### RAG Pipeline Internals (FYI)
+`enhanced_rag/pipeline.py` orchestrates context extraction ➜ query enhancement ➜ multi-stage retrieval ➜ ranking ➜ response generation.  It consumes the Pydantic `Config` above and lazy-loads optional modules like vector search or learning; most contributors only interact with the public `RAGPipeline` API.
+
 ---
 Need help? Ping a maintainer in `#mcprag-dev` or explore docs/ for deep dives.
-
