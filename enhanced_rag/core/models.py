@@ -115,6 +115,7 @@ class SearchResult(BaseModel):
 
     # MCP tracking
     query_id: Optional[str] = None
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class RankingMetrics(BaseModel):

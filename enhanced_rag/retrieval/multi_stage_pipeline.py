@@ -200,12 +200,19 @@ class MultiStageRetriever(Retriever):
 
     async def _execute_keyword_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute keyword-based search"""
-        results = await self.hybrid_searcher.keyword_search(
-            query.query,
-            filter_expr=self._build_filter(query),
-            top_k=50
+        if 'main' not in self.search_clients:
+            return []
+
+        results = with_retry(op_name="acs.keyword")(self.search_clients["main"].search)(
+            search_text=query.query,
+            query_type=QueryType.SIMPLE,
+            filter=self._build_filter(query),
+            include_total_count=True,
+            top=50,
+            search_fields=["content", "function_name", "class_name", "docstring"],
         )
-        return [(r.id, r.score) for r in results]
+
+        return [(r['id'], r['@search.score']) for r in results]
 
     async def _execute_semantic_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute semantic search with query understanding"""

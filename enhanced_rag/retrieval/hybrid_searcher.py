@@ -423,45 +423,22 @@ class HybridSearcher:
             return []
 
         try:
-            # Execute keyword/semantic search with advanced params and retries
-            # Select scoring profile with safe defaults
-            scoring_profile = None  # Don't use scoring profile as it doesn't exist
-            try:
-                if hasattr(self.config, "azure") and getattr(self.config, "azure"):
-                    scoring_profile = getattr(
-                        self.config.azure,
-                        "default_scoring_profile",
-                        None,  # Default to None if not configured
-                    )
-            except Exception:
-                scoring_profile = None
-            enable_semantic = False  # Disable semantic search as config doesn't exist
-            kw_kwargs = self._sanitize_search_kwargs({
-                "search_text": query,
-                "query_type": QueryType.SEMANTIC if enable_semantic else QueryType.SIMPLE,
-                "semantic_configuration_name": "semantic-config" if enable_semantic else None,
-                "scoring_profile": scoring_profile,
-                "filter": filter_expr,
-                "facets": ["language,count:20", "repository,count:20", "tags,count:20"],
-                "query_caption": "extractive" if enable_semantic else None,
-                "query_answer": "extractive" if enable_semantic else None,
-                "highlight_fields": "content,docstring",
-                "include_total_count": True,
-                "top": top_k,
-                "search_fields": ["content", "function_name", "class_name", "docstring"],
-            })
-            body = {
-                "queryType": kw_kwargs.get("query_type", "semantic"),
-                "filter": kw_kwargs.get("filter"),
-                "top": kw_kwargs.get("top", top_k),
-                "includeTotalCount": kw_kwargs.get("include_total_count", True),
+            import httpx
+            url = f"{self._endpoint}/indexes/{self._index_name}/docs/search?api-version=2025-05-01-preview"
+            headers = {
+                "Content-Type": "application/json",
+                "api-key": self._rest_client.api_key
             }
-            if kw_kwargs.get("query_type") == QueryType.SEMANTIC:
-                body["semanticConfiguration"] = kw_kwargs.get("semantic_configuration_name", "semantic-config")
-                body["queryCaption"] = kw_kwargs.get("query_caption", "extractive")
-                body["queryAnswer"] = kw_kwargs.get("query_answer", "extractive")
-            resp = await self.rest_ops.search(self._index_name, query=query, **body)
-            return self._process_results(resp.get("value", []))
+            body = {
+                "search": query,
+                "queryType": "simple",
+                "top": top_k,
+                "includeTotalCount": True,
+            }
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, json=body, headers=headers)
+                resp.raise_for_status()  # Raise an exception for bad status codes
+                return self._process_results(resp.json().get("value", []))
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")
             return []
