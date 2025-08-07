@@ -149,6 +149,36 @@ class FileProcessor:
         ext = Path(file_path).suffix.lower()
         return ext in self.extensions
 
+    def process_repository(self, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
+        """Process an entire repository into indexable documents.
+
+        Walks the repo directory, filters by known extensions, and delegates
+        to process_file for chunk extraction.
+        """
+        base = Path(repo_path).resolve()
+        if not base.exists() or not base.is_dir():
+            return []
+
+        documents: List[Dict[str, Any]] = []
+        # Limit files to avoid accidental huge scans; reasonable default 20k files
+        max_files = int(os.getenv("MCP_MAX_INDEX_FILES", "20000"))
+        count = 0
+        for p in base.rglob("*"):
+            if count >= max_files:
+                break
+            if not p.is_file():
+                continue
+            if not self.should_process_file(str(p)):
+                continue
+            try:
+                docs = process_file(str(p), str(base), repo_name)
+                documents.extend(docs)
+                count += 1
+            except Exception:
+                # Skip unreadable/problematic files
+                continue
+        return documents
+
 
 def get_language_from_extension(file_path: str) -> str:
     """Legacy function - use FileProcessor.get_language_from_extension() instead."""
@@ -184,10 +214,16 @@ def get_language_from_extension(file_path: str) -> str:
 
 
 def extract_python_chunks(content: str, file_path: str) -> List[Dict[str, Any]]:
-    """Extract semantic chunks from Python code using AST."""
+    """Extract semantic chunks from Python code using AST.
+
+    Applies content length limits before parsing to reduce DoS risk from
+    pathological inputs.
+    """
     chunks: List[Dict[str, Any]] = []
     try:
-        tree = ast.parse(content)
+        # Enforce a reasonable cap before AST parsing
+        safe_content, _ = FileProcessor.truncate_content(content, limit=min(CONTENT_CHAR_LIMIT, 32000))
+        tree = ast.parse(safe_content)
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 start = getattr(node, "lineno", 1)
@@ -201,15 +237,15 @@ def extract_python_chunks(content: str, file_path: str) -> List[Dict[str, Any]]:
                     "docstring": ast.get_docstring(node) or "",
                     "signature": f"def {node.name}" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else f"class {node.name}",
                 }
-                lines = content.split('\n')
+                lines = safe_content.split('\n')
                 chunk['content'] = '\n'.join(lines[start-1:end])
                 chunks.append(chunk)
     except (SyntaxError, ValueError):
         chunks.append({
             "chunk_type": "file",
-            "content": content,
+            "content": (content or "")[:CONTENT_CHAR_LIMIT],
             "start_line": 1,
-            "end_line": len(content.split('\n'))
+            "end_line": len((content or "").split('\n'))
         })
     return chunks
 

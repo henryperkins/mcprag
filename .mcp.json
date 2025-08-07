@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "DeepGraph React MCP": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-code-graph@latest",
-        "facebook/react"
-      ]
-    },
     "memory": {
       "command": "npx",
       "args": [

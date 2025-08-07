@@ -203,14 +203,18 @@ class MultiStageRetriever(Retriever):
         if 'main' not in self.search_clients:
             return []
 
-        results = with_retry(op_name="acs.keyword")(self.search_clients["main"].search)(
-            search_text=query.query,
-            query_type=QueryType.SIMPLE,
-            filter=self._build_filter(query),
-            include_total_count=True,
-            top=50,
-            search_fields=["content", "function_name", "class_name", "docstring"],
-        )
+        def _do_keyword():
+            return with_retry(op_name="acs.keyword")(self.search_clients["main"].search)(
+                search_text=query.query,
+                query_type=QueryType.SIMPLE,
+                filter=self._build_filter(query),
+                include_total_count=True,
+                top=50,
+                search_fields=["content", "function_name", "class_name", "docstring"],
+            )
+
+        # Run blocking SDK call in a thread to avoid blocking the event loop
+        results = await asyncio.to_thread(_do_keyword)
 
         return [(r['id'], r['@search.score']) for r in results]
 
@@ -220,20 +224,23 @@ class MultiStageRetriever(Retriever):
             return []
 
         # Enrich semantic search with facets, captions/answers, highlights, total count, search_fields and retries
-        results = with_retry(op_name="acs.semantic")(self.search_clients["main"].search)(
-            search_text=query.query,
-            query_type=QueryType.SEMANTIC,
-            semantic_configuration_name="semantic-config",
-            # scoring_profile="code_quality_boost",  # Commented out - profile doesn't exist
-            filter=self._build_filter(query),
-            facets=["language,count:20", "repository,count:20", "tags,count:20"],
-            query_caption="extractive",
-            query_answer="extractive",
-            highlight_fields="content,docstring",
-            include_total_count=True,
-            top=50,
-            search_fields=["content", "function_name", "class_name", "docstring"],
-        )
+        def _do_semantic():
+            return with_retry(op_name="acs.semantic")(self.search_clients["main"].search)(
+                search_text=query.query,
+                query_type=QueryType.SEMANTIC,
+                semantic_configuration_name="semantic-config",
+                # scoring_profile="code_quality_boost",  # Commented out - profile doesn't exist
+                filter=self._build_filter(query),
+                facets=["language,count:20", "repository,count:20", "tags,count:20"],
+                query_caption="extractive",
+                query_answer="extractive",
+                highlight_fields="content,docstring",
+                include_total_count=True,
+                top=50,
+                search_fields=["content", "function_name", "class_name", "docstring"],
+            )
+
+        results = await asyncio.to_thread(_do_semantic)
 
         return [(r['id'], r['@search.score']) for r in results]
 
@@ -267,7 +274,8 @@ class MultiStageRetriever(Retriever):
 
         # Honor repository/path filters if present on query
         if hasattr(query, "repository") and getattr(query, "repository", None):
-            filters.append(f"repository eq '{query.repository}'")
+            repo_val = str(getattr(query, "repository", "")).replace("'", "''")
+            filters.append(f"repository eq '{repo_val}'")
 
         # Add exclusion filters for exclude_terms
         if hasattr(query, 'exclude_terms') and query.exclude_terms:
@@ -478,7 +486,11 @@ class MultiStageRetriever(Retriever):
                 return self._cache[doc_id]
 
             # Fetch from Azure Search
-            doc = with_retry(op_name="acs.get_document")(self.search_clients['main'].get_document)(key=doc_id)
+            def _do_get():
+                return with_retry(op_name="acs.get_document")(self.search_clients['main'].get_document)(key=doc_id)
+
+            # Offload blocking get_document to thread pool
+            doc = await asyncio.to_thread(_do_get)
 
             # Convert to SearchResult
             result = SearchResult(

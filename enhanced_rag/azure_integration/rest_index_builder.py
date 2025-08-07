@@ -100,7 +100,7 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
             "missing_fields": missing,
             "total_fields": len(field_names),
             "has_vector_search": bool(current.get("vectorSearch")),
-            "has_semantic_search": bool(current.get("semanticSearch")),
+            "has_semantic_search": bool(current.get("semantic")),
             "scoring_profiles": [p.get("name") for p in current.get("scoringProfiles", [])],
         }
 
@@ -114,13 +114,13 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
         try:
             current = await self._index_automation.ops.get_index(index_name)
             fields = current.get("fields", [])
-            
+
             vector_field = None
             for field in fields:
                 if field["name"] == vector_field_name:
                     vector_field = field
                     break
-            
+
             if not vector_field:
                 return {
                     "valid": False,
@@ -128,9 +128,9 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
                     "expected_dimensions": expected_dimensions,
                     "actual_dimensions": None
                 }
-            
+
             actual_dimensions = vector_field.get("dimensions")
-            
+
             return {
                 "valid": actual_dimensions == expected_dimensions,
                 "expected_dimensions": expected_dimensions,
@@ -160,16 +160,16 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
             raise FileNotFoundError(
                 "Index schema file 'azure_search_index_schema.json' not found"
             )
-        
+
         index_def = json.loads(schema_path.read_text())
         index_def["name"] = index_name
-        
+
         # Update vector dimensions if specified
         if enable_vectors and "fields" in index_def:
             for field in index_def["fields"]:
                 if field.get("type") == "Collection(Edm.Single)" and field.get("dimensions"):
                     field["dimensions"] = vector_dimensions
-        
+
         return index_def
 
     def create_or_update_index(self, index_def: Dict[str, Any]) -> Any:
@@ -193,7 +193,7 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
         class MockIndexClient:
             def __init__(self, builder):
                 self.builder = builder
-            
+
             def delete_index(self, index_name: str):
                 """Delete an index."""
                 import asyncio
@@ -205,7 +205,7 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
                     )
                 finally:
                     loop.close()
-            
+
             def get_index(self, index_name: str):
                 """Get index definition."""
                 import asyncio
@@ -218,5 +218,5 @@ class EnhancedIndexBuilder:  # noqa: D401 – keep original public name
                     return SimpleNamespace(**result)
                 finally:
                     loop.close()
-        
+
         return MockIndexClient(self)

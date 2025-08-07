@@ -19,5 +19,5 @@ def err(msg: str, code: str = "error") -> Dict[str, Any]:
     # user-visible errors.  We purposefully log at INFO level – many callers
     # treat user errors as part of the expected control flow and therefore do
     # not want them to appear as noisy WARNING/ERROR lines.
-    logger.info("mcp_response_error", extra={"code": code, "message": msg})
+    logger.info("mcp_response_error", extra={"code": code, "error_message": msg})
     return {"ok": False, "error": msg, "code": code}

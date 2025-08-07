@@ -42,7 +42,7 @@ async def recreate_index():
         endpoint=endpoint,
         credential=AzureKeyCredential(admin_key)
     )
-    
+
     # Delete if exists
     try:
         index_client.delete_index(index_name)
@@ -50,7 +50,7 @@ async def recreate_index():
     except Exception as e:
         # Avoid failing if index doesn't exist; provide context
         print(f"No existing index to delete or deletion skipped: {e}")
-    
+
     # Create new index with fixed schema
     builder = EnhancedIndexBuilder()
     index = await builder.create_enhanced_rag_index(
@@ -59,17 +59,21 @@ async def recreate_index():
         enable_vectors=True,
         enable_semantic=True
     )
-    
+
     print(f"\n✅ Successfully created index: {index_name}")
-    print(f"Fields: {len(index.fields)}")
-    
+    # Fetch current index schema via REST to inspect fields
+    current = await builder._index_automation.ops.get_index(index_name)
+    fields = current.get("fields", [])
+    print(f"Fields: {len(fields)}")
+
     # List collection fields
     collection_fields = []
-    for field in index.fields:
-        if hasattr(field, 'type') and str(field.type).startswith('Collection'):
-            analyzer = getattr(field, 'analyzer_name', None)
-            collection_fields.append(f"{field.name} (analyzer: {analyzer})")
-    
+    for field in fields:
+        ftype = field.get("type")
+        if isinstance(ftype, str) and ftype.startswith("Collection("):
+            analyzer = field.get("analyzer")
+            collection_fields.append(f"{field.get('name')} (analyzer: {analyzer})")
+
     print(f"\nCollection fields:")
     for cf in collection_fields:
         print(f"  - {cf}")

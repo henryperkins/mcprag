@@ -171,5 +171,24 @@
         "algorithm": "vector-algo"
       }
     ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "semantic-config",
+        "prioritizedFields": {
+          "titleField": { "fieldName": "function_name" },
+          "prioritizedContentFields": [
+            { "fieldName": "content" },
+            { "fieldName": "docstring" }
+          ],
+          "prioritizedKeywordsFields": [
+            { "fieldName": "repository" },
+            { "fieldName": "language" },
+            { "fieldName": "tags" }
+          ]
+        }
+      }
+    ]
   }
 }

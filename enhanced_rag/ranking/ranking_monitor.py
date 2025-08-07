@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field, asdict
 import json
 import statistics
+from collections import deque
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +47,9 @@ class InMemoryStorage:
     """Simple in-memory storage for testing"""
 
     def __init__(self):
-        self.decisions = []
-        self.metrics = []
+        # Bound in-memory storage to avoid unbounded growth
+        self.decisions = deque(maxlen=5000)
+        self.metrics = deque(maxlen=2000)
         self.feedback_by_query = {}  # Track feedback separately
 
     async def store_decisions(self, decisions: List[RankingDecision]):
@@ -99,7 +102,8 @@ class RankingMonitor:
 
     def __init__(self, storage: Optional[InMemoryStorage] = None):
         self.storage = storage or InMemoryStorage()
-        self.buffer = []
+        # Bounded buffer for decisions before flush
+        self.buffer = deque(maxlen=100)
         self.buffer_size = 100
         self.flush_interval = 30  # seconds
         # Add property for backward compatibility
@@ -173,7 +177,7 @@ class RankingMonitor:
     async def flush_buffers(self):
         """Flush buffered decisions to storage"""
         if self.buffer:
-            await self.storage.store_decisions(self.buffer)
+            await self.storage.store_decisions(list(self.buffer))
             self.buffer.clear()
 
     async def record_user_feedback(
@@ -185,6 +189,15 @@ class RankingMonitor:
         success: Optional[bool] = None
     ):
         """Record user feedback on search results"""
+        # Validate inputs to prevent poisoning/injection
+        if query_id and not re.match(r'^[A-Za-z0-9_-:.]+$', query_id):
+            raise ValueError("Invalid query_id format")
+        if clicked_position is not None:
+            if not isinstance(clicked_position, int) or clicked_position < 1 or clicked_position > 100:
+                raise ValueError("Invalid clicked_position")
+        if rating is not None:
+            if not isinstance(rating, int) or rating < 1 or rating > 5:
+                raise ValueError("Invalid rating")
         feedback = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'clicked_position': clicked_position,

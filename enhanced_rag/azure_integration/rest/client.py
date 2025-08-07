@@ -1,9 +1,15 @@
-"""Simple REST client for Azure AI Search automation."""
+"""Simple REST client for Azure AI Search automation.
+
+Adds a lightweight circuit breaker around HTTP requests to prevent
+cascading failures during upstream outages while keeping tenacity
+retry behavior.
+"""
 
 import httpx
 from typing import Dict, Any, Optional
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential
+from enhanced_rag.utils.error_handler import _CircuitBreaker, StructuredError, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,8 @@ class AzureSearchClient:
                 "Accept": "application/json"
             }
         )
+        # Circuit breaker to guard repeated upstream failures
+        self._circuit = _CircuitBreaker(failure_threshold=5, reset_sec=60)
     
     @retry(
         stop=stop_after_attempt(3), 
@@ -62,6 +70,13 @@ class AzureSearchClient:
         Raises:
             httpx.HTTPStatusError: If request fails after retries
         """
+        # Short‑circuit if the circuit is open
+        if not self._circuit.allow():
+            raise StructuredError(
+                ErrorCode.CIRCUIT_OPEN,
+                f"Circuit open – blocking request {method} {path}",
+            )
+
         url = f"{self.endpoint}{path}"
         params = kwargs.pop("params", {})
         params["api-version"] = self.api_version
@@ -80,15 +95,19 @@ class AzureSearchClient:
             # Return empty dict for 204 No Content responses
             if response.status_code == 204:
                 return {}
-                
+            # Mark success on the circuit breaker
+            self._circuit.success()
+
             return response.json() if response.text else {}
             
         except httpx.HTTPStatusError as e:
             status = getattr(e.response, "status_code", "unknown")
             logger.error(f"HTTP error {status} during Azure Search request")
+            self._circuit.failure()
             raise
         except Exception as e:
             logger.error(f"Request failed: {e}")
+            self._circuit.failure()
             raise
     
     async def close(self):

@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -17,13 +20,29 @@ class Config:
 
     # Azure Search Configuration
     ENDPOINT: str = os.getenv("ACS_ENDPOINT", "")
+    # Prefer env var; optionally fall back to OS keyring if configured
     ADMIN_KEY: str = os.getenv("ACS_ADMIN_KEY", "")
+    if not ADMIN_KEY:
+        try:
+            import keyring  # type: ignore
+            ADMIN_KEY = keyring.get_password("mcprag", "ACS_ADMIN_KEY") or ""
+            if ADMIN_KEY:
+                logger.info("Loaded ACS_ADMIN_KEY from keyring")
+        except Exception:
+            # Keyring not available or not configured – continue with empty default
+            pass
     INDEX_NAME: str = os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota")
 
     # Azure OpenAI Configuration (for vector search)
     AZURE_OPENAI_KEY: Optional[str] = os.getenv("AZURE_OPENAI_KEY") or os.getenv(
         "AZURE_OPENAI_API_KEY"
     )
+    if not AZURE_OPENAI_KEY:
+        try:
+            import keyring  # type: ignore
+            AZURE_OPENAI_KEY = keyring.get_password("mcprag", "AZURE_OPENAI_KEY")
+        except Exception:
+            pass
     AZURE_OPENAI_ENDPOINT: Optional[str] = os.getenv("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_DEPLOYMENT: Optional[str] = os.getenv("AZURE_OPENAI_DEPLOYMENT")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")

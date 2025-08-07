@@ -52,6 +52,8 @@ class AdaptiveRanker:
         # Start background updater
         if self.enable_background_updates:
             self._start_background_updater()
+        # Concurrency guard for weight updates during ranking
+        self._weight_lock = asyncio.Lock()
 
     async def rank(
         self,
@@ -86,25 +88,26 @@ class AdaptiveRanker:
         # Store original weights
         original_weights = self.base_ranker.weights.get(intent, {}).copy()
 
-        try:
-            # Apply adaptive weights
-            self.base_ranker.weights[intent] = weights
+        async with self._weight_lock:
+            try:
+                # Apply adaptive weights
+                self.base_ranker.weights[intent] = weights
 
-            # Rank with adapted weights
-            ranked = await self.base_ranker.rank(results, intent, context)
+                # Rank with adapted weights
+                ranked = await self.base_ranker.rank(results, intent, context)
 
-            # Track ranking for learning
-            self.queries_since_update += 1
+                # Track ranking for learning
+                self.queries_since_update += 1
 
-            # Check if we should trigger an update
-            if self.queries_since_update >= self.update_interval:
-                asyncio.create_task(self._update_weights())
+                # Check if we should trigger an update
+                if self.queries_since_update >= self.update_interval:
+                    asyncio.create_task(self._update_weights())
 
-            return ranked
+                return ranked
 
-        finally:
-            # Restore original weights
-            self.base_ranker.weights[intent] = original_weights
+            finally:
+                # Restore original weights
+                self.base_ranker.weights[intent] = original_weights
 
     async def _get_adaptive_weights(self, intent: SearchIntent) -> Dict[str, float]:
         """Get current adaptive weights for intent"""

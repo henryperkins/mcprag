@@ -5,6 +5,7 @@ Coordinates all enhanced RAG components for optimal code search
 
 import logging
 from typing import Dict, List, Any, Optional, Union, TYPE_CHECKING
+from collections import OrderedDict
 
 from datetime import datetime, timezone
 
@@ -132,9 +133,11 @@ class RAGPipeline:
             except Exception as e:
                 logger.warning(f"Vector search initialization failed: {e}")
 
-        # Component cache for performance
-        self._context_cache: Dict[str, CodeContext] = {}
-        self._session_contexts: Dict[str, Dict[str, Any]] = {}
+        # Component caches with bounded memory
+        self._MAX_CONTEXT_CACHE = 1000
+        self._context_cache: "OrderedDict[str, CodeContext]" = OrderedDict()
+        self._MAX_SESSIONS = 1000
+        self._session_contexts: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 
         # Keep a structural type for self.ranker to avoid Pylance self-dependency errors
         # Define Protocol at module level scope to ensure it is resolvable for type checkers
@@ -588,6 +591,8 @@ class RAGPipeline:
         # Check cache first
         cache_key = f"{query_context.current_file}:{query_context.workspace_root}"
         if cache_key in self._context_cache:
+            # LRU: move to end on access
+            self._context_cache.move_to_end(cache_key)
             return self._context_cache[cache_key]
 
         try:
@@ -598,8 +603,11 @@ class RAGPipeline:
                 recent_edits=[]  # Could be enhanced with recent edits
             )
 
-            # Cache the context
+            # Cache the context (bounded LRU)
             self._context_cache[cache_key] = context
+            self._context_cache.move_to_end(cache_key)
+            if len(self._context_cache) > self._MAX_CONTEXT_CACHE:
+                self._context_cache.popitem(last=False)
             return context
 
         except Exception as e:
@@ -638,7 +646,11 @@ class RAGPipeline:
             # Store interaction ID for potential later feedback
             if hasattr(query, 'user_id') and query.user_id:
                 self._session_contexts.setdefault(query.user_id, {})
+                # LRU update and bound sessions
                 self._session_contexts[query.user_id]['last_interaction_id'] = interaction_id
+                self._session_contexts.move_to_end(query.user_id)
+                if len(self._session_contexts) > self._MAX_SESSIONS:
+                    self._session_contexts.popitem(last=False)
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to record interaction: {e}")
@@ -655,8 +667,10 @@ class RAGPipeline:
         """Update session context with new information"""
         if session_id not in self._session_contexts:
             self._session_contexts[session_id] = {}
-
         self._session_contexts[session_id].update(context_update)
+        self._session_contexts.move_to_end(session_id)
+        if len(self._session_contexts) > self._MAX_SESSIONS:
+            self._session_contexts.popitem(last=False)
 
     def get_pipeline_status(self) -> Dict[str, Any]:
         """Get current pipeline status and health"""

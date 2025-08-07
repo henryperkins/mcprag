@@ -176,16 +176,19 @@ class PatternMatchScorer:
     def _detect_structural_patterns(self, result: SearchResult) -> Dict[str, float]:
         """Detect patterns based on code structure"""
         patterns = {}
-        content = result.code_snippet
+        # Limit content length to avoid catastrophic regex backtracking on huge inputs
+        MAX_SCAN_LEN = 20000
+        content = (result.code_snippet or "")[:MAX_SCAN_LEN]
 
         # Singleton pattern detection
-        if re.search(r'class.*\{[\s\S]*?_instance\s*=\s*None', content):
+        # Use non-greedy, DOTALL-limited patterns to reduce backtracking risk
+        if re.search(r'class[\s\S]{0,4000}?_instance\s*=\s*None', content, re.DOTALL):
             patterns['singleton'] = 0.8
         elif '_instance' in content and 'getInstance' in content:
             patterns['singleton'] = 0.6
 
         # Factory pattern detection
-        if re.search(r'def\s+create\w+\s*\(.*?\)\s*->\s*\w+:', content):
+        if re.search(r'def\s+create\w+\s*\([\s\S]{0,200}\)\s*->\s*\w+\s*:', content, re.DOTALL):
             patterns['factory'] = 0.7
         elif re.search(r'class\s+\w*Factory', content):
             patterns['factory'] = 0.8

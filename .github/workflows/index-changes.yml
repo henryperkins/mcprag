@@ -47,21 +47,23 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          ACS_INDEX_NAME: ${{ vars.ACS_INDEX_NAME || 'codebase-mcp-sota' }}
         run: |
           echo "Changed files: ${{ steps.changed-files.outputs.all_changed_files }}"
-          python smart_indexer.py --files ${{ steps.changed-files.outputs.all_changed_files }}
+          python scripts/index_changed_files.py \
+            --files "${{ steps.changed-files.outputs.all_changed_files }}" \
+            --index-name "$ACS_INDEX_NAME"
 
-      - name: Index via GitHub API (backup)
+      - name: Fallback index attempt
         if: failure()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACS_ENDPOINT: ${{ secrets.ACS_ENDPOINT }}
           ACS_ADMIN_KEY: ${{ secrets.ACS_ADMIN_KEY }}
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          ACS_INDEX_NAME: ${{ vars.ACS_INDEX_NAME || 'codebase-mcp-sota' }}
         run: |
-          python github_azure_integration.py \
-            --owner ${{ github.repository_owner }} \
-            --repo ${{ github.event.repository.name }} \
-            --files ${{ steps.changed-files.outputs.all_changed_files }}
+          python scripts/index_changed_files.py \
+            --files "${{ steps.changed-files.outputs.all_changed_files }}" \
+            --index-name "$ACS_INDEX_NAME"

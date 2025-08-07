@@ -41,7 +41,7 @@ def create_field(
     vector_search_profile: Optional[str] = None
 ) -> Dict[str, Any]:
     """Create a field definition.
-    
+
     Args:
         name: Field name
         field_type: Field data type
@@ -57,7 +57,7 @@ def create_field(
         synonym_maps: Synonym maps to apply
         dimensions: Vector dimensions (for vector fields)
         vector_search_profile: Vector search profile name
-        
+
     Returns:
         Field definition dictionary
     """
@@ -71,7 +71,7 @@ def create_field(
         "facetable": facetable,
         "retrievable": retrievable
     }
-    
+
     # Add optional properties
     if analyzer:
         field["analyzer"] = analyzer
@@ -81,12 +81,13 @@ def create_field(
         field["indexAnalyzer"] = index_analyzer
     if synonym_maps:
         field["synonymMaps"] = synonym_maps
-    
+
     # Vector field properties
     if dimensions:
         field["dimensions"] = dimensions
-        field["vectorSearchConfiguration"] = vector_search_profile
-        
+    if vector_search_profile:
+        field["vectorSearchProfile"] = vector_search_profile
+
     return field
 
 
@@ -96,25 +97,23 @@ def create_vector_search_profile(
     vectorizer: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Create a vector search profile.
-    
+    """Create a vector search profile aligned with REST API (2025-05-01-preview).
+
     Args:
         name: Profile name
-        algorithm: Algorithm name (e.g., "hnsw")
-        vectorizer: Optional vectorizer name
-        parameters: Algorithm-specific parameters
-        
+        algorithm: Algorithm configuration name to reference (must match algorithms[].name)
+        vectorizer: Optional vectorizer name to reference (must match vectorizers[].name)
+        parameters: Unused placeholder for compatibility
+
     Returns:
         Vector search profile definition
     """
     profile = {
         "name": name,
-        "algorithmConfigurationName": f"{algorithm}-config"
+        "algorithm": algorithm
     }
-    
     if vectorizer:
-        profile["vectorizerName"] = vectorizer
-        
+        profile["vectorizer"] = vectorizer
     return profile
 
 
@@ -126,14 +125,14 @@ def create_hnsw_algorithm(
     metric: str = "cosine"
 ) -> Dict[str, Any]:
     """Create HNSW algorithm configuration.
-    
+
     Args:
         name: Configuration name
         m: Number of bi-directional links
         ef_construction: Size of dynamic candidate list
         ef_search: Size of the neighbor list for search
         metric: Distance metric (cosine, euclidean, dotProduct)
-        
+
     Returns:
         HNSW algorithm configuration
     """
@@ -156,13 +155,13 @@ def create_semantic_configuration(
     keyword_fields: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Create a semantic search configuration.
-    
+
     Args:
         name: Configuration name
         title_field: Field to use as title
         content_fields: Fields to use as content
         keyword_fields: Optional keyword fields
-        
+
     Returns:
         Semantic configuration definition
     """
@@ -172,17 +171,17 @@ def create_semantic_configuration(
             "titleField": {
                 "fieldName": title_field
             },
-            "contentFields": [
+            "prioritizedContentFields": [
                 {"fieldName": field} for field in content_fields
             ]
         }
     }
-    
+
     if keyword_fields:
-        config["prioritizedFields"]["keywordsFields"] = [
+        config["prioritizedFields"]["prioritizedKeywordsFields"] = [
             {"fieldName": field} for field in keyword_fields
         ]
-        
+
     return config
 
 
@@ -193,13 +192,13 @@ def create_scoring_profile(
     function_aggregation: str = "sum"
 ) -> Dict[str, Any]:
     """Create a scoring profile.
-    
+
     Args:
         name: Profile name
         text_weights: Field weights for text scoring
         functions: Scoring functions
         function_aggregation: How to aggregate function scores
-        
+
     Returns:
         Scoring profile definition
     """
@@ -207,13 +206,13 @@ def create_scoring_profile(
         "name": name,
         "functionAggregation": function_aggregation
     }
-    
+
     if text_weights:
         profile["text"] = {"weights": text_weights}
-        
+
     if functions:
         profile["functions"] = functions
-        
+
     return profile
 
 
@@ -222,19 +221,19 @@ def create_indexer_schedule(
     start_time: Optional[str] = None
 ) -> Dict[str, Any]:
     """Create an indexer schedule.
-    
+
     Args:
         interval: ISO 8601 duration (e.g., PT1H for 1 hour)
         start_time: Optional start time (ISO 8601)
-        
+
     Returns:
         Schedule definition
     """
     schedule = {"interval": interval}
-    
+
     if start_time:
         schedule["startTime"] = start_time
-        
+
     return schedule
 
 
@@ -246,14 +245,14 @@ def create_blob_datasource(
     delete_detection_policy: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Create an Azure Blob Storage data source.
-    
+
     Args:
         name: Data source name
         connection_string: Storage account connection string
         container_name: Container name
         query: Optional virtual folder path
         delete_detection_policy: Optional deletion detection policy
-        
+
     Returns:
         Data source definition
     """
@@ -267,13 +266,13 @@ def create_blob_datasource(
             "name": container_name
         }
     }
-    
+
     if query:
         datasource["container"]["query"] = query
-        
+
     if delete_detection_policy:
         datasource["dataDeletionDetectionPolicy"] = delete_detection_policy
-        
+
     return datasource
 
 
@@ -285,14 +284,14 @@ def create_sql_datasource(
     delete_detection_policy: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Create an Azure SQL data source.
-    
+
     Args:
         name: Data source name
         connection_string: SQL connection string
         table_or_view: Table or view name
         change_detection_policy: Optional change detection policy
         delete_detection_policy: Optional deletion detection policy
-        
+
     Returns:
         Data source definition
     """
@@ -306,13 +305,13 @@ def create_sql_datasource(
             "name": table_or_view
         }
     }
-    
+
     if change_detection_policy:
         datasource["dataChangeDetectionPolicy"] = change_detection_policy
-        
+
     if delete_detection_policy:
         datasource["dataDeletionDetectionPolicy"] = delete_detection_policy
-        
+
     return datasource
 
 
@@ -324,14 +323,14 @@ def create_text_split_skill(
     default_language_code: str = "en"
 ) -> Dict[str, Any]:
     """Create a text split cognitive skill.
-    
+
     Args:
         name: Skill name
         text_split_mode: Split mode (pages or sentences)
         maximum_page_length: Maximum characters per page
         page_overlap_length: Overlap between pages
         default_language_code: Default language
-        
+
     Returns:
         Skill definition
     """
@@ -361,10 +360,10 @@ def create_text_split_skill(
 
 def create_language_detection_skill(name: str) -> Dict[str, Any]:
     """Create a language detection skill.
-    
+
     Args:
         name: Skill name
-        
+
     Returns:
         Skill definition
     """
@@ -394,12 +393,12 @@ def create_entity_recognition_skill(
     default_language_code: str = "en"
 ) -> Dict[str, Any]:
     """Create an entity recognition skill.
-    
+
     Args:
         name: Skill name
         categories: Entity categories to extract
         default_language_code: Default language
-        
+
     Returns:
         Skill definition
     """
@@ -422,8 +421,8 @@ def create_entity_recognition_skill(
             }
         ]
     }
-    
+
     if categories:
         skill["categories"] = categories
-        
+
     return skill

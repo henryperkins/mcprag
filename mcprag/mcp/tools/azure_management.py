@@ -13,25 +13,25 @@ def _truncate_indexer_status(status: Dict[str, Any], max_size: int = 20000) -> D
     """Truncate indexer status response to prevent token limit issues."""
     # Convert to JSON to estimate size
     status_json = json.dumps(status, default=str)
-    
+
     # If status is small enough, return as-is
     if len(status_json) <= max_size:
         return status
-    
+
     # Create truncated version keeping most important fields
     truncated = {}
-    
+
     # Always keep these top-level fields
     important_fields = ["name", "status", "lastResult", "limits", "executionHistory"]
     for field in important_fields:
         if field in status:
             truncated[field] = status[field]
-    
+
     # Handle executionHistory specially - keep only recent entries
     if "executionHistory" in status and isinstance(status["executionHistory"], list):
         # Keep only the 5 most recent execution history entries
         truncated["executionHistory"] = status["executionHistory"][:5]
-        
+
         # Further truncate each history entry if needed
         for i, history in enumerate(truncated["executionHistory"]):
             if isinstance(history, dict):
@@ -45,9 +45,9 @@ def _truncate_indexer_status(status: Dict[str, Any], max_size: int = 20000) -> D
                             history_truncated[field] = history[field][:1000] + "... [truncated]"
                         else:
                             history_truncated[field] = history[field]
-                
+
                 truncated["executionHistory"][i] = history_truncated
-    
+
     # Check final size and add truncation notice
     final_json = json.dumps(truncated, default=str)
     if len(final_json) > max_size:
@@ -57,7 +57,7 @@ def _truncate_indexer_status(status: Dict[str, Any], max_size: int = 20000) -> D
             truncated["_truncation_notice"] = "Response truncated due to size limits. Use Azure Portal for full details."
     else:
         truncated["_truncation_notice"] = "Some fields truncated due to size limits."
-    
+
     return truncated
 
 
@@ -305,7 +305,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 if server.rest_ops is None:
                     return err("REST operations component is not initialized")
                 st = await server.rest_ops.get_indexer_status(indexer_name)
-                
+
                 # Truncate large status responses to prevent token limit issues
                 truncated_status = _truncate_indexer_status(st)
                 return ok({"indexer": indexer_name, "status": truncated_status})
@@ -427,15 +427,40 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err("REST operations component is not initialized")
 
         try:
+            # Build definition that matches Azure REST API schema
             ds_def = {
                 "name": name,
                 "type": datasource_type,
-                "connection_info": connection_info,
-                "container": container,
-                "credentials": credentials,
-                "description": description,
-                "refresh": refresh,
+                # Azure expects 'credentials.connectionString'
+                "credentials": {
+                    "connectionString": connection_info.get("connectionString", "")
+                },
+                # Container definition is required but callers may omit;
+                # fall back to an empty dict to satisfy the schema.
+                "container": container or {},
             }
+            # CosmosDB container mapping
+            if datasource_type == "cosmosdb":
+                # Ensure collection name provided
+                collection = None
+                if container and "name" in container:
+                    collection = container["name"]
+                elif "collectionName" in connection_info:
+                    collection = connection_info["collectionName"]
+                if not collection:
+                    return err("CosmosDB datasource requires a collection name in container or connection_info.collectionName")
+                # Rebuild container for CosmosDB (collection name only; query optional)
+                ds_def["container"] = {"name": collection}
+            
+            # Optional fields
+            if description is not None:
+                ds_def["description"] = description
+            # Map legacy refresh argument to the correct API field if provided
+            if refresh is not None:
+                ds_def["dataChangeDetectionPolicy"] = refresh
+            # Allow callers to supply a full credentials object that overrides the simple mapping
+            if credentials:
+                ds_def["credentials"] = credentials
             # Clean None values
             ds_def = {k: v for k, v in ds_def.items() if v is not None}
 
@@ -465,9 +490,18 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                     else:
                         result = maybe_res
                 else:
-                    raise AttributeError(
-                        "REST operations component lacks both create_or_update_datasource and create_or_update"
-                    )
+                    # Fall back to dedicated REST op: create_datasource(ds_def)
+                    _put_ds = getattr(server.rest_ops, "create_datasource", None)
+                    if callable(_put_ds):
+                        maybe_res = _put_ds(ds_def)
+                        if hasattr(maybe_res, "__await__"):
+                            result = await maybe_res  # type: ignore[reportUnknownMemberType]
+                        else:
+                            result = maybe_res
+                    else:
+                        raise AttributeError(
+                            "REST operations component lacks create_datasource, create_or_update_datasource, and create_or_update"
+                        )
             return ok({"datasource": name, "result": result})
         except Exception as e:
             return err(str(e))
@@ -495,14 +529,55 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err("REST operations component is not initialized")
 
         try:
-            sk_def = {
+            # Validate and normalize skills
+            normalized_skills: List[Dict[str, Any]] = []
+            for skill in skills:
+                if "@odata.type" not in skill:
+                    return err("Each skill must include '@odata.type'")
+                # Ensure mandatory lists exist
+                skill.setdefault("inputs", [])
+                skill.setdefault("outputs", [])
+                # Default context
+                skill.setdefault("context", "/document")
+                normalized_skills.append(skill)
+            # Build skillset definition according to API spec
+            sk_def: Dict[str, Any] = {
                 "name": name,
-                "description": description,
-                "skills": skills,
-                "cognitive_services_key": cognitive_services_key,
-                "knowledge_store": knowledge_store,
-                "encryption_key": encryption_key,
+                "skills": normalized_skills,
             }
+            if description is not None:
+                sk_def["description"] = description
+            # Determine if any skill requires Cognitive Services (most skills except TextSplit)
+            requires_cs = any(
+                skill["@odata.type"].startswith("#Microsoft.")
+                and "TextSplitSkill" not in skill["@odata.type"]
+                for skill in normalized_skills
+            )
+            if not cognitive_services_key and requires_cs:
+                import os
+                cognitive_services_key = os.getenv("AZURE_COGNITIVE_SERVICES_KEY")
+                if not cognitive_services_key:
+                    return err(
+                        "Cognitive Services key is required for one or more skills but "
+                        "was not provided. Set AZURE_COGNITIVE_SERVICES_KEY env var or "
+                        "pass cognitive_services_key parameter."
+                    )
+            # Cognitive services configuration block
+            if cognitive_services_key:
+                sk_def["cognitiveServices"] = {
+                    "@odata.type": "#Microsoft.Azure.Search.DefaultCognitiveServices",
+                    "key": cognitive_services_key,
+                }
+            else:
+                # For skillsets containing only built-in skills that don’t need a key
+                sk_def["cognitiveServices"] = {
+                    "@odata.type": "#Microsoft.Azure.Search.DefaultCognitiveServices"
+                }
+            # Optional blocks
+            if knowledge_store is not None:
+                sk_def["knowledgeStore"] = knowledge_store
+            if encryption_key is not None:
+                sk_def["encryptionKey"] = encryption_key
             # Clean None values
             sk_def = {k: v for k, v in sk_def.items() if v is not None}
 
@@ -531,9 +606,18 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                     else:
                         result = maybe_result
                 else:
-                    raise AttributeError(
-                        "REST operations component lacks both create_or_update_skillset and create_or_update"
-                    )
+                    # Fall back to dedicated REST op: create_skillset(sk_def)
+                    _put_skillset = getattr(server.rest_ops, "create_skillset", None)
+                    if callable(_put_skillset):
+                        maybe_result = _put_skillset(sk_def)
+                        if hasattr(maybe_result, "__await__"):
+                            result = await maybe_result  # type: ignore[reportUnknownMemberType]
+                        else:
+                            result = maybe_result
+                    else:
+                        raise AttributeError(
+                            "REST operations component lacks create_skillset, create_or_update_skillset, and create_or_update"
+                        )
             return ok({"skillset": name, "result": result})
         except Exception as e:
             return err(str(e))
@@ -547,14 +631,14 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         try:
             from ...config import Config
             index_name = Config.INDEX_NAME
-            
+
             # Get index stats and definition using automation components
             if server.index_automation is None:
                 return err("Index automation component is not initialized")
-                
+
             stats = await server.index_automation.ops.get_index_stats(index_name)
             index_def = await server.index_automation.ops.get_index(index_name)
-            
+
             return ok({
                 "index_name": index_name,
                 "fields": len(index_def.get("fields", [])),
@@ -563,7 +647,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 "vector_search": bool(index_def.get("vectorSearch")),
                 "semantic_search": bool(index_def.get("semanticSearch"))
             })
-            
+
         except Exception as e:
             return err(str(e))
 
@@ -578,15 +662,15 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         try:
             from ...config import Config
             index_name = Config.INDEX_NAME
-                
+
             if server.index_automation is None:
                 return err("Index automation component is not initialized")
-                
+
             result = await server.index_automation.validate_index_schema(
                 index_name, expected_schema
             )
             return ok(result)
-            
+
         except Exception as e:
             return err(str(e))
 
@@ -597,7 +681,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         patterns: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Index a repository into Azure Search using the CLI automation.
-        
+
         Args:
             repo_path: Path to the repository to index (default: current directory)
             repo_name: Name to use for the repository in the search index
@@ -607,36 +691,36 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             from ...config import Config
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for repository indexing")
-                
+
             # Use the CLI automation to index repository
             import subprocess
             import os
-            
+
             # Activate virtual environment and run indexing
             venv_python = sys.executable
-            
+
             cmd = [
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
                 "local-repo", "--repo-path", repo_path, "--repo-name", repo_name
             ]
-            
+
             if patterns:
                 cmd.extend(["--patterns"] + patterns)
-            
+
             # Set working directory to project root
             cwd = "/home/azureuser/mcprag"
-            
+
             result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
+                cmd,
+                capture_output=True,
+                text=True,
                 cwd=cwd,
                 env=dict(os.environ, PYTHONPATH=cwd)
             )
-            
+
             if result.returncode != 0:
                 return err(f"Failed to index repository: {result.stderr}")
-            
+
             return ok({
                 "indexed": True,
                 "repo_path": repo_path,
@@ -644,7 +728,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 "patterns": patterns,
                 "output": result.stdout.strip()
             })
-            
+
         except Exception as e:
             return err(str(e))
 
@@ -654,7 +738,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         repo_name: str = "mcprag"
     ) -> Dict[str, Any]:
         """Index specific changed files into Azure Search.
-        
+
         Args:
             files: List of file paths that have changed
             repo_name: Name of the repository in the search index
@@ -663,36 +747,36 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             from ...config import Config
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for file indexing")
-                
+
             import subprocess
             import os
-            
+
             venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
-            
+
             cmd = [
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
                 "changed-files", "--files"
             ] + files + ["--repo-name", repo_name]
-            
+
             result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
+                cmd,
+                capture_output=True,
+                text=True,
                 cwd=cwd,
                 env=dict(os.environ, PYTHONPATH=cwd)
             )
-            
+
             if result.returncode != 0:
                 return err(f"Failed to index changed files: {result.stderr}")
-            
+
             return ok({
                 "indexed": True,
                 "files": files,
                 "repo_name": repo_name,
                 "output": result.stdout.strip()
             })
-            
+
         except Exception as e:
             return err(str(e))
 
@@ -701,7 +785,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         output_file: str = "schema_backup.json"
     ) -> Dict[str, Any]:
         """Backup the current index schema to a file.
-        
+
         Args:
             output_file: Path where to save the schema backup
         """
@@ -709,28 +793,28 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             from ...config import Config
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for schema backup")
-                
+
             import subprocess
             import os
-            
+
             venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
-            
+
             result = subprocess.run([
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
                 "reindex", "--method", "backup", "--output", output_file
             ], capture_output=True, text=True, cwd=cwd,
                env=dict(os.environ, PYTHONPATH=cwd))
-            
+
             if result.returncode != 0:
                 return err(f"Failed to backup schema: {result.stderr}")
-            
+
             return ok({
                 "backed_up": True,
                 "output_file": output_file,
                 "output": result.stdout.strip()
             })
-            
+
         except Exception as e:
             return err(str(e))
 
@@ -739,7 +823,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         repository_filter: str
     ) -> Dict[str, Any]:
         """Clear documents from a specific repository in the index.
-        
+
         Args:
             repository_filter: Filter to match repository documents (e.g., "repository eq 'old-repo'")
         """
@@ -747,28 +831,28 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             from ...config import Config
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for document clearing")
-                
+
             import subprocess
             import os
-            
+
             venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
-            
+
             result = subprocess.run([
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
                 "reindex", "--method", "clear", "--filter", repository_filter
             ], capture_output=True, text=True, cwd=cwd,
                env=dict(os.environ, PYTHONPATH=cwd))
-            
+
             if result.returncode != 0:
                 return err(f"Failed to clear documents: {result.stderr}")
-            
+
             return ok({
                 "cleared": True,
                 "filter": repository_filter,
                 "output": result.stdout.strip()
             })
-            
+
         except Exception as e:
             return err(str(e))
 
@@ -777,7 +861,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         confirm: bool = False
     ) -> Dict[str, Any]:
         """Drop and rebuild the entire index. ⚠️ CAUTION: This deletes all data!
-        
+
         Args:
             confirm: Must be set to True to confirm this destructive operation
         """
@@ -785,30 +869,30 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             from ...config import Config
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for index rebuild")
-                
+
             if not confirm:
                 return err("Must set confirm=True to rebuild index. This operation deletes all data!")
-                
+
             import subprocess
             import os
-            
+
             venv_python = sys.executable
             cwd = "/home/azureuser/mcprag"
-            
+
             result = subprocess.run([
                 venv_python, "-m", "enhanced_rag.azure_integration.cli",
                 "reindex", "--method", "drop-rebuild"
             ], capture_output=True, text=True, cwd=cwd,
                env=dict(os.environ, PYTHONPATH=cwd))
-            
+
             if result.returncode != 0:
                 return err(f"Failed to rebuild index: {result.stderr}")
-            
+
             return ok({
                 "rebuilt": True,
                 "warning": "All previous data has been deleted",
                 "output": result.stdout.strip()
             })
-            
+
         except Exception as e:
             return err(str(e))
