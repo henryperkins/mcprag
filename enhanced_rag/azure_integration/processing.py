@@ -180,37 +180,6 @@ class FileProcessor:
         return documents
 
 
-def get_language_from_extension(file_path: str) -> str:
-    """Legacy function - use FileProcessor.get_language_from_extension() instead."""
-    ext_map = {
-        '.py': 'python',
-        '.js': 'javascript',
-        '.mjs': 'javascript',
-        '.ts': 'typescript',
-        '.jsx': 'javascript',
-        '.tsx': 'typescript',
-        '.java': 'java',
-        '.cpp': 'cpp',
-        '.c': 'c',
-        '.cs': 'csharp',
-        '.go': 'go',
-        '.rs': 'rust',
-        '.php': 'php',
-        '.rb': 'ruby',
-        '.swift': 'swift',
-        '.kt': 'kotlin',
-        '.scala': 'scala',
-        '.r': 'r',
-        '.md': 'markdown',
-        '.json': 'json',
-        '.yaml': 'yaml',
-        '.yml': 'yaml',
-        '.xml': 'xml',
-        '.html': 'html',
-        '.css': 'css'
-    }
-    ext = Path(file_path).suffix.lower()
-    return ext_map.get(ext, 'text')
 
 
 def extract_python_chunks(content: str, file_path: str) -> List[Dict[str, Any]]:
@@ -250,6 +219,28 @@ def extract_python_chunks(content: str, file_path: str) -> List[Dict[str, Any]]:
     return chunks
 
 
+def find_repository_root(file_paths: List[str]) -> str:
+    """Find the repository root by looking for .git directory.
+    
+    Args:
+        file_paths: List of file paths to search from
+        
+    Returns:
+        Repository root path (directory containing .git) or common parent if not found
+    """
+    for file_path in file_paths:
+        current = Path(file_path).parent
+        while current != current.parent:
+            if (current / '.git').exists():
+                return str(current)
+            current = current.parent
+    
+    # Fall back to common parent directory
+    if file_paths:
+        return os.path.commonpath([os.path.dirname(p) for p in file_paths])
+    return os.getcwd()
+
+
 def process_file(file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
     """Process a single file and create document chunks for indexing."""
     try:
@@ -258,7 +249,9 @@ def process_file(file_path: str, repo_path: str, repo_name: str) -> List[Dict[st
     except (IOError, OSError):
         return []
 
-    language = get_language_from_extension(file_path)
+    # Use FileProcessor for consistent language detection
+    file_processor = FileProcessor()
+    language = file_processor.get_language_from_extension(file_path)
     relative_path = os.path.relpath(file_path, repo_path)
 
     if language == 'python':

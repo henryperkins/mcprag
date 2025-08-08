@@ -1,12 +1,40 @@
 """Azure AI Search management MCP tools."""
 import sys
+import os
+import subprocess
 import json
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
 from ...utils.response_helpers import ok, err
 from .base import check_component
 
 if TYPE_CHECKING:
     from ...server import MCPServer
+
+
+def _run_enhanced_cli(argv: List[str]) -> Tuple[int, str, str]:
+    """Run enhanced_rag CLI command with consistent environment.
+    
+    Args:
+        argv: Command arguments (e.g., ["local-repo", "--repo-path", ...])
+        
+    Returns:
+        Tuple of (returncode, stdout, stderr)
+    """
+    venv_python = sys.executable
+    cmd = [venv_python, "-m", "enhanced_rag.azure_integration.cli"] + argv
+    
+    # Set working directory to project root
+    cwd = "/home/azureuser/mcprag"
+    
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=dict(os.environ, PYTHONPATH=cwd)
+    )
+    
+    return result.returncode, result.stdout.strip(), result.stderr
 
 
 def _truncate_indexer_status(status: Dict[str, Any], max_size: int = 20000) -> Dict[str, Any]:
@@ -94,9 +122,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             if action == "create" or action == "ensure":
                 if not index_definition:
                     return err("index_definition required for create/ensure")
-                # Add null check for type checker
-                if server.index_automation is None:
-                    return err("Index automation component is not initialized")
+                # Component already checked above
+                assert server.index_automation is not None  # for type checker
                 result = await server.index_automation.ensure_index_exists(
                     index_definition, update_if_different
                 )
@@ -105,9 +132,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             elif action == "recreate":
                 if not index_definition:
                     return err("index_definition required for recreate")
-                # Add null check for type checker
-                if server.index_automation is None:
-                    return err("Index automation component is not initialized")
+                # Component already checked above
+                assert server.index_automation is not None  # for type checker
                 result = await server.index_automation.recreate_index(
                     index_definition, backup_documents
                 )
@@ -116,9 +142,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             elif action == "delete":
                 if not index_name:
                     return err("index_name required for delete")
-                # Add null check for type checker
-                if server.rest_ops is None:
-                    return err("REST operations component is not initialized")
+                # Component already checked above
+                assert server.rest_ops is not None  # for type checker
                 await server.rest_ops.delete_index(index_name)
                 return ok({"deleted": True, "index": index_name})
 
@@ -293,9 +318,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 return err("Admin mode required for indexer modifications")
 
             if action == "list":
-                # Null check for type checker
-                if server.rest_ops is None:
-                    return err("REST operations component is not initialized")
+                # Component already checked above
+                assert server.rest_ops is not None  # for type checker
                 idx_list = await server.rest_ops.list_indexers()
                 return ok({"indexers": idx_list})
 
@@ -313,16 +337,14 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             elif action == "run":
                 if not indexer_name:
                     return err("indexer_name required for run")
-                if server.rest_ops is None:
-                    return err("REST operations component is not initialized")
+                assert server.rest_ops is not None  # for type checker
                 result = await server.rest_ops.run_indexer(indexer_name, wait=wait)
                 return ok({"indexer": indexer_name, "run_started": True, "result": result})
 
             elif action == "reset":
                 if not indexer_name:
                     return err("indexer_name required for reset")
-                if server.rest_ops is None:
-                    return err("REST operations component is not initialized")
+                assert server.rest_ops is not None  # for type checker
                 await server.rest_ops.reset_indexer(indexer_name)
                 # Optionally run after reset
                 run_res = None
@@ -422,9 +444,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         if not check_component(server.rest_ops, "REST operations"):
             return err("REST operations not available")
 
-        # Explicit null check for type checker
-        if server.rest_ops is None:
-            return err("REST operations component is not initialized")
+        # Component already checked above
+        assert server.rest_ops is not None  # for type checker
 
         try:
             # Build definition that matches Azure REST API schema
@@ -524,9 +545,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         if not check_component(server.rest_ops, "REST operations"):
             return err("REST operations not available")
 
-        # Explicit null check for type checker
-        if server.rest_ops is None:
-            return err("REST operations component is not initialized")
+        # Component already checked above
+        assert server.rest_ops is not None  # for type checker
 
         try:
             # Validate and normalize skills
@@ -693,40 +713,23 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 return err("Admin mode required for repository indexing")
 
             # Use the CLI automation to index repository
-            import subprocess
-            import os
-
-            # Activate virtual environment and run indexing
-            venv_python = sys.executable
-
-            cmd = [
-                venv_python, "-m", "enhanced_rag.azure_integration.cli",
-                "local-repo", "--repo-path", repo_path, "--repo-name", repo_name
-            ]
-
+            # Build CLI arguments
+            argv = ["local-repo", "--repo-path", repo_path, "--repo-name", repo_name]
             if patterns:
-                cmd.extend(["--patterns"] + patterns)
-
-            # Set working directory to project root
-            cwd = "/home/azureuser/mcprag"
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd,
-                env=dict(os.environ, PYTHONPATH=cwd)
-            )
-
-            if result.returncode != 0:
-                return err(f"Failed to index repository: {result.stderr}")
+                argv.extend(["--patterns"] + patterns)
+            
+            # Run CLI command
+            returncode, stdout, stderr = _run_enhanced_cli(argv)
+            
+            if returncode != 0:
+                return err(f"Failed to index repository: {stderr}")
 
             return ok({
                 "indexed": True,
                 "repo_path": repo_path,
                 "repo_name": repo_name,
                 "patterns": patterns,
-                "output": result.stdout.strip()
+                "output": stdout
             })
 
         except Exception as e:
@@ -748,33 +751,20 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for file indexing")
 
-            import subprocess
-            import os
-
-            venv_python = sys.executable
-            cwd = "/home/azureuser/mcprag"
-
-            cmd = [
-                venv_python, "-m", "enhanced_rag.azure_integration.cli",
-                "changed-files", "--files"
-            ] + files + ["--repo-name", repo_name]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd,
-                env=dict(os.environ, PYTHONPATH=cwd)
-            )
-
-            if result.returncode != 0:
-                return err(f"Failed to index changed files: {result.stderr}")
+            # Build CLI arguments
+            argv = ["changed-files", "--files"] + files + ["--repo-name", repo_name]
+            
+            # Run CLI command
+            returncode, stdout, stderr = _run_enhanced_cli(argv)
+            
+            if returncode != 0:
+                return err(f"Failed to index changed files: {stderr}")
 
             return ok({
                 "indexed": True,
                 "files": files,
                 "repo_name": repo_name,
-                "output": result.stdout.strip()
+                "output": stdout
             })
 
         except Exception as e:
@@ -794,25 +784,19 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for schema backup")
 
-            import subprocess
-            import os
-
-            venv_python = sys.executable
-            cwd = "/home/azureuser/mcprag"
-
-            result = subprocess.run([
-                venv_python, "-m", "enhanced_rag.azure_integration.cli",
-                "reindex", "--method", "backup", "--output", output_file
-            ], capture_output=True, text=True, cwd=cwd,
-               env=dict(os.environ, PYTHONPATH=cwd))
-
-            if result.returncode != 0:
-                return err(f"Failed to backup schema: {result.stderr}")
+            # Build CLI arguments
+            argv = ["reindex", "--method", "backup", "--output", output_file]
+            
+            # Run CLI command
+            returncode, stdout, stderr = _run_enhanced_cli(argv)
+            
+            if returncode != 0:
+                return err(f"Failed to backup schema: {stderr}")
 
             return ok({
                 "backed_up": True,
                 "output_file": output_file,
-                "output": result.stdout.strip()
+                "output": stdout
             })
 
         except Exception as e:
@@ -832,25 +816,19 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             if not Config.ADMIN_MODE:
                 return err("Admin mode required for document clearing")
 
-            import subprocess
-            import os
-
-            venv_python = sys.executable
-            cwd = "/home/azureuser/mcprag"
-
-            result = subprocess.run([
-                venv_python, "-m", "enhanced_rag.azure_integration.cli",
-                "reindex", "--method", "clear", "--filter", repository_filter
-            ], capture_output=True, text=True, cwd=cwd,
-               env=dict(os.environ, PYTHONPATH=cwd))
-
-            if result.returncode != 0:
-                return err(f"Failed to clear documents: {result.stderr}")
+            # Build CLI arguments
+            argv = ["reindex", "--method", "clear", "--filter", repository_filter]
+            
+            # Run CLI command
+            returncode, stdout, stderr = _run_enhanced_cli(argv)
+            
+            if returncode != 0:
+                return err(f"Failed to clear documents: {stderr}")
 
             return ok({
                 "cleared": True,
                 "filter": repository_filter,
-                "output": result.stdout.strip()
+                "output": stdout
             })
 
         except Exception as e:
@@ -873,25 +851,19 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             if not confirm:
                 return err("Must set confirm=True to rebuild index. This operation deletes all data!")
 
-            import subprocess
-            import os
-
-            venv_python = sys.executable
-            cwd = "/home/azureuser/mcprag"
-
-            result = subprocess.run([
-                venv_python, "-m", "enhanced_rag.azure_integration.cli",
-                "reindex", "--method", "drop-rebuild"
-            ], capture_output=True, text=True, cwd=cwd,
-               env=dict(os.environ, PYTHONPATH=cwd))
-
-            if result.returncode != 0:
-                return err(f"Failed to rebuild index: {result.stderr}")
+            # Build CLI arguments
+            argv = ["reindex", "--method", "drop-rebuild"]
+            
+            # Run CLI command
+            returncode, stdout, stderr = _run_enhanced_cli(argv)
+            
+            if returncode != 0:
+                return err(f"Failed to rebuild index: {stderr}")
 
             return ok({
                 "rebuilt": True,
                 "warning": "All previous data has been deleted",
-                "output": result.stdout.strip()
+                "output": stdout
             })
 
         except Exception as e:

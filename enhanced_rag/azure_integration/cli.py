@@ -29,7 +29,7 @@ from .automation import DataAutomation
 from .rest import AzureSearchClient, SearchOperations
 from mcprag.config import Config
 from .cli_schema_automation import add_schema_commands
-from .processing import get_language_from_extension, extract_python_chunks, process_file
+from .processing import extract_python_chunks, process_file, FileProcessor, find_repository_root
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,33 +47,19 @@ async def index_repository(repo_path: str, repo_name: str, patterns: Optional[Li
     rest_ops = SearchOperations(rest_client)
     data_automation = DataAutomation(rest_ops)
     
-    # Collect all documents
-    all_documents = []
-    
-    # Default file extensions to process
-    extensions = {'.py', '.js', '.mjs', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', 
-                  '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
-                  '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'}
-    
-    # If patterns provided, extract extensions from them
+    # Use FileProcessor with custom extensions if patterns provided
+    extensions = None
     if patterns:
         extensions = set()
         for pattern, _ in patterns:
             if pattern.startswith('*.'):
                 extensions.add(pattern[1:])
     
-    for root, dirs, files in os.walk(repo_path):
-        # Skip hidden directories and common non-code directories
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv']]
-        
-        for file in files:
-            if any(file.endswith(ext) for ext in extensions):
-                file_path = os.path.join(root, file)
-                docs = process_file(file_path, repo_path, repo_name)
-                all_documents.extend(docs)
-                
-                if docs:
-                    logger.info(f"Processed {file_path} ({len(docs)} chunks)")
+    # Use FileProcessor for consistent repository processing
+    file_processor = FileProcessor(extensions=extensions)
+    all_documents = file_processor.process_repository(repo_path, repo_name)
+    
+    logger.info(f"Collected {len(all_documents)} documents from repository")
     
     # Upload documents using async generator
     async def document_generator():
@@ -134,21 +120,8 @@ async def index_changed_files(file_paths: List[str], repo_name: str) -> int:
     # Collect all documents
     all_documents = []
     
-    # Find the repo root (go up until we find .git or can't go further)
-    repo_path = None
-    for file_path in file_paths:
-        current = Path(file_path).parent
-        while current != current.parent:
-            if (current / '.git').exists():
-                repo_path = str(current)
-                break
-            current = current.parent
-        if repo_path:
-            break
-    
-    if not repo_path:
-        # Fall back to common parent
-        repo_path = os.path.commonpath([os.path.dirname(p) for p in file_paths])
+    # Find the repo root using shared helper
+    repo_path = find_repository_root(file_paths)
     
     for file_path in file_paths:
         if os.path.exists(file_path) and os.path.isfile(file_path):

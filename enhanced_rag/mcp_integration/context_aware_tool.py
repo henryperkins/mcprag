@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List, Set
 from pathlib import Path
+from datetime import datetime
 
 from ..context.hierarchical_context import HierarchicalContextAnalyzer
 from ..context.session_tracker import SessionTracker
@@ -60,17 +61,26 @@ class ContextAwareTool:
 
             context = await context_task
 
+            # EnhancedContext extends CodeContext and carries module_context/project_context as dicts.
+            # Use .get(...) accessors for forward/backward compatibility with analyzer outputs.
+            module_ctx = getattr(context, "module_context", {}) or {}
+            project_ctx = getattr(context, "project_context", {}) or {}
+
+            project_root = project_ctx.get('project_root') or project_ctx.get('root_path')
+            project_name = project_ctx.get('name') or (Path(project_root).name if project_root else None)
+            project_type = project_ctx.get('project_type')
+
             result = {
                 'file': file_path,
-                'language': context.file_context.language,
-                'module': context.module_context.module_path,
+                'language': getattr(context, 'language', None),
+                'module': module_ctx.get('module_path'),
                 'project': {
-                    'name': context.project_context.name,
-                    'root': context.project_context.root_path,
-                    'type': context.project_context.project_type
+                    'name': project_name,
+                    'root': project_root,
+                    'type': project_type
                 },
                 'context_depth': depth,
-                'timestamp': context.timestamp.isoformat()
+                'timestamp': datetime.utcnow().isoformat()
             }
 
             # Resolve parallel optionals
@@ -80,7 +90,7 @@ class ContextAwareTool:
             if include_imports:
                 indirect = await self._get_indirect_imports(context)
                 result['imports'] = {
-                    'direct': context.file_context.imports,
+                    'direct': getattr(context, 'imports', []) or [],
                     'indirect': indirect
                 }
 
@@ -341,7 +351,7 @@ class ContextAwareTool:
                 cache[p] = res
                 return res
 
-        imports = list(set(context.file_context.imports))
+        imports = list(set(getattr(context, 'imports', []) or []))
         # Cap the number of imports analyzed (top 20)
         imports_to_analyze = imports[:20]
         
@@ -349,7 +359,7 @@ class ContextAwareTool:
         out: Set[str] = set()
         for r in results:
             if r:
-                out.update(r.file_context.imports or [])
+                out.update((getattr(r, "imports", []) or []))
         return sorted(list(out - set(imports)))
     
     async def _get_git_history(self, file_path: str) -> Dict[str, Any]:
@@ -366,7 +376,7 @@ class ContextAwareTool:
         related = []
         
         # Test files
-        if test_file := self._find_test_file(context.file_context.file_path):
+        if test_file := self._find_test_file(getattr(context, 'current_file', '') or ''):
             related.append({
                 'type': 'test',
                 'path': test_file,
@@ -374,7 +384,7 @@ class ContextAwareTool:
             })
         
         # Import relationships
-        for imp in context.file_context.imports[:5]:
+        for imp in (getattr(context, 'imports', []) or [])[:5]:
             related.append({
                 'type': 'import',
                 'path': imp,
@@ -382,9 +392,9 @@ class ContextAwareTool:
             })
         
         # Same module files
-        module_files = await self._find_module_files(context.module_context)
+        module_files = await self._find_module_files(getattr(context, 'module_context', {}) or {})
         for mf in module_files[:3]:
-            if mf != context.file_context.file_path:
+            if mf != getattr(context, 'current_file', ''):
                 related.append({
                     'type': 'module',
                     'path': mf,
@@ -398,9 +408,13 @@ class ContextAwareTool:
         summary_parts = []
         
         # File info
+        module_ctx = getattr(context, "module_context", {}) or {}
+        module_path = module_ctx.get('module_path')
+        module_name = Path(module_path).name if module_path else 'unknown'
+        current_file = getattr(context, 'current_file', '')
         summary_parts.append(
-            f"File '{Path(context.file_context.file_path).name}' "
-            f"in module '{context.module_context.module_name}'"
+            f"File '{Path(current_file).name}' "
+            f"in module '{module_name}'"
         )
         
         # Dependencies
@@ -499,20 +513,16 @@ class ContextAwareTool:
     
     def _get_search_paths(self, context: Any, scope: str) -> List[str]:
         """Get paths to search based on scope"""
+        module_ctx = getattr(context, "module_context", {}) or {}
+        project_ctx = getattr(context, "project_context", {}) or {}
         if scope == 'module':
-            return context.module_context.files
+            return module_ctx.get('module_files', []) or []
         elif scope == 'project':
-            # Use project context fields if present
-            if hasattr(context, 'project_context') and hasattr(context.project_context, 'files'):
-                return context.project_context.files
-            # Fallback to empty list
-            return []
+            # No explicit file list in project context; return empty or discoverable list
+            return project_ctx.get('files', []) or []
         else:  # scope == 'all'
-            # Use indexed files from project context
-            if hasattr(context, 'project_context') and hasattr(context.project_context, 'indexed_files'):
-                return context.project_context.indexed_files
-            # Fallback to empty list
-            return []
+            # Prefer any indexed files list if present
+            return project_ctx.get('indexed_files', []) or []
     
     async def _calculate_similarity(self, ast1: Dict, ast2: Dict) -> float:
         """Calculate similarity between two AST structures"""
@@ -541,4 +551,8 @@ class ContextAwareTool:
     
     async def _find_module_files(self, module_context: Any) -> List[str]:
         """Find all files in module"""
-        return module_context.files if hasattr(module_context, 'files') else []
+        if isinstance(module_context, dict):
+            # our analyzer stores 'module_files'
+            return module_context.get('module_files', []) or []
+        # Fallback for object-like contexts
+        return getattr(module_context, 'files', []) if hasattr(module_context, 'files') else []

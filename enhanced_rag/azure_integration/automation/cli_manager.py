@@ -13,7 +13,7 @@ import os
 
 from ..rest import SearchOperations
 from ..embedding_provider import IEmbeddingProvider
-from ..processing import FileProcessor
+from ..processing import FileProcessor, find_repository_root
 from .data_manager import DataAutomation
 from .embedding_manager import EmbeddingAutomation
 from .reindex_manager import ReindexAutomation
@@ -188,21 +188,8 @@ class CLIAutomation:
         start_time = datetime.utcnow()
         logger.info(f"Indexing {len(file_paths)} changed files")
         
-        # Find the repo root
-        repo_path = None
-        for file_path in file_paths:
-            current = Path(file_path).parent
-            while current != current.parent:
-                if (current / '.git').exists():
-                    repo_path = str(current)
-                    break
-                current = current.parent
-            if repo_path:
-                break
-        
-        if not repo_path:
-            # Fall back to common parent
-            repo_path = os.path.commonpath([os.path.dirname(p) for p in file_paths])
+        # Find the repo root using shared helper
+        repo_path = find_repository_root(file_paths)
         
         # Process files
         all_documents = []

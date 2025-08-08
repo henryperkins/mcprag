@@ -196,7 +196,12 @@ class StyleMatcher:
         style_features = defaultdict(Counter)
         
         for example in examples[:20]:  # Analyze top 20 examples
-            features = self._extract_style_features(example.content, language)
+            # Prefer canonical 'code_snippet'; fallback to legacy 'content' and dict-shaped examples for backwards compatibility
+            code_sample = getattr(example, "code_snippet", None) or getattr(example, "content", None)
+            if code_sample is None and isinstance(example, dict):
+                code_sample = example.get("code_snippet") or example.get("content")
+            code_sample = code_sample or ""
+            features = self._extract_style_features(code_sample, language)
             
             for feature_type, feature_value in features.items():
                 style_features[feature_type][feature_value] += 1

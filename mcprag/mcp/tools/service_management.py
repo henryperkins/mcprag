@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, Optional
 import httpx
 from fastmcp import Context
+from mcprag.utils.response_helpers import ok, err
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +58,66 @@ async def get_subscription_info() -> Optional[Dict[str, str]]:
         return None
 
 
+def _resolve_search_service_name(resource_group: Optional[str], search_service_name: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve resource group and search service name from environment.
+    
+    Returns:
+        Tuple of (resource_group, search_service_name, error_message)
+    """
+    import re
+    
+    if not resource_group:
+        resource_group = os.getenv("AZURE_RESOURCE_GROUP")
+        if not resource_group:
+            return None, None, "Resource group not provided and AZURE_RESOURCE_GROUP env var not set"
+    
+    if not search_service_name:
+        # Try to extract from endpoint
+        endpoint = os.getenv("ACS_ENDPOINT", "")
+        if endpoint:
+            match = re.match(r"https://([^.]+)\.search\.windows\.net", endpoint)
+            if match:
+                search_service_name = match.group(1)
+        
+        if not search_service_name:
+            search_service_name = os.getenv("AZURE_SEARCH_SERVICE_NAME")
+            
+        if not search_service_name:
+            return resource_group, None, "Search service name not provided and cannot be determined from environment"
+    
+    return resource_group, search_service_name, None
+
+
+async def _build_mgmt_context(resource_group: str, search_service_name: str) -> tuple[Optional[Dict[str, str]], Optional[str], Optional[str]]:
+    """Build Azure Management API context.
+    
+    Returns:
+        Tuple of (headers, service_path, error_message)
+    """
+    # Get Azure credentials
+    token = await get_management_token()
+    if not token:
+        return None, None, "Failed to get Azure access token. Ensure Azure CLI is installed and authenticated (az login)"
+    
+    sub_info = await get_subscription_info()
+    if not sub_info:
+        return None, None, "Failed to get Azure subscription info"
+    
+    subscription_id = sub_info["subscription_id"]
+    
+    # Build Management API URL components
+    service_path = f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Search/searchServices/{search_service_name}"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    
+    return headers, service_path, None
+
+
 def register_service_management_tools(server):
     """Register service management tools with the MCP server."""
-    
-    def ok(data: Any) -> Dict[str, Any]:
-        """Create a successful response."""
-        return {"ok": True, "data": data}
-    
-    def err(message: str) -> Dict[str, Any]:
-        """Create an error response."""
-        return {"ok": False, "error": message, "code": "error"}
     
     @server.mcp.tool()
     async def configure_semantic_search(
@@ -97,48 +148,19 @@ def register_service_management_tools(server):
             - Standard plan: Pay-per-query pricing
         """
         try:
-            # Get resource group and service name from env vars if not provided
-            if not resource_group:
-                resource_group = os.getenv("AZURE_RESOURCE_GROUP")
-                if not resource_group:
-                    return err("Resource group not provided and AZURE_RESOURCE_GROUP env var not set")
+            # Resolve resource group and service name
+            resource_group, search_service_name, error = _resolve_search_service_name(resource_group, search_service_name)
+            if error:
+                return err(error)
             
-            if not search_service_name:
-                # Try to extract from endpoint
-                endpoint = os.getenv("ACS_ENDPOINT", "")
-                if endpoint:
-                    # Extract service name from https://servicename.search.windows.net
-                    import re
-                    match = re.match(r"https://([^.]+)\.search\.windows\.net", endpoint)
-                    if match:
-                        search_service_name = match.group(1)
-                
-                if not search_service_name:
-                    search_service_name = os.getenv("AZURE_SEARCH_SERVICE_NAME")
-                    
-                if not search_service_name:
-                    return err("Search service name not provided and cannot be determined from environment")
+            # Build management context
+            headers, service_path, error = await _build_mgmt_context(resource_group, search_service_name)
+            if error:
+                return err(error)
             
-            # Get Azure credentials
-            token = await get_management_token()
-            if not token:
-                return err("Failed to get Azure access token. Ensure Azure CLI is installed and authenticated (az login)")
-            
-            sub_info = await get_subscription_info()
-            if not sub_info:
-                return err("Failed to get Azure subscription info")
-            
-            subscription_id = sub_info["subscription_id"]
-            
-            # Build Management API URL
+            # API settings
             base_url = "https://management.azure.com"
-            service_path = f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Search/searchServices/{search_service_name}"
             api_version = "2023-11-01"  # Latest stable version that supports semantic search
-            
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 if action == "status":
@@ -243,47 +265,23 @@ def register_service_management_tools(server):
             Detailed service information including tier, capacity, and features
         """
         try:
-            # Get resource group and service name from env vars if not provided
-            if not resource_group:
-                resource_group = os.getenv("AZURE_RESOURCE_GROUP")
-                if not resource_group:
-                    return err("Resource group not provided and AZURE_RESOURCE_GROUP env var not set")
+            # Resolve resource group and service name
+            resource_group, search_service_name, error = _resolve_search_service_name(resource_group, search_service_name)
+            if error:
+                return err(error)
             
-            if not search_service_name:
-                # Try to extract from endpoint
-                endpoint = os.getenv("ACS_ENDPOINT", "")
-                if endpoint:
-                    import re
-                    match = re.match(r"https://([^.]+)\.search\.windows\.net", endpoint)
-                    if match:
-                        search_service_name = match.group(1)
-                
-                if not search_service_name:
-                    search_service_name = os.getenv("AZURE_SEARCH_SERVICE_NAME")
-                    
-                if not search_service_name:
-                    return err("Search service name not provided and cannot be determined from environment")
-            
-            # Get Azure credentials
-            token = await get_management_token()
-            if not token:
-                return err("Failed to get Azure access token. Ensure Azure CLI is installed and authenticated")
-            
+            # Build management context
+            headers, service_path, error = await _build_mgmt_context(resource_group, search_service_name)
+            if error:
+                return err(error)
+
+            # Resolve subscription id for response metadata
             sub_info = await get_subscription_info()
-            if not sub_info:
-                return err("Failed to get Azure subscription info")
+            subscription_id = sub_info.get("subscription_id") if sub_info else None
             
-            subscription_id = sub_info["subscription_id"]
-            
-            # Build Management API URL
+            # API settings
             base_url = "https://management.azure.com"
-            service_path = f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Search/searchServices/{search_service_name}"
             api_version = "2023-11-01"
-            
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(

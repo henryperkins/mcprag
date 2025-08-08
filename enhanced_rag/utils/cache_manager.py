@@ -6,6 +6,7 @@ import time
 from typing import Dict, Any, Optional
 from collections import OrderedDict
 import asyncio
+import fnmatch
 
 
 class CacheManager:
@@ -49,6 +50,34 @@ class CacheManager:
         """Clear all cache entries"""
         async with self._lock:
             self._cache.clear()
+
+    async def clear_scope(self, scope: str) -> int:
+        """Clear entries whose keys start with the given scope prefix.
+
+        Example:
+            scope = "search" will clear keys like "search:..."
+        
+        Returns:
+            Number of entries cleared.
+        """
+        prefix = f"{scope.strip()}:" if not scope.endswith(":") else scope
+        async with self._lock:
+            keys = [k for k in list(self._cache.keys()) if k.startswith(prefix)]
+            for k in keys:
+                del self._cache[k]
+            return len(keys)
+
+    async def clear_pattern(self, pattern: str) -> int:
+        """Clear entries matching a glob-style pattern (e.g., 'search:*query*').
+
+        Returns:
+            Number of entries cleared.
+        """
+        async with self._lock:
+            keys = [k for k in list(self._cache.keys()) if fnmatch.fnmatch(k, pattern)]
+            for k in keys:
+                del self._cache[k]
+            return len(keys)
             
     async def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""

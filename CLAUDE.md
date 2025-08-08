@@ -47,6 +47,7 @@ This file guides Claude Code and subagents working in this repository. It define
    - Index, document, and indexer management
    - Embedding generation with caching
    - Repository processing and file chunking
+   - `processing.py`: Single source of truth for file processing, language detection, and repository traversal
 
 ### Data Flow
 ```
@@ -64,7 +65,7 @@ MCP Client Response
 ## Protected paths and rules
 Never write to or delete the following without explicit human approval:
 - `.env`, `.env.*`, `.git/`, `.github/`
-- Configuration: `mcprag/config.py`, `.mcp.json`
+- Configuration: `mcprag/config.py` (core loading logic), `.mcp.json`
 - Azure schemas: `azure_search_index_schema.json`
 - Secrets/keys/certs directories: `secrets/`, `keys/`, `certs/`
 
@@ -81,6 +82,9 @@ Additional rules:
 ACS_ENDPOINT=https://<name>.search.windows.net
 ACS_ADMIN_KEY=<admin-key>
 ACS_INDEX_NAME=codebase-mcp-sota  # default
+AZURE_RESOURCE_GROUP=<your-resource-group>
+# Optional: explicitly set if not inferrable from ACS_ENDPOINT
+AZURE_SEARCH_SERVICE_NAME=<your-search-service-name>
 
 # Azure OpenAI (Optional - for embeddings)
 AZURE_OPENAI_ENDPOINT=https://<name>.openai.azure.com
@@ -199,6 +203,9 @@ MCP_DEBUG_TIMINGS=false  # Enable timing logs
 The MCP tools require specific server components to be initialized:
 
 ### Component Requirements by Tool
+
+**Note**: Components are checked once with `check_component()`; subsequent uses can assert non-None for type checking.
+
 | Tool | Required Component | Fallback Behavior |
 |------|-------------------|-------------------|
 | search_code | enhanced_search | Returns error if unavailable |
@@ -242,7 +249,7 @@ Tools requiring explicit `confirm=true` parameter:
 - Language: Python 3.12+ with type hints
 - Style:
   - Prefer small, pure functions; clear names; single responsibility.
-  - Avoid duplicated code; extract shared utilities.
+  - Avoid duplicated code; extract shared utilities. Check for existing helpers in `utils/`, `processing.py`, and tool base modules before implementing new functions.
   - Handle errors explicitly; avoid silent failures.
   - Validate inputs; sanitize outputs for security.
   - Use dataclasses for structured data
@@ -250,6 +257,8 @@ Tools requiring explicit `confirm=true` parameter:
   - Use explicit, minimal imports; avoid unused symbols.
   - Prefer absolute imports for cross-module references
   - Use TYPE_CHECKING for circular import prevention
+  - Import shared utilities from their canonical locations rather than reimplementing
+  - Never import deprecated or legacy functions if a canonical version exists
 - Async:
   - Use `async/await` throughout; handle rejections
   - Add timeouts for all external calls (default 30s)
@@ -257,13 +266,14 @@ Tools requiring explicit `confirm=true` parameter:
 - Performance:
   - Avoid N+1 patterns; batch Azure Search operations
   - Cache embeddings with SHA256 keys
-  - Limit context cache size (1000 entries default)
   - Use streaming for large document sets
+  - File processing limits configured via environment (e.g., MCP_MAX_INDEX_FILES)
 
 ## Testing standards
 - Add or update tests for new behavior and bug fixes.
 - Include negative cases and edge cases.
 - Keep tests deterministic; avoid sleeping; use fakes/mocks where appropriate.
+- When refactoring to remove duplication, ensure all call sites are updated and tested.
 - Minimal acceptance for change:
   - Tests pass locally for impacted area(s).
   - No flakiness introduced.
@@ -399,6 +409,27 @@ The system includes feedback-based learning components:
   - Session-based performance tracking
   - Anomaly detection with thresholds
   - Performance history retention (100 entries)
+
+### Code Deduplication Patterns
+
+#### Shared Utilities
+- **Repository root detection**: Use `find_repository_root()` from `enhanced_rag/azure_integration/processing.py`
+- **Response helpers**: Import `ok`/`err` from `mcprag/utils/response_helpers.py` - never redefine locally
+- **CLI subprocess invocation**: Use `_run_enhanced_cli()` from `mcprag/mcp/tools/azure_management.py` for invoking enhanced_rag CLI
+- **Azure service resolution**: Use `_resolve_search_service_name()` and `_build_mgmt_context()` from `mcprag/mcp/tools/service_management.py`
+
+#### File Processing
+- **FileProcessor class** (`enhanced_rag/azure_integration/processing.py`) is the single source of truth for:
+  - Repository traversal via `process_repository()`
+  - Extension filtering via `DEFAULT_EXTENSIONS`
+  - Language detection via `get_language_from_extension()`
+  - Never duplicate directory walking or extension filtering logic
+
+#### Component Validation
+- Use `check_component()` for all component availability checks
+- After check_component, use `assert component is not None` for type checker
+- Never add redundant manual None-checks after check_component
+- This pattern eliminates duplicate error messages
 
 ## Orchestrator expectations (subagent)
 Use the orchestrator for multi-file/multi-step tasks requiring planning and delegation.
