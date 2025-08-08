@@ -15,7 +15,7 @@ from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.interfaces import Retriever
 from ..core.models import SearchQuery, SearchResult, SearchIntent, CodeContext
-from ..core.config import get_config
+from ..core.config import get_config, Config
 from .hybrid_searcher import HybridSearcher
 from .dependency_resolver import DependencyResolver
 from ..pattern_registry import get_pattern_registry
@@ -37,29 +37,38 @@ class MultiStageRetriever(Retriever):
     Orchestrates multiple search strategies in parallel and fuses results
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self.config = config or get_config()
+    def __init__(self, config: Optional[Config | Dict[str, Any]] = None):
+        # Normalize incoming config so self.config is always a Config instance
+        cfg: Config
+        if config is None:
+            cfg = get_config()
+        elif isinstance(config, Config):
+            cfg = config
+        elif isinstance(config, dict):
+            try:
+                cfg = Config(**config)
+            except Exception as e:
+                logger.warning("Invalid config dict passed to MultiStageRetriever; falling back to get_config(): %s", e)
+                cfg = get_config()
+        else:
+            # Unknown type; fall back to environment-based config
+            cfg = get_config()
+
+        self.config: Config = cfg
+
         self.search_clients = self._initialize_clients()
-        self.hybrid_searcher = HybridSearcher(config)
-        self.dependency_resolver = DependencyResolver(config)
+        self.hybrid_searcher = HybridSearcher(self.config.model_dump())
+        self.dependency_resolver = DependencyResolver(self.config.model_dump())
         self.pattern_registry = get_pattern_registry()
         self._cache = {}
 
     def _initialize_clients(self) -> Dict[str, SearchClient]:
         """Initialize search clients for different indexes"""
-        clients = {}
+        clients: Dict[str, SearchClient] = {}
 
-        # Get Azure Search configuration - handle both dict and Config object
         try:
-            if hasattr(self.config, 'azure'):
-                # Config object
-                endpoint = getattr(self.config.azure, "endpoint", None)
-                admin_key = getattr(self.config.azure, "admin_key", None)
-            else:
-                # Dictionary config - fallback to get_config()
-                full_config = get_config()
-                endpoint = full_config.azure.endpoint
-                admin_key = full_config.azure.admin_key
+            endpoint = self.config.azure.endpoint
+            admin_key = self.config.azure.admin_key
 
             if not endpoint or not admin_key:
                 logger.warning("Azure Search credentials not configured")
@@ -67,32 +76,15 @@ class MultiStageRetriever(Retriever):
 
             credential = AzureKeyCredential(admin_key)
         except Exception as e:
-            logger.warning(f"Failed to get Azure Search configuration: {e}")
+            logger.warning("Failed to get Azure Search configuration: %s", e)
             return clients
 
-        # ----------------------------------------------------------
-        # Resolve index names.
-        # When ``self.config`` is a dict (from ``model_dump``) we need to
-        # extract the nested ``azure`` section manually to stay consistent
-        # with the object version.  Falling back to the historical default
-        # keeps backward-compatibility.
-        # ----------------------------------------------------------
-
-        main_index_name: str
-        if hasattr(self.config, "azure"):
-            main_index_name = getattr(self.config.azure, "index_name", None) or "codebase-mcp-sota"
-        elif isinstance(self.config, dict):
-            main_index_name = (
-                self.config.get("azure", {}).get("index_name")
-                or "codebase-mcp-sota"
-            )
-        else:
-            main_index_name = "codebase-mcp-sota"
+        main_index_name: str = self.config.azure.index_name or "codebase-mcp-sota"
 
         index_names = {
-            'main': main_index_name,
-            'patterns': 'codebase-patterns',
-            'dependencies': 'codebase-dependencies'
+            "main": main_index_name,
+            "patterns": "codebase-patterns",
+            "dependencies": "codebase-dependencies",
         }
 
         for key, index_name in index_names.items():
@@ -101,7 +93,7 @@ class MultiStageRetriever(Retriever):
                     endpoint=endpoint,
                     index_name=index_name,
                     credential=credential,
-                    api_version="2024-07-01"
+                    api_version="2024-07-01",
                 )
             except Exception as e:
                 logger.warning(

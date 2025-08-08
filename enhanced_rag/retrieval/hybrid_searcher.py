@@ -16,7 +16,7 @@ from azure.search.documents.models import (
 )
 # Note: Azure SDK SearchClient and AzureKeyCredential removed - using REST API only
 
-from ..core.config import get_config
+from ..core.config import get_config, Config
 from enhanced_rag.utils.performance_monitor import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class HybridSearcher:
 
     def __init__(
         self,
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[Config | Dict[str, Any]] = None,
         performance_monitor: Optional[PerformanceMonitor] = None,
         rest_ops: Optional[SearchOperations] = None
     ):
@@ -88,6 +88,9 @@ class HybridSearcher:
 
     def _initialize_client(self):
         """Initialize Azure Search client"""
+        endpoint: Optional[str] = None
+        admin_key: Optional[str] = None
+        index_name: Optional[str] = None
         try:
             # --------------------------------------------------------------
             # Resolve Azure Search connection details from the supplied
@@ -100,8 +103,6 @@ class HybridSearcher:
             # and ensures **exactly one** place determines the active index
             # name, which is critical for index-stability across the codebase.
             # --------------------------------------------------------------
-
-            endpoint = admin_key = index_name = None  # sensible defaults
 
             # Case 1 – Pydantic config object or object with `.azure`
             def _get_attr_or_key(obj: Any, key: str) -> Optional[Any]:
@@ -349,9 +350,11 @@ class HybridSearcher:
                 "include_total_count": False,
                 "timeout": (deadline_ms / 1000) if deadline_ms else None,
             })
-            options = {"top": vec_kwargs.get("top", top_k * 2)}
+            options: Dict[str, Any] = {"top": vec_kwargs.get("top", top_k * 2)}
             if vq and emb:
                 options["vectorQueries"] = [{"vector": emb, "k": top_k * 2, "fields": "content_vector"}]
+            if filter_expr:
+                options["filter"] = filter_expr
             resp = await self.rest_ops.search(self._index_name, query="", **options)
             vec_results = self._process_results(resp.get("value", []))
         except Exception as e:
@@ -424,8 +427,8 @@ class HybridSearcher:
 
         try:
             # Execute vector search using REST API
-            options = {"top": top_k}
-            if isinstance(vector_query, VectorizedQuery) and vector_query.vector:
+            options: Dict[str, Any] = {"top": top_k}
+            if isinstance(vector_query, VectorizedQuery) and getattr(vector_query, "vector", None):
                 options["vectorQueries"] = [{"vector": vector_query.vector, "k": top_k, "fields": "content_vector"}]
             if filter_expr:
                 options["filter"] = filter_expr
@@ -447,22 +450,15 @@ class HybridSearcher:
             return []
 
         try:
-            import httpx
-            url = f"{self._endpoint}/indexes/{self._index_name}/docs/search?api-version=2025-05-01-preview"
-            headers = {
-                "Content-Type": "application/json",
-                "api-key": self._rest_client.api_key
-            }
-            body = {
-                "search": query,
+            body: Dict[str, Any] = {
                 "queryType": "simple",
                 "top": top_k,
                 "includeTotalCount": True,
             }
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=body, headers=headers)
-                resp.raise_for_status()  # Raise an exception for bad status codes
-                return self._process_results(resp.json().get("value", []))
+            if filter_expr:
+                body["filter"] = filter_expr
+            resp = await self.rest_ops.search(self._index_name, query=query, **body)
+            return self._process_results(resp.get("value", []))
         except Exception as e:
             logger.error(f"Keyword search failed: {e}")
             return []
@@ -578,4 +574,3 @@ class HybridSearcher:
                 except Exception as e:
                     logger.error(f"Client-side embedding failed: {e}")
         return None
-
