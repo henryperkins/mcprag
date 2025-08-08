@@ -34,7 +34,7 @@ class MCPToolMetrics:
 
 class MCPToolWrapper:
     """Enhanced wrapper for MCP tools with rate limiting, validation, and monitoring."""
-    
+
     def __init__(
         self,
         tool_name: str,
@@ -44,7 +44,7 @@ class MCPToolWrapper:
         enable_metrics: bool = True
     ):
         """Initialize MCP tool wrapper.
-        
+
         Args:
             tool_name: Name of the MCP tool
             rate_limit_config: Rate limiting configuration
@@ -57,23 +57,23 @@ class MCPToolWrapper:
         self.enable_validation = enable_validation
         self.enable_sanitization = enable_sanitization
         self.enable_metrics = enable_metrics
-        
+
         # Initialize components
         self.validator = create_mcp_validator(tool_name) if enable_validation else None
         self.metrics = MCPToolMetrics() if enable_metrics else None
-        
+
         logger.info(f"Initialized MCP wrapper for tool '{tool_name}' with "
                    f"rate_limit={rate_limit_config is not None}, "
                    f"validation={enable_validation}, "
                    f"sanitization={enable_sanitization}, "
                    f"metrics={enable_metrics}")
-    
+
     def wrap_tool(self, tool_func: Callable) -> Callable:
         """Wrap an MCP tool function with enhancements.
-        
+
         Args:
             tool_func: Original tool function to wrap
-            
+
         Returns:
             Enhanced tool function
         """
@@ -81,17 +81,17 @@ class MCPToolWrapper:
         @wraps(tool_func)
         async def enhanced_tool(*args, **kwargs):
             start_time = time.time()
-            
+
             try:
                 # Update metrics
                 if self.metrics:
                     self.metrics.total_calls += 1
                     self.metrics.last_called = start_time
-                
+
                 # Sanitize inputs
                 if self.enable_sanitization:
                     kwargs = {k: sanitize_input(v) for k, v in kwargs.items()}
-                
+
                 # Validate inputs
                 if self.validator:
                     try:
@@ -102,40 +102,40 @@ class MCPToolWrapper:
                             self.metrics.failed_calls += 1
                         logger.warning(f"Validation failed for {self.tool_name}: {e}")
                         raise
-                
+
                 # Call the original tool
                 result = await tool_func(*args, **kwargs)
-                
+
                 # Update success metrics
                 if self.metrics:
                     self.metrics.successful_calls += 1
                     duration = time.time() - start_time
                     self._update_average_response_time(duration)
-                
+
                 logger.debug(f"Successfully called {self.tool_name} in {time.time() - start_time:.3f}s")
                 return result
-                
+
             except RateLimitError as e:
                 if self.metrics:
                     self.metrics.rate_limited_calls += 1
                     self.metrics.failed_calls += 1
                 logger.warning(f"Rate limit exceeded for {self.tool_name}: {e}")
                 raise
-                
+
             except Exception as e:
                 if self.metrics:
                     self.metrics.failed_calls += 1
                 logger.error(f"Error in {self.tool_name}: {e}", exc_info=True)
                 raise
-        
+
         return enhanced_tool
-    
+
     def _get_client_id(self, kwargs: Dict[str, Any]) -> str:
         """Extract client ID from kwargs for rate limiting.
-        
+
         Args:
             kwargs: Function keyword arguments
-            
+
         Returns:
             Client identifier string
         """
@@ -143,32 +143,35 @@ class MCPToolWrapper:
         for field in ['user_id', 'client_id', 'session_id', 'api_key']:
             if field in kwargs:
                 return str(kwargs[field])
-        
+
         # Fallback to tool name (global rate limiting)
         return self.tool_name
-    
+
     def _update_average_response_time(self, duration: float):
         """Update average response time metric.
-        
+
         Args:
             duration: Duration of the last call
         """
+        if not self.metrics:
+            return
+
         if self.metrics.successful_calls == 1:
             self.metrics.average_response_time = duration
         else:
             # Running average
             total_time = self.metrics.average_response_time * (self.metrics.successful_calls - 1) + duration
             self.metrics.average_response_time = total_time / self.metrics.successful_calls
-    
+
     def get_metrics(self) -> Optional[Dict[str, Any]]:
         """Get tool metrics.
-        
+
         Returns:
             Metrics dictionary or None if metrics disabled
         """
         if not self.metrics:
             return None
-        
+
         return {
             'tool_name': self.tool_name,
             'total_calls': self.metrics.total_calls,
@@ -183,7 +186,7 @@ class MCPToolWrapper:
             'last_called': self.metrics.last_called,
             'uptime_hours': (time.time() - (self.metrics.last_called or time.time())) / 3600
         }
-    
+
     def reset_metrics(self):
         """Reset metrics counters."""
         if self.metrics:
@@ -193,12 +196,12 @@ class MCPToolWrapper:
 
 class MCPToolRegistry:
     """Registry for managing enhanced MCP tools."""
-    
+
     def __init__(self):
         """Initialize tool registry."""
         self.tools: Dict[str, MCPToolWrapper] = {}
         self.original_tools: Dict[str, Callable] = {}
-    
+
     def register_tool(
         self,
         tool_name: str,
@@ -209,7 +212,7 @@ class MCPToolRegistry:
         enable_metrics: bool = True
     ) -> Callable:
         """Register and enhance an MCP tool.
-        
+
         Args:
             tool_name: Name of the tool
             tool_func: Original tool function
@@ -217,7 +220,7 @@ class MCPToolRegistry:
             enable_validation: Enable input validation
             enable_sanitization: Enable input sanitization
             enable_metrics: Enable metrics collection
-            
+
         Returns:
             Enhanced tool function
         """
@@ -228,30 +231,30 @@ class MCPToolRegistry:
             enable_sanitization=enable_sanitization,
             enable_metrics=enable_metrics
         )
-        
+
         enhanced_func = wrapper.wrap_tool(tool_func)
-        
+
         self.tools[tool_name] = wrapper
         self.original_tools[tool_name] = tool_func
-        
+
         logger.info(f"Registered enhanced MCP tool: {tool_name}")
         return enhanced_func
-    
+
     def get_tool_metrics(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """Get metrics for a specific tool.
-        
+
         Args:
             tool_name: Name of the tool
-            
+
         Returns:
             Metrics dictionary or None
         """
         wrapper = self.tools.get(tool_name)
         return wrapper.get_metrics() if wrapper else None
-    
+
     def get_all_metrics(self) -> Dict[str, Dict[str, Any]]:
         """Get metrics for all registered tools.
-        
+
         Returns:
             Dictionary mapping tool names to their metrics
         """
@@ -261,25 +264,25 @@ class MCPToolRegistry:
             if tool_metrics:
                 metrics[tool_name] = tool_metrics
         return metrics
-    
+
     def reset_tool_metrics(self, tool_name: str):
         """Reset metrics for a specific tool.
-        
+
         Args:
             tool_name: Name of the tool
         """
         wrapper = self.tools.get(tool_name)
         if wrapper:
             wrapper.reset_metrics()
-    
+
     def reset_all_metrics(self):
         """Reset metrics for all tools."""
         for wrapper in self.tools.values():
             wrapper.reset_metrics()
-    
+
     def list_tools(self) -> Dict[str, Dict[str, Any]]:
         """List all registered tools with their configurations.
-        
+
         Returns:
             Dictionary of tool configurations
         """
@@ -311,12 +314,12 @@ def enhance_mcp_tool(
     enable_metrics: bool = True
 ):
     """Decorator to enhance MCP tools.
-    
+
     Args:
         tool_name: Name of the MCP tool
         rate_limit_config: Rate limiting configuration
         enable_validation: Enable input validation
-        enable_sanitization: Enable input sanitization  
+        enable_sanitization: Enable input sanitization
         enable_metrics: Enable metrics collection
     """
     def decorator(func: Callable) -> Callable:
