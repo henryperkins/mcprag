@@ -311,15 +311,24 @@ class RAGPipeline:
                 enhanced_queries = [query]  # Fallback to original query
                 exclude_terms = []
 
-            # 3. Build search query object
+            # 3. Build search query object with repository and other parameters from preferences
+            prefs = context.user_preferences or {}
+            repo_pref = prefs.get('repository')
+            exact_terms_pref = prefs.get('exact_terms', [])
+            bm25_only_pref = bool(prefs.get('bm25_only', False))
+
             search_query = SearchQuery(
                 query=query,
                 intent=intent,
                 current_file=context.current_file,
-                language=code_context.language if code_context else None,
-                framework=code_context.framework if code_context else None,
+                language=code_context.language if code_context else prefs.get('language'),
+                framework=code_context.framework if code_context else prefs.get('framework'),
                 user_id=context.session_id,
-                exclude_terms=exclude_terms
+                exclude_terms=exclude_terms,
+                repository=repo_pref,
+                exact_terms=exact_terms_pref if isinstance(exact_terms_pref, list) else [],
+                bm25_only=bm25_only_pref,
+                top_k=max_results
             )
 
             # 4. Execute multi-stage retrieval
@@ -414,8 +423,17 @@ class RAGPipeline:
                 if hasattr(self, 'hybrid_searcher') and self.hybrid_searcher:
                     try:
                         logger.info("Falling back to HybridSearcher")
+                        # Build filter for fallback path using FilterManager
+                        from .ranking.filter_manager import FilterManager
+                        filter_expr = FilterManager.combine_and(
+                            FilterManager.repository(repo_pref),
+                            FilterManager.language(code_context.language if code_context else prefs.get('language')),
+                            FilterManager.framework(code_context.framework if code_context else prefs.get('framework'))
+                        )
+
                         hybrid_results = await self.hybrid_searcher.hybrid_search(
                             query=query,
+                            filter_expr=filter_expr,
                             top_k=max_results * 2  # Get more results for ranking
                         )
                         # Convert HybridSearchResult to SearchResult

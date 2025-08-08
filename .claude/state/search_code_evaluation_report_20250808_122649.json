@@ -1,0 +1,138 @@
+{
+  "timestamp": "2025-08-08T12:26:49.675700+00:00",
+  "total_tests": 29,
+  "passed_tests": 16,
+  "failed_tests": 13,
+  "categories": {
+    "parameter_combinations": {
+      "total": 5,
+      "passed": 4,
+      "failed": 1,
+      "avg_response_time_ms": 100.22740364074707
+    },
+    "search_quality": {
+      "total": 5,
+      "passed": 2,
+      "failed": 3,
+      "avg_response_time_ms": 100.24275779724121
+    },
+    "repository_filtering": {
+      "total": 5,
+      "passed": 0,
+      "failed": 5,
+      "avg_response_time_ms": 100.23212432861328
+    },
+    "performance_tests": {
+      "total": 4,
+      "passed": 1,
+      "failed": 3,
+      "avg_response_time_ms": 100.23951530456543
+    },
+    "regression_tests": {
+      "total": 3,
+      "passed": 2,
+      "failed": 1,
+      "avg_response_time_ms": 100.23887952168782
+    },
+    "edge_cases": {
+      "total": 7,
+      "passed": 7,
+      "failed": 0,
+      "avg_response_time_ms": 100.22708347865513
+    }
+  },
+  "performance_summary": {
+    "avg_response_time_ms": 100.23364527472134,
+    "median_response_time_ms": 100.23283958435059,
+    "p95_response_time_ms": 100.25639533996582,
+    "max_response_time_ms": 100.27170181274414
+  },
+  "issues": [
+    {
+      "test_id": "PC-01",
+      "category": "parameter_combinations",
+      "error": "Relevance below threshold: 0.5",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RF-01",
+      "category": "repository_filtering",
+      "error": "Missing expected file pattern: mcprag/mcp/",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-02",
+      "category": "repository_filtering",
+      "error": "Result from wrong repo: mcprag; Missing expected file pattern: enhanced_rag/ranking/",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-03",
+      "category": "repository_filtering",
+      "error": "Result from wrong repo: mcprag; Missing expected file pattern: tests/",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-04",
+      "category": "repository_filtering",
+      "error": "Expected max 0 results, got 1",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-05",
+      "category": "repository_filtering",
+      "error": "Expected min 5 results, got 1",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "SQ-02",
+      "category": "search_quality",
+      "error": "Missing expected file pattern: mcprag/mcp/tools/__init__.py",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "SQ-04",
+      "category": "search_quality",
+      "error": "Missing expected file pattern: tests/",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "SQ-05",
+      "category": "search_quality",
+      "error": "Expected min 2 results, got 1",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PF-01",
+      "category": "performance_tests",
+      "error": "Expected min 5 results, got 1",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PF-02",
+      "category": "performance_tests",
+      "error": "Expected min 10 results, got 1",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PF-04",
+      "category": "performance_tests",
+      "error": "'list' object has no attribute 'get'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RT-02",
+      "category": "regression_tests",
+      "error": "Relevance below threshold: 0.5",
+      "severity": "P2-Medium"
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udea8 CRITICAL: Fix repository filtering - this is blocking basic functionality",
+    "\u26a1 Investigate performance bottlenecks - response times exceeding thresholds",
+    "\ud83c\udfaf Review search quality - relevance scores or result accuracy below expectations",
+    "\ud83d\udccb Address systemic issues in search_quality - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in repository_filtering - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in performance_tests - >50% failure rate"
+  ]
+}

@@ -336,3 +336,15 @@ Represents an item-level warning.
 |key|string|The key of the item which generated a warning.|
 |message|string|The message describing the warning that occurred while processing the item.|
 |name|string|The name of the source at which the warning originated. For example, this could refer to a particular skill in the attached skillset. This may not be always available.|
+
+## MCP Integration
+
+Use the MCP tool "manage_indexer" with action "status" to fetch execution status and recent history for a given indexer.
+
+- Tool: manage_indexer(action="status", indexer_name="myindexer")
+- Server REST endpoint used:
+  - GET /indexers('{indexerName}')/search.status?api-version=2025-05-01-preview (alias: GET /indexers/{indexerName}/status)
+
+Notes:
+- The MCP tool safely truncates large executionHistory payloads to avoid oversized responses, preserving the most recent entries and key fields (status, start/end time, itemsProcessed, itemsFailed, errorMessage).
+- For full details, use the Azure Portal or call the REST API directly.

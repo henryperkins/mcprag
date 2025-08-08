@@ -5,6 +5,7 @@ Hybrid search implementation combining vector and keyword search
 import logging
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
+from ..ranking.filter_manager import FilterManager
 
 from enhanced_rag.azure_integration.rest.operations import SearchOperations
 from enhanced_rag.azure_integration.rest.client import AzureSearchClient
@@ -216,7 +217,7 @@ class HybridSearcher:
         quoted_terms = [q for pair in quoted for q in pair if q]
         numeric_terms = _re.findall(r'(?<![\w.])(\d{2,})(?![\w.])', query)
         exact_terms = [t.strip() for t in (quoted_terms + numeric_terms) if t.strip()]
-        
+
         # Clamp length and ASCII range to avoid malformed filters
         def _clamp_term(t: str) -> str:
             t = t[:200]
@@ -549,3 +550,102 @@ class HybridSearcher:
                 except Exception as e:
                     logger.error(f"Client-side embedding failed: {e}")
         return None
+
+    async def hybrid_search(
+        self,
+        query: str,
+        filter_expr: Optional[str] = None,
+        top_k: int = 10,
+        include_total_count: bool = False,
+        exact_terms: Optional[List[str]] = None
+    ) -> List[HybridSearchResult]:
+        """
+        Perform hybrid search combining keyword and vector search
+
+        Args:
+            query: Search query
+            filter_expr: OData filter expression
+            top_k: Number of results to return
+            include_total_count: Whether to include total count
+            exact_terms: Terms that must appear exactly
+
+        Returns:
+            List of hybrid search results
+        """
+        # Build combined filter with exact terms if provided
+        exact_filter = FilterManager.exact_terms(exact_terms) if exact_terms else None
+        combined_filter = FilterManager.combine_and(filter_expr, exact_filter)
+
+        # 1. Keyword/semantic search with filter
+        kw_results = await self._keyword_search(query, combined_filter, top_k)
+
+        # 2. Vector search with filter (if enabled)
+        vec_results = []
+        if self.config.get('enable_vector_search', False):
+            vec_results = await self._vector_search(query, combined_filter, top_k)
+
+        # 3. Fuse results using reciprocal rank fusion
+        fused = self._reciprocal_rank_fusion([kw_results, vec_results], k=60)
+
+        return fused[:top_k]
+
+    async def _keyword_search(
+        self,
+        query: str,
+        filter_expr: Optional[str],
+        top_k: int
+    ) -> List[HybridSearchResult]:
+        """Execute keyword search with filter"""
+        # Implementation would call Azure Search with filter
+        # For now, return empty list as placeholder
+        return []
+
+    async def _vector_search(
+        self,
+        query: str,
+        filter_expr: Optional[str],
+        top_k: int
+    ) -> List[HybridSearchResult]:
+        """Execute vector search with filter"""
+        # Implementation would call vector search with filter
+        # For now, return empty list as placeholder
+        return []
+
+    def _reciprocal_rank_fusion(
+        self,
+        result_sets: List[List[HybridSearchResult]],
+        k: int = 60
+    ) -> List[HybridSearchResult]:
+        """Fuse multiple result sets using RRF"""
+        doc_scores = {}
+
+        for results in result_sets:
+            for rank, result in enumerate(results):
+                if result.id not in doc_scores:
+                    doc_scores[result.id] = {'score': 0, 'result': result}
+                doc_scores[result.id]['score'] += 1 / (k + rank + 1)
+
+        # Sort by fused score
+        sorted_results = sorted(
+            doc_scores.values(),
+            key=lambda x: x['score'],
+            reverse=True
+        )
+
+        # Update scores and return
+        output = []
+        for item in sorted_results:
+            result = item['result']
+            result.score = item['score']
+            output.append(result)
+
+        return output
+
+    async def vector_search(
+        self,
+        query: str,
+        filter_expr: Optional[str] = None,
+        top_k: int = 10
+    ) -> List[HybridSearchResult]:
+        """Public method for vector-only search"""
+        return await self._vector_search(query, filter_expr, top_k)

@@ -125,3 +125,27 @@ Statistics for a given index. Statistics are collected periodically and are not 
 |documentCount|integer (int64)|The number of documents in the index.|
 |storageSize|integer (int64)|The amount of storage in bytes consumed by the index.|
 |vectorIndexSize|integer (int64)|The amount of memory in bytes consumed by vectors in the index.|
+
+## MCP Integration
+
+Use the MCP tool "index_status" to retrieve a compact summary for the configured index, which combines the index definition and stats.
+
+- Tool: index_status
+- Server REST calls under the hood:
+  - GET /indexes('{indexName}')/search.stats?api-version=2025-05-01-preview (alias: GET /indexes/{indexName}/stats)
+  - GET /indexes/{indexName}?api-version=2025-05-01-preview
+
+Example MCP response:
+```
+{
+  "ok": true,
+  "data": {
+    "index_name": "preview-test",
+    "fields": 42,
+    "documents": 12,
+    "storage_size_mb": 0.12,
+    "vector_search": true,
+    "semantic_search": true
+  }
+}
+```

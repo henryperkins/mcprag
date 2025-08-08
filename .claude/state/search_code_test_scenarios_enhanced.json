@@ -1,0 +1,443 @@
+{
+  "test_scenarios": {
+    "repository_filtering": [
+      {
+        "id": "RF-01",
+        "name": "Filter to mcprag repository",
+        "parameters": {
+          "query": "FastMCP server implementation",
+          "repository": "mcprag",
+          "max_results": 5
+        },
+        "expected": {
+          "all_results_from_repo": "mcprag",
+          "min_results": 1,
+          "should_contain_files": ["mcprag/server.py", "mcprag/mcp/"]
+        }
+      },
+      {
+        "id": "RF-02",
+        "name": "Filter to enhanced_rag repository",
+        "parameters": {
+          "query": "ranking algorithm",
+          "repository": "enhanced_rag",
+          "max_results": 5
+        },
+        "expected": {
+          "all_results_from_repo": "enhanced_rag",
+          "min_results": 1,
+          "should_contain_files": ["enhanced_rag/ranking/"]
+        }
+      },
+      {
+        "id": "RF-03",
+        "name": "Repository with special characters",
+        "parameters": {
+          "query": "test",
+          "repository": "test-repo_v2.0",
+          "max_results": 5
+        },
+        "expected": {
+          "acceptable_error": true,
+          "max_results": 0
+        }
+      }
+    ],
+    "caching_behavior": [
+      {
+        "id": "CB-01",
+        "name": "Cache hit for identical query",
+        "parameters": {
+          "query": "cache test query",
+          "max_results": 5,
+          "disable_cache": false
+        },
+        "expected": {
+          "second_call_faster": true,
+          "identical_results": true,
+          "cache_hit_indicator": true
+        },
+        "test_type": "sequential_calls"
+      },
+      {
+        "id": "CB-02",
+        "name": "Cache miss with disable_cache flag",
+        "parameters": {
+          "query": "cache test query",
+          "max_results": 5,
+          "disable_cache": true
+        },
+        "expected": {
+          "no_cache_hit": true,
+          "fresh_results": true
+        }
+      },
+      {
+        "id": "CB-03",
+        "name": "Cache invalidation on different parameters",
+        "parameters": [
+          {
+            "query": "same query",
+            "max_results": 5,
+            "bm25_only": false
+          },
+          {
+            "query": "same query",
+            "max_results": 5,
+            "bm25_only": true
+          }
+        ],
+        "expected": {
+          "different_results": true,
+          "no_cache_collision": true
+        },
+        "test_type": "parameter_variation"
+      }
+    ],
+    "content_validation": [
+      {
+        "id": "CV-01",
+        "name": "Code snippet extraction accuracy",
+        "parameters": {
+          "query": "def register_tools",
+          "max_results": 3,
+          "snippet_lines": 5
+        },
+        "expected": {
+          "snippet_contains_query": true,
+          "snippet_line_count": 5,
+          "proper_context": true
+        }
+      },
+      {
+        "id": "CV-02",
+        "name": "Function context extraction",
+        "parameters": {
+          "query": "async def search_code",
+          "max_results": 3,
+          "include_dependencies": true
+        },
+        "expected": {
+          "has_function_name": true,
+          "has_class_context": false,
+          "has_imports": true
+        }
+      },
+      {
+        "id": "CV-03",
+        "name": "Class context extraction",
+        "parameters": {
+          "query": "class MCPServer",
+          "max_results": 3
+        },
+        "expected": {
+          "has_class_name": true,
+          "proper_indentation": true,
+          "method_list": true
+        }
+      }
+    ],
+    "ranking_validation": [
+      {
+        "id": "RV-01",
+        "name": "Relevance score ordering",
+        "parameters": {
+          "query": "Azure Search index",
+          "max_results": 10
+        },
+        "expected": {
+          "descending_relevance": true,
+          "top_result_highest_score": true,
+          "score_range_valid": true
+        }
+      },
+      {
+        "id": "RV-02",
+        "name": "BM25 vs Enhanced scoring comparison",
+        "parameters": [
+          {
+            "query": "ranking algorithm",
+            "max_results": 5,
+            "bm25_only": true
+          },
+          {
+            "query": "ranking algorithm",
+            "max_results": 5,
+            "bm25_only": false
+          }
+        ],
+        "expected": {
+          "enhanced_better_quality": true,
+          "different_ordering": true,
+          "score_comparison": "enhanced_lower_but_better"
+        },
+        "test_type": "comparison"
+      },
+      {
+        "id": "RV-03",
+        "name": "Intent-based ranking adjustment",
+        "parameters": [
+          {
+            "query": "error handling",
+            "intent": "DEBUG",
+            "max_results": 5
+          },
+          {
+            "query": "error handling",
+            "intent": "IMPLEMENT",
+            "max_results": 5
+          }
+        ],
+        "expected": {
+          "different_top_results": true,
+          "debug_prioritizes_errors": true,
+          "implement_prioritizes_examples": true
+        },
+        "test_type": "intent_comparison"
+      }
+    ],
+    "performance_intensive": [
+      {
+        "id": "PI-01",
+        "name": "Large result set handling",
+        "parameters": {
+          "query": "def",
+          "max_results": 100
+        },
+        "expected": {
+          "response_time_ms": 2000,
+          "memory_stable": true,
+          "all_results_valid": true
+        }
+      },
+      {
+        "id": "PI-02",
+        "name": "Complex regex pattern performance",
+        "parameters": {
+          "query": "async\\s+def\\s+\\w+\\s*\\([^)]*\\)\\s*->",
+          "max_results": 20
+        },
+        "expected": {
+          "response_time_ms": 1500,
+          "regex_matches_valid": true
+        }
+      },
+      {
+        "id": "PI-03",
+        "name": "Concurrent request handling",
+        "parameters": {
+          "query": "server",
+          "max_results": 10
+        },
+        "expected": {
+          "concurrent_requests": 5,
+          "no_race_conditions": true,
+          "consistent_results": true
+        },
+        "test_type": "concurrent"
+      }
+    ],
+    "dependency_analysis": [
+      {
+        "id": "DA-01",
+        "name": "Include dependencies flag",
+        "parameters": {
+          "query": "search_code",
+          "include_dependencies": true,
+          "max_results": 5
+        },
+        "expected": {
+          "has_dependency_info": true,
+          "imports_listed": true,
+          "called_functions": true
+        }
+      },
+      {
+        "id": "DA-02",
+        "name": "Dependency mode auto",
+        "parameters": {
+          "query": "import",
+          "dependency_mode": "auto",
+          "max_results": 5
+        },
+        "expected": {
+          "appropriate_dependencies": true,
+          "no_circular_deps": true
+        }
+      }
+    ],
+    "error_recovery": [
+      {
+        "id": "ER-01",
+        "name": "Azure Search service unavailable",
+        "parameters": {
+          "query": "test",
+          "max_results": 5,
+          "simulate_failure": "azure_search_down"
+        },
+        "expected": {
+          "graceful_fallback": true,
+          "error_message_helpful": true,
+          "no_crash": true
+        }
+      },
+      {
+        "id": "ER-02",
+        "name": "Invalid authentication",
+        "parameters": {
+          "query": "test",
+          "max_results": 5,
+          "simulate_failure": "invalid_auth"
+        },
+        "expected": {
+          "auth_error_clear": true,
+          "no_sensitive_info_leaked": true
+        }
+      },
+      {
+        "id": "ER-03",
+        "name": "Timeout handling",
+        "parameters": {
+          "query": "test",
+          "max_results": 5,
+          "simulate_failure": "timeout"
+        },
+        "expected": {
+          "timeout_handled": true,
+          "retry_attempted": true,
+          "appropriate_error": true
+        }
+      }
+    ],
+    "highlighting_features": [
+      {
+        "id": "HF-01",
+        "name": "Code highlighting enabled",
+        "parameters": {
+          "query": "async def",
+          "max_results": 3,
+          "highlight_code": true
+        },
+        "expected": {
+          "has_highlights": true,
+          "highlight_markers_valid": true,
+          "query_terms_highlighted": true
+        }
+      },
+      {
+        "id": "HF-02",
+        "name": "Multi-term highlighting",
+        "parameters": {
+          "query": "Azure Search index",
+          "max_results": 3,
+          "highlight_code": true
+        },
+        "expected": {
+          "multiple_highlights": true,
+          "all_terms_highlighted": true
+        }
+      }
+    ],
+    "semantic_search": [
+      {
+        "id": "SS-01",
+        "name": "Semantic similarity detection",
+        "parameters": {
+          "query": "database connection",
+          "max_results": 5
+        },
+        "expected": {
+          "finds_related_terms": ["db", "sql", "connection_string", "cursor"],
+          "semantic_expansion": true
+        }
+      },
+      {
+        "id": "SS-02",
+        "name": "Synonym recognition",
+        "parameters": {
+          "query": "authenticate user",
+          "max_results": 5
+        },
+        "expected": {
+          "finds_synonyms": ["auth", "login", "verify", "credential"],
+          "concept_matching": true
+        }
+      }
+    ],
+    "detail_level_variations": [
+      {
+        "id": "DL-01",
+        "name": "Ultra detail level",
+        "parameters": {
+          "query": "MCPServer",
+          "max_results": 3,
+          "detail_level": "ultra"
+        },
+        "expected": {
+          "single_line_results": true,
+          "minimal_size": true,
+          "essential_info_only": true
+        }
+      },
+      {
+        "id": "DL-02",
+        "name": "Compact detail level",
+        "parameters": {
+          "query": "MCPServer",
+          "max_results": 3,
+          "detail_level": "compact"
+        },
+        "expected": {
+          "reduced_fields": true,
+          "no_code_snippets": true,
+          "basic_metadata": true
+        }
+      },
+      {
+        "id": "DL-03",
+        "name": "Full detail with snippets",
+        "parameters": {
+          "query": "MCPServer",
+          "max_results": 3,
+          "detail_level": "full",
+          "snippet_lines": 10
+        },
+        "expected": {
+          "complete_metadata": true,
+          "code_snippets_included": true,
+          "snippet_truncated_properly": true
+        }
+      }
+    ]
+  },
+  "test_execution_order": [
+    "edge_cases",
+    "repository_filtering",
+    "search_quality",
+    "content_validation",
+    "ranking_validation",
+    "caching_behavior",
+    "parameter_combinations",
+    "dependency_analysis",
+    "detail_level_variations",
+    "highlighting_features",
+    "semantic_search",
+    "performance_tests",
+    "performance_intensive",
+    "error_recovery",
+    "regression_tests"
+  ],
+  "performance_thresholds": {
+    "simple_query_ms": 200,
+    "complex_query_ms": 500,
+    "large_result_set_ms": 2000,
+    "cache_hit_speedup": 0.1,
+    "p95_response_time_ms": 500
+  },
+  "quality_thresholds": {
+    "min_relevance_score": 0.01,
+    "bm25_min_relevance": 0.5,
+    "enhanced_min_relevance": 0.01,
+    "top_result_relevance": 0.02
+  }
+}

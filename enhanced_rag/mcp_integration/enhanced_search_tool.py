@@ -31,11 +31,27 @@ class EnhancedSearchTool:
         """
         Execute enhanced search through RAG pipeline
         """
+        # Build preferences dict with all search parameters
+        base_prefs = kwargs.get('preferences', {})
+        if not isinstance(base_prefs, dict):
+            base_prefs = {}
+
+        # Pass through important search parameters
+        passthrough_keys = [
+            'repository', 'bm25_only', 'exact_terms', 'intent',
+            'language', 'framework', 'disable_cache', 'simulate_failure',
+            'max_results', 'skip', 'orderby'
+        ]
+        preferences = dict(base_prefs)
+        for key in passthrough_keys:
+            if key in kwargs:
+                preferences[key] = kwargs[key]
+
         # Build context
         context = QueryContext(
             current_file=current_file,
             workspace_root=workspace_root,
-            user_preferences=kwargs.get('preferences', {})
+            user_preferences=preferences
         )
 
         # Process through pipeline
@@ -101,7 +117,7 @@ class EnhancedSearchTool:
                 'match': self._extract_match_summary(r),
                 'context_type': context_type
             }
-            
+
             # Add highlight information if available
             if hasattr(r, 'highlights') and r.highlights:
                 for field, hls in r.highlights.items():
@@ -109,7 +125,7 @@ class EnhancedSearchTool:
                         compact_entry['why'] = hls[0][:120]
                         compact_entry['why_field'] = field
                         break
-            
+
             results_compact.append(compact_entry)
 
             # Ultra-compact format: single line string

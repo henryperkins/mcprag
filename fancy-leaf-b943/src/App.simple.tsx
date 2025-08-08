@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Terminal } from './components/Terminal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import './App.css';
 import './styles/terminal.css';
 
 function App() {
@@ -11,10 +10,10 @@ function App() {
   }, []);
   
   return (
-    <div className="app-container">
+    <>
       <OfflineIndicator />
       <Terminal />
-    </div>
+    </>
   );
 }
 

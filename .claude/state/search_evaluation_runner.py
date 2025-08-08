@@ -10,13 +10,20 @@ import json
 import time
 import asyncio
 import statistics
+import sys
+import os
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from datetime import datetime, timezone
 
-# Would need to import the actual MCP client/tool interface
-# from mcprag.mcp.tools.search import search_code  # Example import
+# Add project root to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+# Use a simple wrapper that will be replaced at runtime with the production MCP tool
+async def search_code(**kwargs) -> Dict[str, Any]:
+    """Placeholder - will be replaced with production MCP tool at runtime"""
+    raise NotImplementedError("This should be replaced with the production MCP tool")
 
 
 @dataclass
@@ -139,41 +146,9 @@ class SearchCodeEvaluator:
     
     async def _execute_search_code(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Execute search_code tool with given parameters"""
-        # This is a placeholder - would need actual MCP tool integration
-        # Example of what the call might look like:
-        
-        # For now, simulate a response structure
-        await asyncio.sleep(0.1)  # Simulate network delay
-        
-        # Mock response based on parameters
-        mock_response = {
-            "ok": True,
-            "data": {
-                "items": [
-                    {
-                        "id": "mock_result_1",
-                        "file": "mcprag/server.py",
-                        "repository": "mcprag",
-                        "language": "python",
-                        "content": "# Mock content for testing",
-                        "relevance": 0.5,
-                        "start_line": 1,
-                        "end_line": 10,
-                        "function_name": None,
-                        "class_name": None,
-                        "highlights": {}
-                    }
-                ],
-                "count": 1,
-                "total": 1,
-                "took_ms": 100.0,
-                "query": parameters.get("query", ""),
-                "backend": "enhanced",
-                "has_more": False
-            }
-        }
-        
-        return mock_response
+        # Call the REAL search_code tool - NO MOCKS!
+        result = await search_code(**parameters)
+        return result
     
     def _validate_results(self, actual: Dict[str, Any], expected: Dict[str, Any], category: str) -> Dict[str, Any]:
         """Validate actual results against expected criteria"""
@@ -396,7 +371,8 @@ class SearchCodeEvaluator:
 
 async def main():
     """Main entry point for evaluation runner"""
-    evaluator = SearchCodeEvaluator("search_code_test_scenarios.json")
+    global _server_instance
+    evaluator = SearchCodeEvaluator("search_code_test_scenarios_enhanced.json")
     
     try:
         # Run all tests
@@ -417,6 +393,13 @@ async def main():
     except Exception as e:
         print(f"\n💥 Evaluation failed: {e}")
         return 2
+    finally:
+        # Cleanup server instance
+        if _server_instance:
+            try:
+                await _server_instance.cleanup_async_components()
+            except Exception as e:
+                print(f"Warning: Server cleanup failed: {e}")
 
 
 if __name__ == "__main__":

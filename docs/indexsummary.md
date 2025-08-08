@@ -141,3 +141,29 @@ Response from a request to retrieve stats summary of all indexes. If successful,
 |Name|Type|Description|
 |---|---|---|
 |value|[IndexStatisticsSummary](#indexstatisticssummary)[]|The Statistics summary of all indexes in the Search service.|
+
+## MCP Integration
+
+To retrieve stats for all indexes via MCP, use the "manage_index" tool with action "list". The server composes this by listing indexes and fetching per-index stats.
+
+- Tool: manage_index(action="list")
+- Server REST calls under the hood:
+  - GET /indexes?api-version=2025-05-01-preview
+  - GET /indexes('{indexName}')/search.stats?api-version=2025-05-01-preview (alias: GET /indexes/{indexName}/stats)
+
+Example MCP response:
+```
+{
+  "ok": true,
+  "data": {
+    "indexes": [
+      {
+        "name": "preview-test",
+        "documentCount": 0,
+        "storageSize": 0,
+        "vectorIndexSize": 0
+      }
+    ]
+  }
+}
+```

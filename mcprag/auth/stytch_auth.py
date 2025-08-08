@@ -215,6 +215,17 @@ class StytchAuthenticator:
         Returns:
             User session data
         """
+        # Check for dev mode first
+        if getattr(Config, 'DEV_MODE', False):
+            # Dev mode - return default admin user
+            return {
+                "user_id": "dev",
+                "email": "dev@localhost",
+                "tier": "admin",
+                "session_id": "dev-session",
+                "mfa_verified": True
+            }
+        
         if not self.enabled:
             # Auth disabled - return default admin user for local development
             return {

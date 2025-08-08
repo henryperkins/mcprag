@@ -1,0 +1,74 @@
+/* Panel Layout Styles */
+.panel-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  background: var(--term-bg, #0d0d0d);
+  overflow: hidden;
+}
+
+.panel-group {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+}
+
+.panel-content {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Panel Resizer */
+.panel-resizer {
+  width: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  cursor: col-resize;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.panel-resizer:hover {
+  background: rgba(114, 159, 207, 0.5);
+}
+
+.panel-resizer:active {
+  background: rgba(114, 159, 207, 0.8);
+}
+
+/* Reset body styles that might conflict */
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  place-items: unset;
+  min-width: unset;
+  min-height: unset;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Fix Terminal specific styles to not affect global layout */
+.terminal-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--term-bg, #0d0d0d);
+}
+
+/* Ensure panels don't have conflicting backgrounds */
+.panel-content > * {
+  flex: 1;
+  overflow: auto;
+}

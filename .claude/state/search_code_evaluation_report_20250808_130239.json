@@ -1,0 +1,251 @@
+{
+  "timestamp": "2025-08-08T13:02:39.824246+00:00",
+  "total_tests": 27,
+  "passed_tests": 0,
+  "failed_tests": 27,
+  "categories": {
+    "content_validation": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 311.6759459177653
+    },
+    "highlighting_features": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "avg_response_time_ms": 303.93290519714355
+    },
+    "caching_behavior": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 207.81469345092773
+    },
+    "dependency_analysis": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "avg_response_time_ms": 311.8518590927124
+    },
+    "detail_level_variations": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 434.88876024882
+    },
+    "error_recovery": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 428.43906084696454
+    },
+    "repository_filtering": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 395.8405653635661
+    },
+    "semantic_search": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "avg_response_time_ms": 302.99484729766846
+    },
+    "ranking_validation": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 103.84996732076009
+    },
+    "performance_intensive": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 302.9632568359375
+    }
+  },
+  "performance_summary": {
+    "avg_response_time_ms": 310.88799900478784,
+    "median_response_time_ms": 304.52609062194824,
+    "p95_response_time_ms": 610.4365348815917,
+    "max_response_time_ms": 696.8784332275391
+  },
+  "issues": [
+    {
+      "test_id": "RF-01",
+      "category": "repository_filtering",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-02",
+      "category": "repository_filtering",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-03",
+      "category": "repository_filtering",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "CV-01",
+      "category": "content_validation",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', and 'detail_level'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CV-02",
+      "category": "content_validation",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CV-03",
+      "category": "content_validation",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-01",
+      "category": "ranking_validation",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-02",
+      "category": "ranking_validation",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-03",
+      "category": "ranking_validation",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-01",
+      "category": "caching_behavior",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-02",
+      "category": "caching_behavior",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-03",
+      "category": "caching_behavior",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DA-01",
+      "category": "dependency_analysis",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DA-02",
+      "category": "dependency_analysis",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DL-01",
+      "category": "detail_level_variations",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DL-02",
+      "category": "detail_level_variations",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DL-03",
+      "category": "detail_level_variations",
+      "error": "search_code_impl() missing 12 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', and 'dependency_mode'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "HF-01",
+      "category": "highlighting_features",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "HF-02",
+      "category": "highlighting_features",
+      "error": "search_code_impl() missing 13 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "SS-01",
+      "category": "semantic_search",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "SS-02",
+      "category": "semantic_search",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PI-01",
+      "category": "performance_intensive",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PI-02",
+      "category": "performance_intensive",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PI-03",
+      "category": "performance_intensive",
+      "error": "search_code_impl() missing 14 required positional arguments: 'intent', 'language', 'repository', 'include_dependencies', 'skip', 'orderby', 'highlight_code', 'bm25_only', 'exact_terms', 'disable_cache', 'include_timings', 'dependency_mode', 'detail_level', and 'snippet_lines'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-01",
+      "category": "error_recovery",
+      "error": "search_code_impl() got an unexpected keyword argument 'simulate_failure'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-02",
+      "category": "error_recovery",
+      "error": "search_code_impl() got an unexpected keyword argument 'simulate_failure'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-03",
+      "category": "error_recovery",
+      "error": "search_code_impl() got an unexpected keyword argument 'simulate_failure'",
+      "severity": "P2-Medium"
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udea8 CRITICAL: Fix repository filtering - this is blocking basic functionality",
+    "\ud83d\udccb Address systemic issues in content_validation - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in highlighting_features - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in caching_behavior - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in dependency_analysis - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in detail_level_variations - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in error_recovery - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in repository_filtering - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in semantic_search - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in ranking_validation - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in performance_intensive - >50% failure rate"
+  ]
+}

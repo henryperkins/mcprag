@@ -12,7 +12,6 @@
 		"cf-typegen": "wrangler types"
 	},
 	"dependencies": {
-		"2": "^3.0.0",
 		"@anthropic-ai/claude-code": "^1.0.70",
 		"@monaco-editor/react": "^4.7.0",
 		"lucide-react": "^0.536.0",

@@ -41,6 +41,11 @@ class SearchQuery(BaseModel):
     user_id: Optional[str] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     exclude_terms: List[str] = Field(default_factory=list)  # Terms to exclude from search results
+    # Add repository scoping and scoring control fields
+    repository: Optional[str] = None
+    exact_terms: List[str] = Field(default_factory=list)
+    bm25_only: bool = False
+    top_k: int = 20  # Add top_k field for result limiting
 
 
 class CodeContext(BaseModel):

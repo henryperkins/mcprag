@@ -19,6 +19,7 @@ from ..core.config import get_config
 from .hybrid_searcher import HybridSearcher
 from .dependency_resolver import DependencyResolver
 from ..pattern_registry import get_pattern_registry
+from ..ranking.filter_manager import FilterManager
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,23 @@ class MultiStageRetriever(Retriever):
         """
         Execute multi-stage retrieval pipeline
         """
+        # Fast path: BM25-only (keyword) – preserve BM25 scores from Azure
+        if getattr(query, "bm25_only", False):
+            try:
+                logger.info("Using BM25-only retrieval path")
+                pairs = await self._execute_keyword_search(query)  # List[Tuple[id, score]]
+                max_k = getattr(query, "top_k", 20)
+                final_results: List[SearchResult] = []
+                for doc_id, score in pairs[:max_k]:
+                    result = await self._fetch_document(doc_id)
+                    if result:
+                        result.score = score  # Keep original BM25 score
+                        final_results.append(result)
+                return final_results
+            except Exception as bm25_err:
+                logger.error(f"BM25-only retrieval failed, falling back to normal: {bm25_err}")
+                # Fall through to normal pipeline
+
         if stages is None:
             stages = self._select_stages_by_intent(
                 query.intent or SearchIntent.IMPLEMENT
@@ -263,44 +281,36 @@ class MultiStageRetriever(Retriever):
         return [(d.file_id, d.relevance_score) for d in deps]
 
     def _build_filter(self, query: SearchQuery) -> Optional[str]:
-        """Build Azure Search filter expression with support for exact numeric/phrase fallback gating and excludes"""
+        """Build Azure Search filter expression using FilterManager"""
+        # Use FilterManager for safe, consistent filter building
         filters = []
 
-        if query.language:
-            filters.append(f"language eq '{query.language}'")
+        # Repository filter
+        repo_filter = FilterManager.repository(getattr(query, "repository", None))
+        if repo_filter:
+            filters.append(repo_filter)
 
-        if query.framework:
-            filters.append(f"framework eq '{query.framework}'")
+        # Language filter
+        lang_filter = FilterManager.language(query.language)
+        if lang_filter:
+            filters.append(lang_filter)
 
-        # Honor repository/path filters if present on query
-        if hasattr(query, "repository") and getattr(query, "repository", None):
-            repo_val = str(getattr(query, "repository", "")).replace("'", "''")
-            filters.append(f"repository eq '{repo_val}'")
+        # Framework filter
+        framework_filter = FilterManager.framework(query.framework)
+        if framework_filter:
+            filters.append(framework_filter)
 
-        # Add exclusion filters for exclude_terms
-        if hasattr(query, 'exclude_terms') and query.exclude_terms:
-            for term in query.exclude_terms:
-                safe = str(term).replace("'", "''")
-                filters.append(f"not search.ismatch('{safe}', 'content')")
-                filters.append(f"not search.ismatch('{safe}', 'tags')")
+        # Exclusion filters
+        exclude_filter = FilterManager.exclude_terms(getattr(query, "exclude_terms", []))
+        if exclude_filter:
+            filters.append(exclude_filter)
 
-        # Add optional exact-term must-have gating if provided via query.exact_terms
-        # This allows MCP layer to pass numeric or quoted phrases explicitly.
-        exact_terms = getattr(query, "exact_terms", None) or []
-        if exact_terms:
-            term_filters = []
-            for t in exact_terms:
-                safe = str(t).replace("'", "''")
-                term_filters.append("(" + " or ".join([
-                    f"search.ismatch('{safe}', 'content')",
-                    f"search.ismatch('{safe}', 'function_name')",
-                    f"search.ismatch('{safe}', 'class_name')",
-                    f"search.ismatch('{safe}', 'docstring')",
-                ]) + ")")
-            if term_filters:
-                filters.append(" and ".join(term_filters))
+        # Exact term filters
+        exact_filter = FilterManager.exact_terms(getattr(query, "exact_terms", []))
+        if exact_filter:
+            filters.append(exact_filter)
 
-        return " and ".join(filters) if filters else None
+        return FilterManager.combine_and(*filters)
 
     async def _fuse_results(
         self,

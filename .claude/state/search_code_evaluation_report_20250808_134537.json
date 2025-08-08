@@ -1,0 +1,130 @@
+{
+  "timestamp": "2025-08-08T13:45:37.928335+00:00",
+  "total_tests": 27,
+  "passed_tests": 19,
+  "failed_tests": 8,
+  "categories": {
+    "ranking_validation": {
+      "total": 3,
+      "passed": 1,
+      "failed": 2,
+      "avg_response_time_ms": 18.28487714131673
+    },
+    "performance_intensive": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 84.94710922241211
+    },
+    "error_recovery": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.00476837158203125
+    },
+    "repository_filtering": {
+      "total": 3,
+      "passed": 1,
+      "failed": 2,
+      "avg_response_time_ms": 229.78854179382324
+    },
+    "dependency_analysis": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "avg_response_time_ms": 31.664252281188965
+    },
+    "content_validation": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 28.59981854756673
+    },
+    "detail_level_variations": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 24.460633595784504
+    },
+    "highlighting_features": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "avg_response_time_ms": 23.159503936767578
+    },
+    "caching_behavior": {
+      "total": 3,
+      "passed": 2,
+      "failed": 1,
+      "avg_response_time_ms": 17.74295171101888
+    },
+    "semantic_search": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "avg_response_time_ms": 39.006829261779785
+    }
+  },
+  "performance_summary": {
+    "avg_response_time_ms": 51.82026933740686,
+    "median_response_time_ms": 28.39374542236328,
+    "p95_response_time_ms": 96.98669910430908,
+    "max_response_time_ms": 676.1443614959717
+  },
+  "issues": [
+    {
+      "test_id": "RF-01",
+      "category": "repository_filtering",
+      "error": "Result from wrong repo: venv/lib; Missing expected file pattern: mcprag/server.py; Missing expected file pattern: mcprag/mcp/",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-02",
+      "category": "repository_filtering",
+      "error": "Expected min 1 results, got 0; Missing expected file pattern: enhanced_rag/ranking/",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RV-02",
+      "category": "ranking_validation",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-03",
+      "category": "ranking_validation",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-03",
+      "category": "caching_behavior",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-01",
+      "category": "error_recovery",
+      "error": "search_code_impl() got an unexpected keyword argument 'simulate_failure'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-02",
+      "category": "error_recovery",
+      "error": "search_code_impl() got an unexpected keyword argument 'simulate_failure'",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-03",
+      "category": "error_recovery",
+      "error": "search_code_impl() got an unexpected keyword argument 'simulate_failure'",
+      "severity": "P2-Medium"
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udea8 CRITICAL: Fix repository filtering - this is blocking basic functionality",
+    "\ud83d\udccb Address systemic issues in ranking_validation - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in error_recovery - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in repository_filtering - >50% failure rate"
+  ]
+}
