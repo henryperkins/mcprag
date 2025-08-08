@@ -64,3 +64,33 @@ Remember that MCP is often used to bridge AI systems with external tools and dat
 sources, so consider the broader integration context when providing guidance. Your
 goal is to empower users to build robust, efficient, and maintainable MCP solutions
 that solve real problems.
+
+## MCPRAG Project Context
+
+This project provides a comprehensive MCP RAG server with Azure AI Search integration.
+When working with this codebase, be aware of the following:
+
+### Search Code Tool Evaluation Framework
+The project includes a complete evaluation system for testing the `search_code` MCP tool:
+- **Location**: `.claude/state/search_code_evaluation_plan.md` and related files
+- **Coverage**: 35+ test scenarios across 6 categories (repository filtering, quality, performance, edge cases)
+- **Known Issues**: Repository filtering is currently broken (P1), relevance scoring issues in enhanced mode (P2)
+- **Usage**: `python .claude/state/search_evaluation_runner.py` for automated testing
+
+### Key MCP Tools Available
+- `search_code`: Enhanced semantic code search with RAG pipeline
+- `search_code_raw`: Raw search results without formatting  
+- `analyze_context`: File context analysis with dependency tracking
+- `explain_ranking`: Search ranking factor explanations
+- Azure management tools: `manage_index`, `manage_documents`, `configure_semantic_search`
+- Cache and feedback tools for performance monitoring
+
+### Testing and Quality Assurance
+When implementing or debugging MCP tools in this project:
+1. Use the automated evaluation framework to validate changes
+2. Test both BM25-only and enhanced semantic search modes
+3. Verify repository filtering works correctly (currently a P1 issue)
+4. Monitor relevance scores and content extraction quality
+5. Follow the testing standards documented in CLAUDE.md
+
+This context ensures you can provide more targeted assistance for MCP development within this specific codebase.

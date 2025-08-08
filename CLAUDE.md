@@ -278,6 +278,46 @@ Tools requiring explicit `confirm=true` parameter:
   - Tests pass locally for impacted area(s).
   - No flakiness introduced.
 
+### Search Code Tool Evaluation Framework
+The project includes a comprehensive evaluation system for the `search_code` MCP tool located in `.claude/state/`:
+
+- **`search_code_evaluation_plan.md`**: Complete evaluation framework with test categories, success metrics, and implementation timeline
+- **`search_code_test_scenarios.json`**: 35+ test scenarios covering repository filtering, search quality, performance, edge cases, and regression testing
+- **`search_evaluation_runner.py`**: Automated test runner with async execution, performance monitoring, and detailed reporting
+- **`evaluation_procedures_guide.md`**: Operational procedures for running evaluations, analyzing results, and troubleshooting
+
+#### Test Categories and Coverage
+1. **Repository Filtering** (5 tests) - Scope isolation and filtering accuracy
+2. **Search Quality** (5 tests) - Relevance scoring and result accuracy validation
+3. **Parameter Combinations** (5 tests) - Feature interaction testing (BM25, exact terms, detail levels)
+4. **Performance Tests** (4 tests) - Response time benchmarks and throughput testing
+5. **Edge Cases** (7 tests) - Input validation, error handling, boundary conditions
+6. **Regression Tests** (3+ tests) - Stability and consistency checks against known baselines
+
+#### Running Evaluations
+```bash
+# Full evaluation suite
+python .claude/state/search_evaluation_runner.py
+
+# Quick regression check  
+python .claude/state/search_evaluation_runner.py --smoke-test
+
+# CI/CD integration
+python .claude/state/search_evaluation_runner.py --ci-mode
+```
+
+#### Success Criteria
+- **Functional**: 100% response rate, <1% error rate for valid inputs
+- **Quality**: 95% repository filtering accuracy, proper relevance scoring
+- **Performance**: 95th percentile response time <500ms
+- **Reliability**: 85%+ test pass rate for stable releases
+
+#### Known Issues to Monitor
+- Repository filtering currently broken (P1 issue)
+- Enhanced mode relevance scores very low (0.016 vs BM25 scores >1.0)
+- Content extraction incomplete for some results
+- Search results biased toward dependency code vs project code
+
 ## Documentation standards
 - Update README and relevant docs when behavior changes.
 - Keep code comments concise and accurate.
@@ -488,6 +528,37 @@ Use the orchestrator for multi-file/multi-step tasks requiring planning and dele
   - PostToolUse (Edit|Write|MultiEdit): run formatter/lint on changed files.
   - SessionStart: inject CLAUDE.md highlights into context.
   - PreCompact: trigger summarization when near context limit.
+
+## Search Code Tool Testing
+When working with search functionality or debugging search issues:
+
+### Quick Manual Tests
+```bash
+# Test basic functionality
+python -c "import asyncio; from mcprag.mcp.tools.search import search_code; asyncio.run(search_code(query='server', max_results=3))"
+
+# Test repository filtering (currently broken - P1 issue)
+python -c "import asyncio; from mcprag.mcp.tools.search import search_code; asyncio.run(search_code(query='server', repository='mcprag', max_results=3))"
+
+# Compare BM25 vs Enhanced modes
+python -c "
+import asyncio
+from mcprag.mcp.tools.search import search_code
+
+async def compare():
+    bm25 = await search_code(query='register_tools', bm25_only=True, max_results=3)
+    enhanced = await search_code(query='register_tools', bm25_only=False, max_results=3)
+    print(f'BM25 relevance: {bm25[\"data\"][\"items\"][0][\"relevance\"]:.3f}')
+    print(f'Enhanced relevance: {enhanced[\"data\"][\"items\"][0][\"relevance\"]:.3f}')
+    
+asyncio.run(compare())
+"
+```
+
+### Automated Evaluation
+- Run full evaluation: `python .claude/state/search_evaluation_runner.py`
+- Run regression tests: `python .claude/state/search_evaluation_runner.py --smoke-test`
+- Monitor for P1 repository filtering and P2 relevance scoring issues
 
 ## Routing cues for subagent selection
 - Orchestrator: “plan”, “orchestrate”, “multi-file”, “refactor across modules”, “end-to-end”, “first…then…”, “migration”, “config/dependency upgrade”, protected paths.

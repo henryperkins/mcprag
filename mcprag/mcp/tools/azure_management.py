@@ -360,8 +360,6 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                     return err("Indexer automation component is not initialized")
                 # Some implementations may not expose 'ensure_indexer_exists' statically.
                 # Use getattr with sync/async support and fall back to a generic method if present.
-                if server.indexer_automation is None:
-                    return err("Indexer automation component is not initialized")
                 _ensure_idx = getattr(server.indexer_automation, "ensure_indexer_exists", None)
                 if callable(_ensure_idx):
                     maybe_res = _ensure_idx(

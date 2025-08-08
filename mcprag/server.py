@@ -287,25 +287,28 @@ class MCPServer:
             AZURE_SDK_AVAILABLE
             and AzureKeyCredential is not None
             and SearchClient is not None
-            and isinstance(getattr(Config, "ADMIN_KEY", None), str)
-            and bool(Config.ADMIN_KEY and Config.ADMIN_KEY.strip())
             and isinstance(getattr(Config, "ENDPOINT", None), str)
             and bool(Config.ENDPOINT and Config.ENDPOINT.strip())
         ):
-            try:
-                # Construct credential only after verifying the symbol is available
-                azure_key_credential = AzureKeyCredential(str(Config.ADMIN_KEY))  # type: ignore[call-arg]
-                self.search_client = SearchClient(
-                    endpoint=str(Config.ENDPOINT),
-                    index_name=str(Config.INDEX_NAME),
-                    credential=azure_key_credential,
-                )  # type: ignore[call-arg]
-            except TypeError as e:
-                # Common in type-checkers when symbol resolution fails; hard-disable SDK path
-                logger.warning(f"Azure SDK credential construction failed (TypeError). Disabling SDK fallback. Error: {e}")
-                self.search_client = None
-            except Exception as e:
-                logger.warning(f"Azure SearchClient initialization failed, disabling SDK fallback: {e}")
+            # Choose key: admin if available, else query (read-only)
+            api_key = (getattr(Config, "ADMIN_KEY", "") or getattr(Config, "QUERY_KEY", "")).strip()
+            if api_key:
+                try:
+                    # Construct credential only after verifying the symbol is available
+                    azure_key_credential = AzureKeyCredential(api_key)  # type: ignore[call-arg]
+                    self.search_client = SearchClient(
+                        endpoint=str(Config.ENDPOINT),
+                        index_name=str(Config.INDEX_NAME),
+                        credential=azure_key_credential,
+                    )  # type: ignore[call-arg]
+                except TypeError as e:
+                    # Common in type-checkers when symbol resolution fails; hard-disable SDK path
+                    logger.warning(f"Azure SDK credential construction failed (TypeError). Disabling SDK fallback. Error: {e}")
+                    self.search_client = None
+                except Exception as e:
+                    logger.warning(f"Azure SearchClient initialization failed, disabling SDK fallback: {e}")
+                    self.search_client = None
+            else:
                 self.search_client = None
         else:
             self.search_client = None

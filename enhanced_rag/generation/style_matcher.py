@@ -204,9 +204,15 @@ class StyleMatcher:
             features = self._extract_style_features(code_sample, language)
             
             for feature_type, feature_value in features.items():
-                style_features[feature_type][feature_value] += 1
-        
-        # Build style profile from most common features
+                # Special handling for 'naming' which returns a dict of {category: style}
+                if feature_type == 'naming' and isinstance(feature_value, dict):
+                    for category, style in feature_value.items():
+                        # Count per (category, style) tuple to keep keys hashable
+                        style_features['naming'][(category, style)] += 1
+                else:
+                    style_features[feature_type][feature_value] += 1
+            
+            # Build style profile from most common features
         profile = self._build_style_profile(style_features, language)
         
         # Calculate consistency score
@@ -399,9 +405,20 @@ class StyleMatcher:
                 profile.line_length = min(percentile_90, 120)  # Cap at 120
         
         if 'naming' in style_features:
-            for category, style in style_features['naming'].most_common():
-                if isinstance(style, dict):
-                    profile.naming_convention.update(style)
+            # style_features['naming'] is a Counter with keys as (category, style) tuples
+            naming_counter = style_features['naming']
+            per_category: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            
+            for key, count in naming_counter.items():
+                # Expect keys like ('function', 'snake_case')
+                if isinstance(key, tuple) and len(key) == 2:
+                    category, style = key
+                    per_category[str(category)][str(style)] += int(count)
+            
+            # Choose the most frequent style per category
+            for category, style_counts in per_category.items():
+                best_style = max(style_counts.items(), key=lambda kv: kv[1])[0]
+                profile.naming_convention[category] = best_style
         
         return profile
     

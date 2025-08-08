@@ -22,7 +22,8 @@
       "mcp__mcprag__track_search_click",
       "mcp__mcprag__track_search_outcome",
       "mcp__mcprag__backup_index_schema",
-      "mcp__mcprag__index_repository"
+      "mcp__mcprag__index_repository",
+      "mcp__sequential-thinking__sequentialthinking"
     ]
   },
   "enableAllProjectMcpServers": true,

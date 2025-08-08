@@ -10,7 +10,6 @@ from .formatting import (
     extract_exact_terms,
     get_snippet_headline,
 )
-from ..base import check_component
 from .search_impl import (
     search_code_impl,
     search_microsoft_docs_impl,
@@ -27,8 +26,6 @@ __all__ = [
     "headline_from_content",
     "extract_exact_terms",
     "get_snippet_headline",
-    # Validation helpers
-    "check_component",
     # Implementation helpers
     "search_code_impl",
     "search_microsoft_docs_impl",
