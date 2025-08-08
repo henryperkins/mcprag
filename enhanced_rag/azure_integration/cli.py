@@ -20,7 +20,8 @@ import os
 import hashlib
 from pathlib import Path
 import ast
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
+
 
 from azure.core.exceptions import ResourceNotFoundError
 from .rest_index_builder import EnhancedIndexBuilder
@@ -33,6 +34,43 @@ from .processing import extract_python_chunks, process_file, FileProcessor, find
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ----------------------------
+# Local validation utilities
+# ----------------------------
+_ALLOWED_REPO_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+def _validate_repo_name(name: str) -> Optional[str]:
+    """
+    Validate repository name: non-empty, no slashes/backslashes, sane length,
+    and only [_-.A-Za-z0-9] characters.
+    Returns error string if invalid, or None if valid.
+    """
+    if not name or not isinstance(name, str):
+        return "Repository name is required"
+    if len(name) > 100:
+        return "Repository name too long (max 100 chars)"
+    if any(c in name for c in "/\\"):
+        return "Repository name must not contain slashes"
+    if any(c not in _ALLOWED_REPO_CHARS for c in name):
+        return "Repository name contains invalid characters; allowed: letters, numbers, '-', '_', '.'"
+    return None
+
+def _repo_root_guard(repo_path: str, excluded_dirs: Set[str]) -> Optional[str]:
+    """
+    Warn/guard if the provided repo_path resolves within a known noisy/excluded directory,
+    unless MCP_ALLOW_EXTERNAL_ROOTS=true is set in env.
+    Returns warning string if guarded, or None to proceed.
+    """
+    allow_external = os.getenv("MCP_ALLOW_EXTERNAL_ROOTS", "false").lower() == "true"
+    resolved = Path(repo_path).resolve()
+    parts = set(p.name for p in resolved.parents) | {resolved.name}
+    if any(d in parts for d in excluded_dirs):
+        if not allow_external:
+            return (f"Repository path '{resolved}' appears to be inside an excluded directory "
+                    f"({', '.join(sorted(excluded_dirs))}). Set MCP_ALLOW_EXTERNAL_ROOTS=true to override.")
+        else:
+            logger.warning("Proceeding with repo_path inside excluded directory due to MCP_ALLOW_EXTERNAL_ROOTS=true")
+    return None
 
 
 
@@ -82,10 +120,29 @@ async def cmd_local_repo(args):
     """Index a local repository."""
     logger.info(f"Indexing repository: {args.repo_path}")
 
+    # Validate repo name
+    err = _validate_repo_name(args.repo_name)
+    if err:
+        logger.error(f"Invalid --repo-name: {err}")
+        return 1
+
+    # Guard against excluded roots unless explicitly allowed
+    try:
+        from .processing import FileProcessor  # reuse canonical excludes
+        guard_msg = _repo_root_guard(args.repo_path, FileProcessor.DEFAULT_EXCLUDE_DIRS)
+        if guard_msg:
+            logger.error(guard_msg)
+            return 1
+    except Exception:
+        # If import fails, proceed cautiously
+        pass
+
     # Parse file patterns if provided
-    patterns = None
+    patterns: Optional[List[Tuple[str, str]]] = None
+    extensions: Optional[Set[str]] = None
     if args.patterns:
         patterns = []
+        extensions = set()
         for pattern in args.patterns:
             # Infer language from extension
             if pattern.endswith('.py'):
@@ -96,6 +153,31 @@ async def cmd_local_repo(args):
                 patterns.append((pattern, 'typescript'))
             else:
                 logger.warning(f"Unknown pattern {pattern}, skipping")
+            if pattern.startswith('*.'):
+                extensions.add(pattern[1:])
+
+    # Optional dry-run path: produce sample list and exit
+    if getattr(args, "dry_run", False):
+        # Build file processor with the same extension filter as actual indexing
+        fp = FileProcessor(extensions=extensions)
+        # Collect documents but only keep unique relative file paths to avoid heavy output
+        documents = fp.process_repository(args.repo_path, args.repo_name)
+        unique_files: List[str] = []
+        seen = set()
+        for d in documents:
+            rel = d.get("file_path")
+            if rel and rel not in seen:
+                seen.add(rel)
+                unique_files.append(rel)
+            if len(unique_files) >= args.sample:
+                break
+
+        out_dir = Path(".claude/state")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / "index_dryrun_sample.txt"
+        out_file.write_text("\n".join(unique_files), encoding="utf-8")
+        logger.info(f"Dry-run complete. Wrote {len(unique_files)} paths to {out_file}")
+        return 0
 
     # Index the repository
     doc_count = await index_repository(
@@ -151,6 +233,23 @@ async def index_changed_files(file_paths: List[str], repo_name: str) -> int:
 async def cmd_changed_files(args):
     """Index specific changed files."""
     logger.info(f"Indexing {len(args.files)} changed files")
+
+    # Validate repo name
+    err = _validate_repo_name(args.repo_name)
+    if err:
+        logger.error(f"Invalid --repo-name: {err}")
+        return 1
+
+    # Additional guard: compute repo root from files and ensure not excluded unless allowed
+    try:
+        repo_root = find_repository_root(args.files)
+        guard_msg = _repo_root_guard(repo_root, FileProcessor.DEFAULT_EXCLUDE_DIRS)
+        if guard_msg:
+            logger.error(guard_msg)
+            return 1
+    except Exception:
+        # Proceed if guard fails unexpectedly
+        pass
 
     # Index the changed files
     doc_count = await index_changed_files(
@@ -430,6 +529,17 @@ def main():
         '--patterns',
         nargs='+',
         help='File patterns to index (e.g., *.py *.js)'
+    )
+    repo_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Do not upload; output a sample of included files to .claude/state/index_dryrun_sample.txt'
+    )
+    repo_parser.add_argument(
+        '--sample',
+        type=int,
+        default=200,
+        help='Number of sample file paths to emit in dry-run (default: 200)'
     )
     # Mutually exclusive group for embed vectors
     embed_group = repo_parser.add_mutually_exclusive_group()

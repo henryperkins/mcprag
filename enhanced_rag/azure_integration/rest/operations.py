@@ -221,7 +221,7 @@ class SearchOperations:
         endpoint = f"/indexes/{index_name}/docs/search"
 
         try:
-            response = await self.client.post(endpoint, json=body)
+            response = await self.client.request("POST", endpoint, json=body)
             return response
         except Exception as e:
             logger.error(f"Search failed: {e}")

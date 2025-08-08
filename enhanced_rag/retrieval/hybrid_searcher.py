@@ -103,25 +103,48 @@ class HybridSearcher:
 
             endpoint = admin_key = index_name = None  # sensible defaults
 
-            # Case 1 – Pydantic config object
+            # Case 1 – Pydantic config object or object with `.azure`
+            def _get_attr_or_key(obj: Any, key: str) -> Optional[Any]:
+                """
+                Safely get a configuration field from either:
+                - an object via attribute access
+                - a mapping via key access
+                Returns None if missing.
+                """
+                if obj is None:
+                    return None
+                # Mapping first, to avoid accidental attribute masking
+                try:
+                    if isinstance(obj, dict):
+                        return obj.get(key)
+                except Exception:
+                    pass
+                try:
+                    return getattr(obj, key, None)
+                except Exception:
+                    return None
+
+            azure_cfg = None
             if hasattr(self.config, "azure"):
-                endpoint = (getattr(self.config.azure, "endpoint", None) or "").strip() or None
-                admin_key = (getattr(self.config.azure, "admin_key", None) or "").strip() or None
-                index_name = (getattr(self.config.azure, "index_name", None) or "").strip() or None
+                azure_cfg = getattr(self.config, "azure", None)
+                endpoint = ((_get_attr_or_key(azure_cfg, "endpoint") or "").strip()) or None
+                admin_key = ((_get_attr_or_key(azure_cfg, "admin_key") or "").strip()) or None
+                index_name = ((_get_attr_or_key(azure_cfg, "index_name") or "").strip()) or None
 
             # Case 2 – dict coming from ``model_dump`` or handcrafted
             elif isinstance(self.config, dict):
-                azure_section = self.config.get("azure", {}) if isinstance(self.config, dict) else {}
-                endpoint = (azure_section.get("endpoint") or "").strip() or None
-                admin_key = (azure_section.get("admin_key") or "").strip() or None
-                index_name = (azure_section.get("index_name") or "").strip() or None
+                azure_section = self.config.get("azure", {})
+                endpoint = ((azure_section.get("endpoint") or "").strip()) or None
+                admin_key = ((azure_section.get("admin_key") or "").strip()) or None
+                index_name = ((azure_section.get("index_name") or "").strip()) or None
 
             # Case 3 – final fallback to singleton env-driven config
             if not all([endpoint, admin_key, index_name]):
                 fallback = get_config()
-                endpoint = endpoint or (getattr(fallback.azure, "endpoint", None) or "").strip() or None
-                admin_key = admin_key or (getattr(fallback.azure, "admin_key", None) or "").strip() or None
-                index_name = index_name or (getattr(fallback.azure, "index_name", None) or "").strip() or None
+                azure_fb = getattr(fallback, "azure", None)
+                endpoint = endpoint or (((_get_attr_or_key(azure_fb, "endpoint") or "").strip()) or None)
+                admin_key = admin_key or (((_get_attr_or_key(azure_fb, "admin_key") or "").strip()) or None)
+                index_name = index_name or (((_get_attr_or_key(azure_fb, "index_name") or "").strip()) or None)
 
             # Absolute last-chance default to preserve historical behaviour
             index_name = index_name or "codebase-mcp-sota"
@@ -451,22 +474,26 @@ class HybridSearcher:
         top_k: int = 50,
         vector_weight: float = 0.5
     ) -> List[HybridSearchResult]:
-        """Execute hybrid search combining vector and keyword results"""
+        """
+        Back-compat wrapper for hybrid search combining vector and keyword results.
+        This delegates to the newer 'search' method but preserves the vector_weight knob.
+        """
+        # Map legacy two-weight model onto the newer three-weight fusion:
+        # allocate remaining weight to "semantic", leave keyword weight minimal (still non-zero).
+        semantic_weight = max(0.0, 1.0 - vector_weight)
+        keyword_weight = 0.0
 
-        # Execute both searches in parallel
-        vector_results = await self.vector_search(query, filter_expr, top_k * 2)
-        keyword_results = await self.keyword_search(query, filter_expr, top_k * 2)
-
-        # Combine results with weighted scoring
-        combined_results = self._combine_results(
-            vector_results,
-            keyword_results,
-            vector_weight
+        return await self.search(
+            query=query,
+            filter_expr=filter_expr,
+            top_k=top_k,
+            include_total_count=True,
+            vector_weight=vector_weight,
+            semantic_weight=semantic_weight,
+            keyword_weight=keyword_weight,
+            deadline_ms=None,
+            exact_boost=0.35,
         )
-
-        # Sort by combined score and return top-k
-        combined_results.sort(key=lambda x: x.score, reverse=True)
-        return combined_results[:top_k]
 
     def _combine_results(
         self,
@@ -474,20 +501,21 @@ class HybridSearcher:
         keyword_results: List[HybridSearchResult],
         vector_weight: float
     ) -> List[HybridSearchResult]:
-        """Combine vector and keyword results with weighted scoring"""
-        combined = {}
-        keyword_weight = 1 - vector_weight
+        """
+        Combine vector and keyword results with weighted scoring.
+        Note: This helper is retained for reference but the preferred path is 'search()'.
+        """
+        combined: Dict[str, HybridSearchResult] = {}
+        keyword_weight = max(0.0, 1.0 - vector_weight)
 
-        # Add vector results
         for result in vector_results:
             combined[result.id] = HybridSearchResult(
                 id=result.id,
                 score=result.score * vector_weight,
                 content=result.content,
-                metadata=result.metadata
+                metadata=dict(result.metadata),
             )
 
-        # Add or update with keyword results
         for result in keyword_results:
             if result.id in combined:
                 combined[result.id].score += result.score * keyword_weight
@@ -496,7 +524,7 @@ class HybridSearcher:
                     id=result.id,
                     score=result.score * keyword_weight,
                     content=result.content,
-                    metadata=result.metadata
+                    metadata=dict(result.metadata),
                 )
 
         return list(combined.values())
@@ -551,101 +579,3 @@ class HybridSearcher:
                     logger.error(f"Client-side embedding failed: {e}")
         return None
 
-    async def hybrid_search(
-        self,
-        query: str,
-        filter_expr: Optional[str] = None,
-        top_k: int = 10,
-        include_total_count: bool = False,
-        exact_terms: Optional[List[str]] = None
-    ) -> List[HybridSearchResult]:
-        """
-        Perform hybrid search combining keyword and vector search
-
-        Args:
-            query: Search query
-            filter_expr: OData filter expression
-            top_k: Number of results to return
-            include_total_count: Whether to include total count
-            exact_terms: Terms that must appear exactly
-
-        Returns:
-            List of hybrid search results
-        """
-        # Build combined filter with exact terms if provided
-        exact_filter = FilterManager.exact_terms(exact_terms) if exact_terms else None
-        combined_filter = FilterManager.combine_and(filter_expr, exact_filter)
-
-        # 1. Keyword/semantic search with filter
-        kw_results = await self._keyword_search(query, combined_filter, top_k)
-
-        # 2. Vector search with filter (if enabled)
-        vec_results = []
-        if self.config.get('enable_vector_search', False):
-            vec_results = await self._vector_search(query, combined_filter, top_k)
-
-        # 3. Fuse results using reciprocal rank fusion
-        fused = self._reciprocal_rank_fusion([kw_results, vec_results], k=60)
-
-        return fused[:top_k]
-
-    async def _keyword_search(
-        self,
-        query: str,
-        filter_expr: Optional[str],
-        top_k: int
-    ) -> List[HybridSearchResult]:
-        """Execute keyword search with filter"""
-        # Implementation would call Azure Search with filter
-        # For now, return empty list as placeholder
-        return []
-
-    async def _vector_search(
-        self,
-        query: str,
-        filter_expr: Optional[str],
-        top_k: int
-    ) -> List[HybridSearchResult]:
-        """Execute vector search with filter"""
-        # Implementation would call vector search with filter
-        # For now, return empty list as placeholder
-        return []
-
-    def _reciprocal_rank_fusion(
-        self,
-        result_sets: List[List[HybridSearchResult]],
-        k: int = 60
-    ) -> List[HybridSearchResult]:
-        """Fuse multiple result sets using RRF"""
-        doc_scores = {}
-
-        for results in result_sets:
-            for rank, result in enumerate(results):
-                if result.id not in doc_scores:
-                    doc_scores[result.id] = {'score': 0, 'result': result}
-                doc_scores[result.id]['score'] += 1 / (k + rank + 1)
-
-        # Sort by fused score
-        sorted_results = sorted(
-            doc_scores.values(),
-            key=lambda x: x['score'],
-            reverse=True
-        )
-
-        # Update scores and return
-        output = []
-        for item in sorted_results:
-            result = item['result']
-            result.score = item['score']
-            output.append(result)
-
-        return output
-
-    async def vector_search(
-        self,
-        query: str,
-        filter_expr: Optional[str] = None,
-        top_k: int = 10
-    ) -> List[HybridSearchResult]:
-        """Public method for vector-only search"""
-        return await self._vector_search(query, filter_expr, top_k)

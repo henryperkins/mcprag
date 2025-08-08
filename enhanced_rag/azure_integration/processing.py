@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 import os
+import pathspec
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +135,34 @@ class FileProcessor:
         '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.r',
         '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'
     }
+
+    # Directories and file patterns always excluded when
+    # MCP_INDEX_DEFAULT_EXCLUDES=true
+    DEFAULT_EXCLUDE_DIRS = {
+        ".git", ".hg", ".svn", ".venv", "venv", "env", "node_modules",
+        "dist", "build", "__pycache__", ".mypy_cache", ".pytest_cache",
+        ".coverage", ".vscode", ".idea"
+    }
+    DEFAULT_EXCLUDE_FILES = {
+        "*.pyc", "*.pyo", "*.pyd", "*.swp", "*.swo",
+        ".DS_Store", "Thumbs.db"
+    }
     
     def __init__(self, extensions: Optional[Set[str]] = None):
-        """Initialize file processor."""
+        """Initialize file processor with optional extension filtering.
+
+        Loads ignore specifications and configures default-exclude behavior via
+        environment flags:
+        • MCP_RESPECT_GITIGNORE (default: true)
+        • MCP_INDEX_DEFAULT_EXCLUDES (default: true)
+        """
         self.extensions = extensions or self.DEFAULT_EXTENSIONS
+        # Behaviour flags
+        self.respect_gitignore = os.getenv("MCP_RESPECT_GITIGNORE", "true").lower() != "false"
+        self.use_default_excludes = os.getenv("MCP_INDEX_DEFAULT_EXCLUDES", "true").lower() != "false"
+
+        # Loaded ignore spec – populated on first repository call
+        self._pathspec: Optional[pathspec.PathSpec] = None
         
     def get_language_from_extension(self, file_path: str) -> str:
         """Determine programming language from file extension."""
@@ -149,35 +174,104 @@ class FileProcessor:
         ext = Path(file_path).suffix.lower()
         return ext in self.extensions
 
-    def process_repository(self, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
-        """Process an entire repository into indexable documents.
+    def process_file(self, file_path: str, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
+        """Wrapper to maintain backward compatibility with callers expecting a class method."""
+        return process_file(file_path, repo_path, repo_name)
 
-        Walks the repo directory, filters by known extensions, and delegates
-        to process_file for chunk extraction.
-        """
+
+    # ------------------------------------------------------------------ #
+    # Ignore / pruning helpers
+    # ------------------------------------------------------------------ #
+
+    def _load_ignore_spec(self, repo_root: Path) -> Optional[pathspec.PathSpec]:
+        """Load combined .gitignore and .mcpragignore rules for repo."""
+        patterns: List[str] = []
+        for fname in (".gitignore", ".mcpragignore"):
+            fp = repo_root / fname
+            if fp.exists():
+                try:
+                    patterns.extend(fp.read_text().splitlines())
+                except Exception:
+                    continue
+        if not patterns:
+            return None
+        # "gitwildmatch" factory avoids direct class import
+        return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+
+    def _should_prune_dir(self, rel_dir: str) -> bool:
+        if self.use_default_excludes and Path(rel_dir).name in self.DEFAULT_EXCLUDE_DIRS:
+            return True
+        if self._pathspec and self._pathspec.match_file(rel_dir + "/"):
+            return True
+        return False
+
+    def _should_skip_file(self, rel_file: str) -> bool:
+        from fnmatch import fnmatch
+
+        if self.use_default_excludes:
+            for patt in self.DEFAULT_EXCLUDE_FILES:
+                if fnmatch(Path(rel_file).name, patt):
+                    return True
+        if self._pathspec and self._pathspec.match_file(rel_file):
+            return True
+        return False
+
+    def process_repository(self, repo_path: str, repo_name: str) -> List[Dict[str, Any]]:
+        """Process entire repository into indexable documents with pruning."""
         base = Path(repo_path).resolve()
         if not base.exists() or not base.is_dir():
             return []
 
+        # (Re)load ignore spec for this repository
+        if self.respect_gitignore:
+            self._pathspec = self._load_ignore_spec(base)
+
         documents: List[Dict[str, Any]] = []
-        # Limit files to avoid accidental huge scans; reasonable default 20k files
         max_files = int(os.getenv("MCP_MAX_INDEX_FILES", "20000"))
-        count = 0
-        for p in base.rglob("*"):
-            if count >= max_files:
+        processed = skipped_ext = skipped_ignored = pruned_dirs = 0
+
+        for root, dirnames, filenames in os.walk(base):
+            rel_root = os.path.relpath(root, base)
+
+            # Prune dirs in-place for performance
+            original_len = len(dirnames)
+            dirnames[:] = [d for d in dirnames if not self._should_prune_dir(os.path.join(rel_root, d))]
+            pruned_dirs += original_len - len(dirnames)
+
+            for fname in filenames:
+                if processed >= max_files:
+                    break
+                rel_path = os.path.join(rel_root, fname) if rel_root != "." else fname
+
+                if self._should_skip_file(rel_path):
+                    skipped_ignored += 1
+                    continue
+
+                full_path = base / rel_path
+                if not self.should_process_file(str(full_path)):
+                    skipped_ext += 1
+                    continue
+
+                try:
+                    docs = process_file(str(full_path), str(base), repo_name)
+                    documents.extend(docs)
+                    processed += 1
+                except Exception:
+                    # unreadable/problematic – skip
+                    continue
+            if processed >= max_files:
                 break
-            if not p.is_file():
-                continue
-            if not self.should_process_file(str(p)):
-                continue
-            try:
-                docs = process_file(str(p), str(base), repo_name)
-                documents.extend(docs)
-                count += 1
-            except Exception:
-                # Skip unreadable/problematic files
-                continue
+
+        logger.info(
+            "FileProcessor.process_repository summary | processed=%s skipped_ext=%s skipped_ignored=%s pruned_dirs=%s",
+            processed,
+            skipped_ext,
+            skipped_ignored,
+            pruned_dirs,
+        )
         return documents
+
+# (duplicate original process_repository method removed)
 
 
 

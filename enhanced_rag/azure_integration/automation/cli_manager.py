@@ -6,7 +6,7 @@ and index management operations.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
 from pathlib import Path
 import os
@@ -19,6 +19,33 @@ from .embedding_manager import EmbeddingAutomation
 from .reindex_manager import ReindexAutomation
 
 logger = logging.getLogger(__name__)
+
+# ----------------------------
+# Local validation utilities
+# ----------------------------
+_ALLOWED_REPO_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+def _validate_repo_name(name: str) -> Optional[str]:
+    if not name or not isinstance(name, str):
+        return "Repository name is required"
+    if len(name) > 100:
+        return "Repository name too long (max 100 chars)"
+    if any(c in name for c in "/\\"):
+        return "Repository name must not contain slashes"
+    if any(c not in _ALLOWED_REPO_CHARS for c in name):
+        return "Repository name contains invalid characters; allowed: letters, numbers, '-', '_', '.'"
+    return None
+
+def _repo_root_guard(repo_path: str, excluded_dirs: Set[str]) -> Optional[str]:
+    allow_external = os.getenv("MCP_ALLOW_EXTERNAL_ROOTS", "false").lower() == "true"
+    resolved = Path(repo_path).resolve()
+    parts = set(p.name for p in resolved.parents) | {resolved.name}
+    if any(d in parts for d in excluded_dirs):
+        if not allow_external:
+            return (f"Repository path '{resolved}' appears to be inside an excluded directory "
+                    f"({', '.join(sorted(excluded_dirs))}). Set MCP_ALLOW_EXTERNAL_ROOTS=true to override.")
+        else:
+            logger.warning("Proceeding with repo_path inside excluded directory due to MCP_ALLOW_EXTERNAL_ROOTS=true")
+    return None
 
 
 class CLIAutomation:
@@ -104,7 +131,17 @@ class CLIAutomation:
         """
         start_time = datetime.utcnow()
         logger.info(f"Starting repository indexing: {repo_name} from {repo_path}")
-        
+
+        # Validate repository name
+        err = _validate_repo_name(repo_name)
+        if err:
+            raise ValueError(f"Invalid repository name: {err}")
+
+        # Guard against excluded roots unless explicitly allowed
+        guard_msg = _repo_root_guard(repo_path, FileProcessor.DEFAULT_EXCLUDE_DIRS)
+        if guard_msg:
+            raise ValueError(guard_msg)
+
         # Use consolidated file processor for repository processing
         if patterns:
             # Convert patterns to extensions
@@ -115,7 +152,7 @@ class CLIAutomation:
             processor = FileProcessor(extensions)
         else:
             processor = self.file_processor
-            
+
         # Process entire repository
         all_documents = processor.process_repository(repo_path, repo_name)
         
@@ -187,10 +224,20 @@ class CLIAutomation:
         """
         start_time = datetime.utcnow()
         logger.info(f"Indexing {len(file_paths)} changed files")
-        
+
+        # Validate repository name
+        err = _validate_repo_name(repo_name)
+        if err:
+            raise ValueError(f"Invalid repository name: {err}")
+
         # Find the repo root using shared helper
         repo_path = find_repository_root(file_paths)
-        
+
+        # Guard against excluded roots unless explicitly allowed
+        guard_msg = _repo_root_guard(repo_path, FileProcessor.DEFAULT_EXCLUDE_DIRS)
+        if guard_msg:
+            raise ValueError(guard_msg)
+
         # Process files
         all_documents = []
         processed_files = 0
