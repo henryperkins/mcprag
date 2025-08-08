@@ -1,7 +1,6 @@
 """Search-related MCP tools."""
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from ...utils.response_helpers import ok, err
-from .base import check_component
 from ._helpers import search_code_impl, search_microsoft_docs_impl
 
 if TYPE_CHECKING:

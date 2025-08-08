@@ -14,7 +14,7 @@ from .formatting import (
     extract_exact_terms,
     truncate_snippets,
 )
-from .validation import check_component
+from ..base import check_component
 from .input_validation import (
     validate_all_search_params,
     validate_query,

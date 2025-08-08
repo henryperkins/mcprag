@@ -10,7 +10,7 @@ from .formatting import (
     extract_exact_terms,
     get_snippet_headline,
 )
-from .validation import check_component
+from ..base import check_component
 from .search_impl import (
     search_code_impl,
     search_microsoft_docs_impl,
