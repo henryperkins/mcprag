@@ -61,6 +61,36 @@
           "targetName": "key_concepts"
         }
       ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.MergeSkill",
+      "name": "merge_chunk_id",
+      "description": "Join file path and chunk text to build deterministic chunk id source",
+      "context": "/document/chunks/*",
+      "separator": "|",
+      "inputs": [
+        { "name": "text", "source": "/document/metadata_storage_path" },
+        { "name": "text", "source": "/document/chunks/*" }
+      ],
+      "outputs": [
+        { "name": "mergedText", "targetName": "chunk_id_source" }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embed_chunk",
+      "description": "Generate 3072-d embeddings for each chunk",
+      "context": "/document/chunks/*",
+      "resourceUri": "https://{AOAI_SUBDOMAIN}.openai.azure.com",
+      "deploymentId": "{AOAI_EMBED_DEPLOYMENT}",
+      "modelName": "text-embedding-3-large",
+      "dimensions": 3072,
+      "inputs": [
+        { "name": "text", "source": "/document/chunks/*" }
+      ],
+      "outputs": [
+        { "name": "embedding", "targetName": "chunk_embedding" }
+      ]
     }
   ],
   "cognitiveServices": {

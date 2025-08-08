@@ -28,6 +28,13 @@
   "fieldMappings": [
     {
       "sourceFieldName": "metadata_storage_path",
+      "targetFieldName": "id",
+      "mappingFunction": {
+        "name": "base64Encode"
+      }
+    },
+    {
+      "sourceFieldName": "metadata_storage_path",
       "targetFieldName": "file_path",
       "mappingFunction": {
         "name": "base64Decode"
@@ -54,6 +61,24 @@
     {
       "sourceFieldName": "/document/chunks/*",
       "targetFieldName": "content"
+    },
+    {
+      "sourceFieldName": "/document/chunks/*/chunk_embedding",
+      "targetFieldName": "content_vector"
+    },
+    {
+      "sourceFieldName": "/document/chunks/*/chunk_id_source",
+      "targetFieldName": "chunk_id",
+      "mappingFunction": {
+        "name": "base64Encode"
+      }
+    },
+    {
+      "sourceFieldName": "/document/chunks/*/chunk_id_source",
+      "targetFieldName": "id",
+      "mappingFunction": {
+        "name": "base64Encode"
+      }
     }
   ]
 }
