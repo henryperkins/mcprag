@@ -1,0 +1,116 @@
+MCP Transport Parity: Handshake State Machine
+
+Purpose
+Defines the normative, transport-agnostic handshake and negotiation lifecycle that MUST be honored across stdio, HTTP, and SSE. This state machine ensures a single behavioral contract irrespective of wire transport.
+
+References:
+- docs/MCP_TRANSPORT_PARITY_GUIDE_V2.md (overview, initialization, auth, SSE proxying)
+- docs/transport-parity/schemas/protocol.handshake.schema.json (handshake envelope)
+- docs/transport-parity/schemas/protocol.capabilities.schema.json (capabilities)
+- docs/transport-parity/schemas/protocol.request.schema.json (requests)
+- docs/transport-parity/schemas/protocol.response.schema.json (responses)
+- docs/transport-parity/schemas/protocol.stream.chunk.schema.json (streaming)
+- docs/transport-parity/schemas/protocol.keepalive.schema.json (keepalive)
+- docs/transport-parity/schemas/protocol.cancel.schema.json (cancellation)
+- docs/transport-parity/schemas/protocol.error.schema.json (error taxonomy)
+
+States
+- Disconnected: No transport established
+- Connecting: Underlying transport established (stdio pipes opened; HTTP/SSE TCP connected)
+- HandshakeSent: Client sent handshake envelope { type:"handshake", protocolVersion, capabilities, resumeToken? }
+- HandshakeAcked: Server validated version/caps and acknowledged (implicitly via readiness for requests or explicit ack event)
+- CapsExchanged: Optional explicit capability intersection has been computed/persisted (if separate caps exchange is used)
+- Ready: Bidirectional request/response is permitted; streaming frames allowed
+- Resuming: Resume attempt in progress using resumeToken + lastAckSeq; on success -> Ready; on failure -> Ready (with restart advice)
+- Canceling: Server draining after receiving cancel; then -> Ready
+- Closing: Orderly shutdown in progress (server or client initiated)
+
+Events
+- connect(): Transport established (stdio/HTTP/SSE)
+- sendHandshake(h): Client sends handshake envelope conforming to protocol.handshake.schema.json
+- recvHandshakeAck(ack): Server validates and acks (implicit in stdio/HTTP, explicit "handshake" SSE event prelude)
+- sendCaps(caps)/recvCapsAck(ack): Optional explicit capability negotiation after handshake
+- sendRequest(req)/recvResponse(resp): Standard request/response lifecycle
+- startStream(req.stream=true)/recvStream(chunk): Start streaming; receive ordered chunks (seq++)
+- sendCancel({ id | streamId }): Client requests cancellation for a request or stream
+- recvEos(): Terminal end-of-stream received
+- timeout(t): Deadline exceeded for handshake/caps/keepalive windows
+- disconnect(): Transport closed (network, process exit, server shutdown)
+- retryBackoff(): Client applies backoff and attempts reconnect
+
+Invariants (MUST)
+- No request is processed before the connection reaches Ready.
+- Capability usage is monotonic: both sides MUST only use the intersection of advertised capabilities.
+- Streaming chunks MUST be delivered in-order per streamId with strictly increasing seq; clients MUST de-duplicate duplicates by seq.
+- Responses MUST match the request id and contain exactly one of result or error.
+- Cancel referencing an id or streamId MUST cause the server to stop producing further data for that target and emit terminal frames if applicable.
+- Authentication decisions and tier enforcement MUST be identical across transports (unified extraction and verification).
+- Proxies for SSE MUST forward the Authorization header and disable buffering to preserve streaming semantics.
+
+Timeouts and Keepalives
+- handshakeTimeout: 5s default from Connecting -> HandshakeAcked; on timeout -> error.version_unsupported or error.internal
+- capsTimeout: 5s default for optional explicit capability exchange; on timeout -> continue with initial intersection or error.feature_not_available (server policy)
+- keepaliveInterval: 
+  - SSE: default 30s server keepalive (event: keepalive) to prevent idle disconnects
+  - stdio: 60s default (type:"keepalive")
+  - HTTP: per-request; keepalive not required
+- idleTimeout: Server MAY close idle connections after advertised timeoutHintSec in keepalive messages
+
+Failure Modes (typed errors)
+- Version mismatch -> error.version_unsupported (retryable=false)
+- Capabilities empty or unsupported feature used -> error.feature_not_available (retryable=false)
+- Authentication missing/invalid -> error.auth.unauthorized (retryable=false unless token refresh advised)
+- Authorization (tier) failure -> error.auth.forbidden (retryable=false unless MFA pending)
+- Rate limit exceeded -> error.rate_limited (retryable=true, retryAfter N)
+- Payload too large -> error.payload_too_large (retryable=false)
+- Duplicate idempotent request processed -> error.already_processed (retryable=false; MAY include result hash)
+- Internal server error -> error.internal (retryable=true with backoff at client discretion)
+
+Reconnection and Resume (SHOULD)
+- Server issues a resumeToken in the handshake or subsequent headers/events.
+- Client MAY attempt resume by presenting resumeToken and lastAckSeq per stream.
+- Server MUST validate window retention; if valid, resume from seq=lastAckSeq+1; else respond with restart advice and transition to Ready.
+- Resume window retention policy: at least 1,000 chunks per stream recommended; server MAY advertise retention limits via capabilities.
+
+Flow Control and Backpressure (SHOULD)
+- Server SHOULD advertise maxConcurrent and maxPayloadBytes via capabilities.
+- Clients SHOULD respect 429/Retry-After responses and throttle accordingly.
+- Slow consumers MUST NOT cause unordered delivery; server MAY pause production per stream while preserving order.
+
+Security and Transport Notes
+- TLS REQUIRED for HTTP/SSE in production.
+- SSE behind proxy: MUST set proxy_buffering off and forward Authorization header; add X-Accel-Buffering "no".
+- CORS for browser HTTP/SSE: Configure Access-Control-Allow-Origin and related headers; CSRF protections for cookie-based auth.
+- Authentication extraction is transport-agnostic: Authorization: Bearer for HTTP/SSE, auth_token for stdio, ?token= fallback for SSE if headers cannot be preserved.
+
+Transition Table (textual)
+Format: From --(Event [Guard] / Action)--> To
+
+- Disconnected --(connect / open transport)--> Connecting
+- Connecting --(sendHandshake(h) / validate h.schema)--> HandshakeSent
+- HandshakeSent --(recvHandshakeAck [version OK, caps OK] / persist caps ∩)--> HandshakeAcked
+- HandshakeAcked --(optional sendCaps/recvCapsAck / persist refined ∩)--> CapsExchanged
+- HandshakeAcked --(no explicit caps)--> Ready
+- CapsExchanged --(implicit)--> Ready
+- Ready --(sendRequest(req) [auth OK, caps allow] / enqueue)--> Ready
+- Ready --(startStream(req.stream=true) / open streamId)--> Ready
+- Ready --(sendCancel({id|streamId}) / stop production)--> Canceling
+- Canceling --(recvEos / finalize)--> Ready
+- Any --(timeout(handshakeTimeout) / emit error.version_unsupported)--> Closing
+- Any --(disconnect / cleanup)--> Disconnected
+- Ready --(reconnect + resumeToken + lastAckSeq / validate window)--> Resuming
+- Resuming --([window OK] / resume from seq=lastAckSeq+1)--> Ready
+- Resuming --([window stale] / advise restart)--> Ready
+
+Observability (SHOULD)
+- Log fields: sessionId, transport, request id, method, tool, auth.tier, streamId, seq, error.code, retryable, retryAfter.
+- Metrics: mcp_requests_total, mcp_latency_ms, mcp_stream_events_total{chunkType}, mcp_retries_total, mcp_cancellations_total.
+- Tracing: traceId propagation; spans: MCP Handshake, MCP Request (method), MCP Stream (streamId).
+
+Compliance Checklist (MUST)
+- Handshake envelope matches schema; capability flags provided.
+- Tool registry identical across transports at Ready.
+- Same error taxonomy returned across transports.
+- Streaming order guarantees enforced; cancel honored promptly.
+- SSE proxy configuration documented and validated.
+- Authentication extraction and verification chain identical; tier enforcement consistent; MFA enforced for ADMIN per config.

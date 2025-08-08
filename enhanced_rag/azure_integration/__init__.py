@@ -17,9 +17,6 @@ RECOMMENDED USAGE (New Consolidated API):
     processor = FileProcessor()
     documents = processor.process_repository("./repo", "repo-name")
 
-LEGACY USAGE (Deprecated but supported):
-    from azure_integration import AzureSearchClient, ReindexOperations
-    # ... legacy code continues to work
 """
 
 # NEW CONSOLIDATED API (Recommended)
@@ -46,8 +43,6 @@ from .automation import (
     UnifiedAutomation
 )
 
-# Legacy configuration (deprecated)
-from .config import AzureSearchConfig, IndexConfig, AutomationConfig
 
 __all__ = [
     # NEW CONSOLIDATED API (Recommended)
@@ -82,8 +77,4 @@ __all__ = [
     'CLIAutomation',
     'UnifiedAutomation',
     
-    # Legacy configuration (deprecated)
-    'AzureSearchConfig',
-    'IndexConfig', 
-    'AutomationConfig',
 ]

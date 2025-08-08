@@ -1,8 +1,10 @@
 """
 MCP Protocol to REST API Adapter.
 
-This adapter translates MCP protocol messages to REST API calls for the remote server.
-It allows Claude Code to use the remote server by speaking MCP protocol.
+STATUS: Experimental helper not used by the core server. This adapter translates
+MCP protocol messages to remote HTTP calls and can be run as a standalone MCP
+server to proxy to the remote API. It’s useful for demos or bridging clients,
+but safe to remove if you standardize on the built-in `mcp_bridge.py`.
 """
 
 import asyncio

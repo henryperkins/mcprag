@@ -1,0 +1,18 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.cancel.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Cancel Message",
+  "description": "Cancellation envelope referencing either a request id or a streamId. Exactly one identifier MUST be present.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "const": "cancel" },
+    "id": { "type": ["string", "integer"], "description": "Request id to cancel" },
+    "streamId": { "type": "string", "description": "Stream identifier to cancel" }
+  },
+  "anyOf": [
+    { "required": ["id"] },
+    { "required": ["streamId"] }
+  ],
+  "additionalProperties": false
+}

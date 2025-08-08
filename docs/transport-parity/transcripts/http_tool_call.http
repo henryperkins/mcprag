@@ -1,0 +1,13 @@
+POST /mcp/tool/invoke HTTP/1.1\r
+Host: localhost:8001\r
+Content-Type: application/json\r
+Authorization: Bearer eyJ...\r
+\r
+{"id":"42","type":"request","method":"tool/invoke","params":{"name":"search_code","args":{"query":"vector"}},"idempotent":true}
+
+HTTP/1.1 200 OK\r
+Content-Type: application/json; charset=utf-8\r
+MCP-Session-Id: c2\r
+MCP-Resume-Token: rTkn123\r
+\r
+{"id":"42","type":"response","result":{"summary":"...","items":[...]}}

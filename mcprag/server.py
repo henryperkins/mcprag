@@ -247,10 +247,14 @@ class MCPServer:
         # Track if async components have been started
         self._async_components_started = False
 
+        # Initialize transport wrapper for unified auth
+        from .mcp.transport_wrapper import TransportWrapper
+        self.transport_wrapper = TransportWrapper(self)
+        
         # Register MCP endpoints
         from .mcp import register_tools, register_resources, register_prompts
 
-        # Structural cast to satisfy type checkers without importing the protocol
+        # Register tools through transport wrapper for auth enforcement
         register_tools(cast(Any, self.mcp), self)
         register_resources(self.mcp, self)
         register_prompts(self.mcp)

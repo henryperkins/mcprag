@@ -1,7 +1,13 @@
-"""Unified authentication for MCP transports leveraging existing architecture.
+"""Unified authentication for MCP transports.
+
+NOTE: Not currently used by the running server. Remote HTTP endpoints enforce
+auth via `StytchAuthenticator` in `remote_server.py`, and tools are registered
+directly with FastMCP. This module is kept to support future transport parity
+work (single decorator-based auth across stdio/HTTP/SSE). Safe to remove if
+unused.
 
 This module provides consistent authentication across stdio, HTTP, and SSE transports
-while integrating with the existing Stytch authentication and Azure AD support.
+using Stytch sessions, M2M tokens, and API keys.
 """
 
 import logging
@@ -14,6 +20,9 @@ from fastapi import HTTPException, Header, Request
 from ..config import Config
 from .stytch_auth import StytchAuthenticator, M2MAuthenticator
 from .tool_security import SecurityTier, get_tool_tier, user_meets_tier_requirement
+from .thread_safe_config import ThreadSafeConfig
+from .audit_logger import AuditLogger, AuditEvent
+from .circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +37,8 @@ class UnifiedAuthHandler:
     
     It supports multiple authentication methods:
     - Stytch sessions (Consumer auth)
-    - Azure AD tokens (via Management API)
     - M2M JWT tokens (service accounts)
+    - API keys (system-managed)
     - Dev mode bypass (local development)
     """
     
@@ -42,9 +51,8 @@ class UnifiedAuthHandler:
         self.jwt_secret = Config.STYTCH_SECRET or getattr(Config, 'JWT_SECRET', 'dev-secret')
         self.jwt_algorithms = ["HS256"]
         
-        # Azure AD configuration (if needed)
-        self.azure_tenant = getattr(Config, 'AZURE_TENANT_ID', '')
-        self.azure_client_id = getattr(Config, 'AZURE_CLIENT_ID', '')
+        # API key configuration
+        self.api_keys = self._load_api_keys()
         
     async def extract_token(self, **kwargs) -> Optional[str]:
         """Extract authentication token from various sources.
@@ -91,7 +99,7 @@ class UnifiedAuthHandler:
         
         Tries multiple validation strategies in order:
         1. Dev mode bypass (if enabled)
-        2. Azure AD token (if JWT with specific claims)
+        2. API key validation
         3. Stytch session validation
         4. M2M JWT validation
         5. Generic JWT validation
@@ -108,7 +116,7 @@ class UnifiedAuthHandler:
         # Dev mode bypass
         if Config.DEV_MODE:
             if not token or token == "dev-mode":
-                return {
+                user_info = {
                     "user_id": "dev",
                     "email": "dev@localhost",
                     "tier": "admin",
@@ -116,18 +124,19 @@ class UnifiedAuthHandler:
                     "is_dev": True,
                     "session_id": "dev-session"
                 }
+                AuditLogger.auth_success("dev", "admin", "dev_mode")
+                return user_info
         
         if not token:
+            AuditLogger.auth_failure("No token provided")
             raise HTTPException(401, "Authentication required")
         
-        # Try Azure AD token validation (check JWT structure)
-        if self._is_azure_ad_token(token):
-            try:
-                user_info = await self._validate_azure_ad_token(token)
-                if user_info:
-                    return user_info
-            except Exception as e:
-                logger.debug(f"Azure AD validation failed: {e}")
+        # Try API key validation
+        if token.startswith('sk-') or token.startswith('pk-'):
+            user_info = self._validate_api_key(token)
+            if user_info:
+                AuditLogger.auth_success(user_info['user_id'], user_info['tier'], "api_key")
+                return user_info
         
         # Try Stytch session validation
         if self.stytch.enabled:
@@ -170,76 +179,53 @@ class UnifiedAuthHandler:
         except jwt.InvalidTokenError as e:
             logger.debug(f"JWT validation failed: {e}")
         
+        AuditLogger.auth_failure("Invalid token", token_prefix=token[:10] if token else None)
         raise HTTPException(401, "Invalid authentication token")
     
-    def _is_azure_ad_token(self, token: str) -> bool:
-        """Check if token appears to be an Azure AD token."""
-        if not token or '.' not in token:
-            return False
+    def _load_api_keys(self) -> Dict[str, Dict[str, Any]]:
+        """Load API keys from environment or config."""
+        api_keys = {}
         
-        try:
-            # Decode header without verification
-            header = jwt.get_unverified_header(token)
-            
-            # Azure AD tokens have specific header fields
-            return (
-                header.get("typ") == "JWT" and
-                header.get("alg") in ["RS256", "RS384", "RS512"] and
-                "kid" in header and
-                (header.get("x5t") or header.get("x5c"))
-            )
-        except Exception:
-            return False
-    
-    async def _validate_azure_ad_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """Validate Azure AD token using existing Management API integration.
+        # Load from environment variables
+        # Format: API_KEY_<NAME>=<key>:<tier>
+        import os
+        for key, value in os.environ.items():
+            if key.startswith('API_KEY_'):
+                try:
+                    api_key, tier = value.split(':')
+                    name = key.replace('API_KEY_', '').lower()
+                    api_keys[api_key] = {
+                        'name': name,
+                        'tier': tier,
+                        'mfa_verified': tier == 'admin'  # Admin keys always MFA verified
+                    }
+                except ValueError:
+                    logger.warning(f"Invalid API key format for {key}")
         
-        Note: This is a simplified validation. In production, you would:
-        1. Fetch JWKS from Azure AD
-        2. Validate signature with proper RSA keys
-        3. Check audience and issuer claims
-        """
-        try:
-            # Decode without signature verification (simplified for demo)
-            # In production, use python-jose or PyJWT with RSA validation
-            decoded = jwt.decode(
-                token,
-                options={"verify_signature": False},
-                audience=None  # Skip audience validation for now
-            )
-            
-            # Check token expiration
-            if decoded.get("exp", 0) < datetime.utcnow().timestamp():
-                return None
-            
-            # Extract user information from Azure AD claims
-            return {
-                "user_id": decoded.get("oid", decoded.get("sub", "azure_user")),
-                "email": decoded.get("email", decoded.get("upn", "user@azure")),
-                "name": decoded.get("name", "Azure User"),
-                "tier": self._determine_tier_from_azure_roles(decoded),
-                "is_azure_ad": True,
-                "mfa_verified": decoded.get("acr") == "1",  # Auth context
-                "session_id": token[:20]
+        # Add default service keys if configured
+        if hasattr(Config, 'SERVICE_API_KEY'):
+            api_keys[Config.SERVICE_API_KEY] = {
+                'name': 'service',
+                'tier': 'service',
+                'mfa_verified': True
             }
-            
-        except Exception as e:
-            logger.error(f"Azure AD token validation failed: {e}")
-            return None
+        
+        return api_keys
     
-    def _determine_tier_from_azure_roles(self, claims: Dict[str, Any]) -> str:
-        """Determine user tier from Azure AD roles/groups."""
-        roles = claims.get("roles", [])
+    def _validate_api_key(self, token: str) -> Optional[Dict[str, Any]]:
+        """Validate API key and return user info."""
+        if token not in self.api_keys:
+            return None
         
-        # Map Azure roles to MCP tiers
-        if any(role in ["Owner", "Contributor", "Search Service Contributor"] for role in roles):
-            return "admin"
-        elif any(role in ["Search Index Data Contributor"] for role in roles):
-            return "developer"
-        elif any(role in ["Search Index Data Reader", "Reader"] for role in roles):
-            return "public"
-        
-        return "public"
+        key_info = self.api_keys[token]
+        return {
+            "user_id": f"api_{key_info['name']}",
+            "email": f"{key_info['name']}@api.mcprag",
+            "tier": key_info['tier'],
+            "is_api_key": True,
+            "mfa_verified": key_info.get('mfa_verified', False),
+            "session_id": token[:20]
+        }
     
     def require_auth(self, min_tier: SecurityTier = SecurityTier.PUBLIC):
         """Decorator for protecting endpoints/tools with authentication.
@@ -262,6 +248,13 @@ class UnifiedAuthHandler:
                 # Check tier requirements
                 user_tier = SecurityTier(user.get("tier", "public"))
                 if not user_meets_tier_requirement(user_tier, min_tier):
+                    AuditLogger.log(
+                        AuditEvent.TIER_DENIED,
+                        user_id=user.get('user_id'),
+                        tier=user_tier.value,
+                        success=False,
+                        details={'required_tier': min_tier.value}
+                    )
                     raise HTTPException(
                         403,
                         f"Insufficient permissions. Required: {min_tier.value}, "
@@ -269,23 +262,19 @@ class UnifiedAuthHandler:
                     )
                 
                 # Check MFA for admin operations if required
-                if min_tier == SecurityTier.ADMIN and Config.REQUIRE_MFA_FOR_ADMIN:
+                if min_tier == SecurityTier.ADMIN and ThreadSafeConfig.get('REQUIRE_MFA_FOR_ADMIN', Config.REQUIRE_MFA_FOR_ADMIN):
                     if not user.get("mfa_verified"):
                         raise HTTPException(403, "MFA verification required for admin operations")
                 
                 # Inject user into kwargs
                 kwargs["user"] = user
                 
-                # Temporarily set ADMIN_MODE if user has admin/service tier
-                old_admin_mode = Config.ADMIN_MODE
+                # Use thread-safe config override for ADMIN_MODE
                 if user_tier in (SecurityTier.ADMIN, SecurityTier.SERVICE):
-                    Config.ADMIN_MODE = True
-                
-                try:
+                    with ThreadSafeConfig.override(ADMIN_MODE=True):
+                        return await func(*args, **kwargs)
+                else:
                     return await func(*args, **kwargs)
-                finally:
-                    # Restore original ADMIN_MODE
-                    Config.ADMIN_MODE = old_admin_mode
             
             return wrapper
         return decorator

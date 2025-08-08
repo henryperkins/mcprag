@@ -1,0 +1,30 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.error.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Error Object",
+  "description": "Stable error taxonomy with retry hints for transport-agnostic responses.",
+  "type": "object",
+  "required": ["code", "message"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "version_unsupported",
+        "feature_not_available",
+        "auth.unauthorized",
+        "auth.forbidden",
+        "rate_limited",
+        "payload_too_large",
+        "already_processed",
+        "internal"
+      ],
+      "description": "Stable error code"
+    },
+    "message": { "type": "string", "description": "Human-readable description" },
+    "details": { "description": "Arbitrary details for debugging" },
+    "retryable": { "type": "boolean", "description": "Whether the client MAY retry" },
+    "retryAfter": { "type": "integer", "minimum": 0, "description": "Retry hint in seconds" }
+  },
+  "additionalProperties": false
+}

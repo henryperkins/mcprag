@@ -1,4 +1,10 @@
-"""Enhanced MCP tool wrapper with rate limiting, validation, and monitoring."""
+"""Enhanced MCP tool wrapper with rate limiting, validation, and monitoring.
+
+STATUS: Experimental/unused. This helper is not currently referenced by the
+server’s tool registration path. It remains as a documented prototype for
+centralized rate limiting, validation, and metrics, and can be safely removed
+if you prefer a leaner runtime.
+"""
 
 import time
 import logging

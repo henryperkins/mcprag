@@ -1,0 +1,10 @@
+{"type":"handshake","protocolVersion":"MCP/1.0","sessionId":"c1","capabilities":{"protocol":{"min":"MCP/1.0","max":"MCP/1.0"},"streaming":true,"resume":true,"idempotentRetry":true,"maxConcurrent":16,"maxPayloadBytes":1048576,"keepaliveSeconds":60}}
+{"id":"1","type":"request","method":"tools/list","params":{}}
+{"id":"1","type":"response","result":{"tools":[{"name":"search_code"},{"name":"manage_index"}]}}
+{"id":"2","type":"request","method":"tool/invoke","params":{"name":"search_code","args":{"query":"test"}},"stream":true,"idempotent":true}
+{"type":"stream","streamId":"s1","seq":1,"chunkType":"data","data":{"lines":["result line 1","result line 2"]}}
+{"type":"stream","streamId":"s1","seq":2,"chunkType":"progress","data":{"pct":50}}
+{"type":"stream","streamId":"s1","seq":3,"chunkType":"data","data":{"lines":["result line 3"]}}
+{"type":"keepalive","ts":"2025-08-08T21:00:00Z","timeoutHintSec":60}
+{"type":"cancel","id":"2"}
+{"type":"stream","streamId":"s1","seq":4,"chunkType":"eos"}

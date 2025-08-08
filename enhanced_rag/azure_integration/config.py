@@ -9,8 +9,6 @@ Usage:
     config = UnifiedConfig.from_env()
     client = ClientFactory.create_client(config.azure_search)
     
-    # Legacy approach (deprecated but supported)
-    search_config = AzureSearchConfig.from_env()
 """
 
 import os

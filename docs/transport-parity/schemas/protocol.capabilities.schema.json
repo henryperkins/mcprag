@@ -1,0 +1,34 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.capabilities.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "VersionRange": {
+      "type": "object",
+      "required": ["min"],
+      "properties": {
+        "min": { "type": "string" },
+        "max": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "protocol": { "$ref": "#/$defs/VersionRange" },
+        "streaming": { "type": "boolean", "description": "Supports streamed tool responses" },
+        "resume": { "type": "boolean", "description": "Supports reconnect+resume semantics" },
+        "idempotentRetry": { "type": "boolean", "description": "Server honors idempotent request retries" },
+        "maxConcurrent": { "type": "integer", "minimum": 1, "description": "Concurrency hint per connection" },
+        "maxPayloadBytes": { "type": "integer", "minimum": 1024, "description": "Max single-envelope payload size" },
+        "keepaliveSeconds": { "type": "integer", "minimum": 1, "description": "Server keepalive interval hint" },
+        "rateLimitRps": { "type": "number", "minimum": 0, "description": "Per-connection request rate hint" }
+      },
+      "required": ["protocol", "streaming", "resume"],
+      "additionalProperties": true
+    }
+  },
+  "type": "object",
+  "allOf": [
+    { "$ref": "#/$defs/Capabilities" }
+  ]
+}

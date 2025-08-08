@@ -227,14 +227,9 @@ class StytchAuthenticator:
             }
         
         if not self.enabled:
-            # Auth disabled - return default admin user for local development
-            return {
-                "user_id": "local",
-                "email": "local@mcprag",
-                "tier": "admin",
-                "session_id": "local",
-                "mfa_verified": True
-            }
+            # When auth is not configured, do NOT silently grant admin access.
+            # Only allow bypass in explicit DEV_MODE; otherwise require proper setup.
+            raise HTTPException(503, "Authentication not configured")
         
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(401, "Missing or invalid authorization header")
@@ -267,7 +262,9 @@ class StytchAuthenticator:
             Verification result
         """
         if not self.enabled:
-            return {"verified": True, "message": "MFA not required in development mode"}
+            if getattr(Config, 'DEV_MODE', False):
+                return {"verified": True, "message": "MFA not required in development mode"}
+            raise HTTPException(503, "Authentication not configured")
         
         try:
             response = self.client.totps.authenticate(
@@ -382,13 +379,15 @@ class M2MAuthenticator:
             Service account credentials
         """
         if not self.enabled:
-            # Return mock credentials for development
-            return {
-                "client_id": f"dev_{name}",
-                "client_secret": secrets.token_urlsafe(32),
-                "allowed_tools": allowed_tools,
-                "message": "Development mode - credentials are mock"
-            }
+            # Return mock credentials only in development mode
+            if getattr(Config, 'DEV_MODE', False):
+                return {
+                    "client_id": f"dev_{name}",
+                    "client_secret": secrets.token_urlsafe(32),
+                    "allowed_tools": allowed_tools,
+                    "message": "Development mode - credentials are mock"
+                }
+            raise HTTPException(503, "M2M authentication not configured")
         
         try:
             response = self.client.m2m.clients.create(
@@ -418,13 +417,15 @@ class M2MAuthenticator:
             Access token and metadata
         """
         if not self.enabled:
-            # Return mock token for development
-            return {
-                "access_token": secrets.token_urlsafe(32),
-                "expires_in": 3600,
-                "tier": SecurityTier.SERVICE.value,
-                "message": "Development mode - token is mock"
-            }
+            # Return mock token only in development mode
+            if getattr(Config, 'DEV_MODE', False):
+                return {
+                    "access_token": secrets.token_urlsafe(32),
+                    "expires_in": 3600,
+                    "tier": SecurityTier.SERVICE.value,
+                    "message": "Development mode - token is mock"
+                }
+            raise HTTPException(503, "M2M authentication not configured")
         
         try:
             response = self.client.m2m.token.authenticate(

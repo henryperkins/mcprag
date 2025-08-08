@@ -1,0 +1,33 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.handshake.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Transport Handshake",
+  "description": "Handshake envelope exchanged on connection or request prelude to advertise protocol version and capabilities uniformly across stdio, HTTP, and SSE.",
+  "type": "object",
+  "required": ["type", "protocolVersion", "sessionId", "capabilities"],
+  "properties": {
+    "type": { "const": "handshake", "description": "Envelope discriminator for handshake messages" },
+    "protocolVersion": { "type": "string", "pattern": "^MCP/\\d+\\.\\d+$", "description": "Protocol version string, e.g., MCP/1.0" },
+    "sessionId": { "type": "string", "minLength": 1, "description": "Server-assigned session identifier" },
+    "resumeToken": { "type": "string", "description": "Opaque token to enable reconnect+resume" },
+    "capabilities": {
+      "$ref": "https://mcprag.dev/schemas/protocol.capabilities.schema.json#/$defs/Capabilities"
+    },
+    "auth": {
+      "type": "object",
+      "description": "Authentication hints for clients",
+      "properties": {
+        "issuerUrl": { "type": "string", "format": "uri" },
+        "resourceServerUrl": { "type": "string", "format": "uri" },
+        "bearerMethodsSupported": {
+          "type": "array",
+          "items": { "enum": ["header", "query"] },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

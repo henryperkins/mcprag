@@ -1,0 +1,14 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.keepalive.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Keepalive Message",
+  "description": "Periodic keepalive/heartbeat message used to maintain long-lived connections (SSE/stdio) and communicate idle timeouts.",
+  "type": "object",
+  "required": ["type", "ts"],
+  "properties": {
+    "type": { "const": "keepalive" },
+    "ts": { "type": "string", "format": "date-time", "description": "Server timestamp (RFC 3339)" },
+    "timeoutHintSec": { "type": "integer", "minimum": 1, "description": "Suggested idle timeout threshold in seconds" }
+  },
+  "additionalProperties": false
+}

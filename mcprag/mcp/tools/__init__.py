@@ -21,10 +21,19 @@ def register_tools(mcp: ModuleType, server: "MCPServer") -> None:
     with the original tools.py file. It imports and registers tools
     from all the modular submodules.
     
+    If the server has a transport_wrapper, tools are registered through it
+    for unified authentication. Otherwise, they're registered directly.
+    
     Args:
         mcp: The MCP module
         server: The MCP server instance
     """
+    # Check if we should use the transport wrapper
+    if hasattr(server, 'transport_wrapper'):
+        # Create a proxy MCP that intercepts tool registration
+        from .auth_proxy import create_auth_proxy_mcp
+        mcp = create_auth_proxy_mcp(mcp, server.transport_wrapper)
+    
     # Import all tool registration functions
     from .search import register_search_tools
     from .generation import register_generation_tools

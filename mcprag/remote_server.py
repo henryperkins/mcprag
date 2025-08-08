@@ -21,6 +21,7 @@ from .server import MCPServer
 from .auth.stytch_auth import StytchAuthenticator, M2MAuthenticator
 from .auth.tool_security import get_tool_tier, SecurityTier, user_meets_tier_requirement
 from .config import Config
+from .mcp.transport_wrapper import TransportWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -202,9 +203,18 @@ class RemoteMCPServer(MCPServer):
         @app.get("/mcp/tools")
         async def list_tools(user=Depends(self.auth.get_current_user)):
             """List available tools for the authenticated user."""
-            user_tier = SecurityTier(user.get("tier", "public"))
+            user_tier = user.get("tier", "public")
 
-            # Get all registered tools from FastMCP
+            # Use transport wrapper if available for unified tool listing
+            if hasattr(self, 'transport_wrapper'):
+                visible_tools = await self.transport_wrapper.list_tools(user_tier)
+                return {
+                    "tools": visible_tools,
+                    "count": len(visible_tools),
+                    "user_tier": user_tier
+                }
+
+            # Fallback to FastMCP listing
             all_tools = []
             try:
                 # Check if list_tools method exists (real FastMCP vs mock)
@@ -297,8 +307,29 @@ class RemoteMCPServer(MCPServer):
             except json.JSONDecodeError:
                 body = {}
 
-            # Execute tool through FastMCP
+            # Execute tool through transport wrapper if available, or directly
             try:
+                # Use transport wrapper for unified auth if available
+                if hasattr(self, 'transport_wrapper'):
+                    # Execute through transport wrapper with auth context
+                    result = await self.transport_wrapper.execute_tool(
+                        tool_name,
+                        body,
+                        user=user,
+                        auth_token=user.get('session_id'),
+                        request=request
+                    )
+                    
+                    # Audit the tool usage
+                    await self._audit_log(
+                        user_id=user.get("user_id"),
+                        action=f"tool.{tool_name}",
+                        details={"args": body, "result": "success"}
+                    )
+                    
+                    return {"result": result}
+                
+                # Fallback to direct execution with manual auth checks
                 # Temporarily set ADMIN_MODE for admin users
                 old_admin_mode = Config.ADMIN_MODE
                 if user_tier in (SecurityTier.ADMIN, SecurityTier.SERVICE):

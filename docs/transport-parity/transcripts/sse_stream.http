@@ -1,0 +1,29 @@
+GET /mcp/sse?stream=tool&name=search_code&args=%7B%22query%22%3A%22test%22%7D HTTP/1.1\r
+Host: mcprag.example.com\r
+Accept: text/event-stream\r
+Cache-Control: no-cache\r
+Connection: keep-alive\r
+Authorization: Bearer eyJ...\r
+\r
+HTTP/1.1 200 OK\r
+Content-Type: text/event-stream\r
+Cache-Control: no-cache\r
+X-Accel-Buffering: no\r
+\r
+event: handshake\r
+data: {"type":"handshake","protocolVersion":"MCP/1.0","sessionId":"c3","capabilities":{"protocol":{"min":"MCP/1.0","max":"MCP/1.0"},"streaming":true,"resume":true,"idempotentRetry":true,"maxConcurrent":16,"maxPayloadBytes":1048576}}\r
+\r
+event: data\r
+data: {"type":"stream","streamId":"s9","seq":1,"chunkType":"data","data":{"lines":["result line 1","result line 2"]}}\r
+\r
+event: keepalive\r
+data: {"type":"keepalive","ts":"2025-08-08T21:00:00Z","timeoutHintSec":30}\r
+\r
+event: data\r
+data: {"type":"stream","streamId":"s9","seq":2,"chunkType":"progress","data":{"pct":50}}\r
+\r
+event: data\r
+data: {"type":"stream","streamId":"s9","seq":3,"chunkType":"data","data":{"lines":["result line 3"]}}\r
+\r
+event: eos\r
+data: {"type":"stream","streamId":"s9","seq":4,"chunkType":"eos"}\r

@@ -1,0 +1,17 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.stream.chunk.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Stream Chunk",
+  "description": "Streaming chunk envelope used across stdio, HTTP, and SSE. Chunks MUST be delivered in-order (seq strictly increasing).",
+  "type": "object",
+  "required": ["type", "streamId", "seq", "chunkType"],
+  "properties": {
+    "type": { "const": "stream" },
+    "streamId": { "type": "string", "minLength": 1 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "chunkType": { "type": "string", "enum": ["data", "progress", "eos", "err", "keepalive"] },
+    "data": { "description": "Payload for data/progress/err frames; omitted for eos/keepalive" },
+    "offset": { "type": "integer", "minimum": 0, "description": "Optional byte offset for large streams" }
+  },
+  "additionalProperties": false
+}

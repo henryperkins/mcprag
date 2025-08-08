@@ -7,7 +7,7 @@ providers, migrating functionality from vector_embeddings.py.
 import os
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Sequence, Optional
+from typing import List, Sequence, Optional, Dict, Any
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -59,10 +59,10 @@ class IEmbeddingProvider(ABC):
     @abstractmethod
     def generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate a single embedding vector for text.
-        
+
         Args:
             text: The text to embed
-            
+
         Returns:
             Embedding vector or None on error
         """
@@ -71,10 +71,10 @@ class IEmbeddingProvider(ABC):
     @abstractmethod
     def generate_embeddings_batch(self, texts: Sequence[str]) -> List[Optional[List[float]]]:
         """Generate embeddings for multiple texts in a batch.
-        
+
         Args:
             texts: Sequence of texts to embed
-            
+
         Returns:
             List of embedding vectors (or None for failures) matching input order
         """
@@ -83,11 +83,11 @@ class IEmbeddingProvider(ABC):
     @abstractmethod
     def generate_code_embedding(self, code: str, context: str) -> Optional[List[float]]:
         """Generate embedding for code with additional context.
-        
+
         Args:
             code: The code snippet to embed
             context: Additional context (e.g., function signatures, imports)
-            
+
         Returns:
             Embedding vector or None on error
         """
@@ -96,7 +96,7 @@ class IEmbeddingProvider(ABC):
 
 class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
     """Embedding provider using Azure OpenAI or OpenAI API.
-    
+
     Supports both Azure-hosted and public OpenAI endpoints based on
     environment configuration.
     """
@@ -128,7 +128,7 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             or _get_env("AZURE_OPENAI_DEPLOYMENT_NAME")
             or "text-embedding-3-large"
         )
-        
+
         # Support for configurable dimensions (text-embedding-3-large supports 256-3072)
         self.dimensions: Optional[int] = None
         if "text-embedding-3" in self.model_name:
@@ -163,20 +163,20 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
                 return False
             self._api_key_validated = True
         return self.enabled
-    
+
     def generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate a single embedding vector for text."""
         if not text or not self._validate_api_key():
             return None
         try:
-            kwargs = {
+            kwargs: Dict[str, Any] = {
                 "input": text,
                 "model": self.model_name,
             }
             # Add dimensions parameter for text-embedding-3 models
             if self.dimensions is not None:
                 kwargs["dimensions"] = self.dimensions
-                
+
             response = self._client.embeddings.create(**kwargs)
             return response.data[0].embedding  # type: ignore[attr-defined]
         except Exception as exc:
@@ -189,14 +189,14 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
             return [None] * len(texts) if texts else []
 
         try:
-            kwargs = {
+            kwargs: Dict[str, Any] = {
                 "input": list(texts),
                 "model": self.model_name,
             }
             # Add dimensions parameter for text-embedding-3 models
             if self.dimensions is not None:
                 kwargs["dimensions"] = self.dimensions
-                
+
             response = self._client.embeddings.create(**kwargs)
             # Sort embeddings by original index to handle out-of-order responses
             embeddings = sorted(response.data, key=lambda e: e.index)

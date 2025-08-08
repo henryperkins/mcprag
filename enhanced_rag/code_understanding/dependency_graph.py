@@ -67,8 +67,8 @@ class DependencyGraphBuilder:
         Returns:
             NetworkX directed graph with dependencies
         """
-        file_path = Path(file_path)
-        if not file_path.exists():
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
             logger.warning(f"File not found: {file_path}")
             return nx.DiGraph()
 
@@ -76,28 +76,28 @@ class DependencyGraphBuilder:
         self.graph.clear()
 
         # Analyze file
-        analysis = await self.ast_analyzer.analyze_file(str(file_path))
+        analysis = await self.ast_analyzer.analyze_file(file_path)
         if not analysis or analysis['language'] == 'unknown':
             return self.graph
 
         # Add file node
-        file_node_id = self._get_node_id('file', str(file_path), '')
+        file_node_id = self._get_node_id('file', file_path, '')
         self.graph.add_node(
             file_node_id,
-            name=file_path.name,
+            name=file_path_obj.name,
             type='file',
-            file_path=str(file_path),
+            file_path=file_path,
             language=analysis['language']
         )
 
         # Add function nodes and internal dependencies
-        await self._add_function_nodes(analysis, str(file_path))
+        await self._add_function_nodes(analysis, file_path)
 
         # Add class nodes and relationships
-        await self._add_class_nodes(analysis, str(file_path))
+        await self._add_class_nodes(analysis, file_path)
 
         # Add import dependencies
-        await self._add_import_dependencies(analysis, str(file_path))
+        await self._add_import_dependencies(analysis, file_path)
 
         return self.graph
 
@@ -116,8 +116,8 @@ class DependencyGraphBuilder:
         Returns:
             NetworkX directed graph with project-wide dependencies
         """
-        project_root = Path(project_root)
-        if not project_root.exists():
+        project_root_path = Path(project_root)
+        if not project_root_path.exists():
             logger.warning(f"Project root not found: {project_root}")
             return nx.DiGraph()
 
@@ -131,7 +131,7 @@ class DependencyGraphBuilder:
         # Find all matching files
         files_to_analyze = []
         for pattern in file_patterns:
-            files_to_analyze.extend(project_root.rglob(pattern))
+            files_to_analyze.extend(project_root_path.rglob(pattern))
 
         logger.info(f"Analyzing {len(files_to_analyze)} files in {project_root}")
 

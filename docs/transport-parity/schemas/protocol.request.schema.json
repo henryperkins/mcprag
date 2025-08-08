@@ -1,0 +1,19 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Request Envelope",
+  "description": "Transport-agnostic request envelope used for stdio, HTTP, and SSE.",
+  "type": "object",
+  "required": ["id", "type", "method", "params"],
+  "properties": {
+    "id": { "type": ["string", "integer"] },
+    "type": { "const": "request" },
+    "method": { "type": "string", "minLength": 1 },
+    "params": { "type": "object" },
+    "stream": { "type": "boolean", "description": "Request streaming response if true" },
+    "idempotent": { "type": "boolean", "description": "Marks request as idempotent for safe retries" },
+    "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+    "traceId": { "type": "string", "description": "Tracing correlation identifier" }
+  },
+  "additionalProperties": false
+}

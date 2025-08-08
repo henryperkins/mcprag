@@ -1,0 +1,29 @@
+{
+  "$id": "https://mcprag.dev/schemas/protocol.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Response Envelope",
+  "description": "Transport-agnostic response envelope; exactly one of result or error MUST be present.",
+  "type": "object",
+  "oneOf": [
+    {
+      "required": ["id", "type", "result"],
+      "properties": {
+        "id": { "type": ["string", "integer"] },
+        "type": { "const": "response" },
+        "result": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "required": ["id", "type", "error"],
+      "properties": {
+        "id": { "type": ["string", "integer"] },
+        "type": { "const": "response" },
+        "error": {
+          "$ref": "https://mcprag.dev/schemas/protocol.error.schema.json"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
