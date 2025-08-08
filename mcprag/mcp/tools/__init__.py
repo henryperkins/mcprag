@@ -33,6 +33,7 @@ def register_tools(mcp: ModuleType, server: "MCPServer") -> None:
     from .cache import register_cache_tools
     from .admin import register_admin_tools
     from .azure_management import register_azure_tools
+    from .service_management import register_service_management_tools
     
     # Register all tool categories
     register_search_tools(mcp, server)
@@ -42,6 +43,7 @@ def register_tools(mcp: ModuleType, server: "MCPServer") -> None:
     register_cache_tools(mcp, server)
     register_admin_tools(mcp, server)
     register_azure_tools(mcp, server)
+    register_service_management_tools(server)
 
 
 # Export for backward compatibility

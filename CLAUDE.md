@@ -108,32 +108,135 @@ MCP_DEBUG_TIMINGS=false  # Enable timing logs
 
 ### Search Tools
 - `search_code`: Enhanced code search with RAG pipeline
+  - Parameters: query, intent, language, repository, max_results (10), include_dependencies, skip, orderby, highlight_code, bm25_only, exact_terms, disable_cache, include_timings, dependency_mode ("auto"), detail_level ("full"/"compact"/"ultra"), snippet_lines (0)
+  - detail_level controls output format: "full" (rich objects), "compact" (minimal dict), "ultra" (single-line strings)
+  - snippet_lines: If >0, applies smart truncation using highlights or first meaningful line
 - `search_code_raw`: Raw search results without formatting
+  - Simplified wrapper around search_code returning unformatted results
 - `search_microsoft_docs`: Microsoft Learn documentation search
+  - Parameters: query, max_results (10)
 
 ### Generation Tools
 - `generate_code`: Code generation using RAG context
-- `analyze_context`: File context analysis
+  - Parameters: description, language ("python"), context_file, style_guide, include_tests, workspace_root
+  - Requires: code_gen component
 
-### Analysis Tools
-- `explain_ranking`: Explain why results are ranked
-- `preview_query_processing`: Show query enhancement
+### Analysis Tools  
+- `analyze_context`: File context analysis with dependency tracking
+  - Parameters: file_path, include_dependencies (true), depth (2), include_imports (true), include_git_history (false)
+  - Requires: context_aware component
+- `explain_ranking`: Explain ranking factors for search results
+  - Parameters: query, mode ("enhanced"), max_results (10), intent, language, repository
+- `preview_query_processing`: Show intent classification and query enhancements
+  - Parameters: query, intent, language, repository
 
 ### Admin Tools (require MCP_ADMIN_MODE=true)
-- `index_rebuild`: Rebuild search indexer
-- `github_index_repo`: Index GitHub repository
+- `index_rebuild`: Rebuild search indexer (requires confirmation)
+  - Parameters: repository, confirm (false)
+  - Triggers full crawl and may overwrite existing data
+- `github_index_repo`: Index GitHub repository (requires confirmation)
+  - Parameters: repo, branch, mode ("full"), confirm (false)
 - `manage_index`: Index lifecycle management
-- `manage_documents`: Document operations
+  - Actions: create, ensure, recreate, delete, optimize, validate, list
+  - Parameters: action, index_definition, index_name, update_if_different (true), backup_documents (false)
+- `manage_documents`: Document operations in Azure Search
+  - Actions: upload, delete, cleanup, count, verify
+  - Parameters: action, index_name, documents, document_keys, filter_query, batch_size (1000), merge (false), days_old, date_field, dry_run (false)
 - `manage_indexer`: Indexer operations
+  - Actions: list, status, run, reset, create, delete
+  - Parameters: action, indexer_name, datasource_name, target_index, schedule, parameters, wait (false)
+  - Note: Status responses are automatically truncated to prevent token limit issues
+
+### Azure Management Tools (require MCP_ADMIN_MODE=true)
+- `create_datasource`: Create or update Azure Search data source
+  - Parameters: name, datasource_type, connection_info, container, credentials, description, refresh, test_connection (true), update_if_exists (true)
+- `create_skillset`: Create or update cognitive skillset
+  - Parameters: name, skills, cognitive_services_key, description, knowledge_store, encryption_key, update_if_exists (true)
+- `index_status`: Get current index status (no admin required)
+  - Returns: index_name, fields count, documents count, storage_size_mb, vector_search enabled, semantic_search enabled
+- `validate_index_schema`: Validate index schema against expected
+  - Parameters: expected_schema (optional)
+- `index_repository`: Index local repository via CLI automation
+  - Parameters: repo_path ("."), repo_name ("mcprag"), patterns (optional file patterns)
+- `index_changed_files`: Index specific changed files
+  - Parameters: files (required list), repo_name ("mcprag")
+- `backup_index_schema`: Backup current index schema to file
+  - Parameters: output_file ("schema_backup.json")
+- `clear_repository_documents`: Clear documents from specific repository
+  - Parameters: repository_filter (required, e.g., "repository eq 'old-repo'")
+- `rebuild_index`: Complete index drop and rebuild (requires confirmation)
+  - Parameters: confirm (false)
+  - ⚠️ CAUTION: Deletes all data in the index
+- `health_check`: Check health of search components (no admin required)
+  - Returns component availability status
 
 ### Cache Tools
-- `cache_stats`: Cache statistics
-- `cache_clear`: Clear cache
+- `cache_stats`: Get cache statistics
+  - Returns cache hit rates, sizes, and entry counts
+- `cache_clear`: Clear cache entries
+  - Parameters: scope ("all"/"search"/"embeddings"/"results"), pattern (optional)
+  - Pattern parameter used when clearing specific cache keys
 
 ### Feedback Tools
-- `submit_feedback`: User feedback submission
-- `track_search_click`: Click tracking
-- `track_search_outcome`: Outcome tracking
+- `submit_feedback`: Submit user feedback
+  - Parameters: target_id, kind ("positive"/"negative"/"neutral"/"bug"/"feature"/"other"), rating (1-5), notes, context
+- `track_search_click`: Track user click on search result
+  - Parameters: query_id, doc_id, rank, context
+- `track_search_outcome`: Track search outcome
+  - Parameters: query_id, outcome, score, context
+
+### Service Management Tools (require Azure CLI authentication)
+- `configure_semantic_search`: Enable/disable semantic search at service level
+  - Parameters: action ("status"/"enable"/"disable"), plan ("free"/"standard"), resource_group, search_service_name
+  - Requires: Azure CLI authenticated with Owner/Contributor permissions
+  - Note: Free plan allows up to 1000 queries/month, Standard is pay-per-query
+- `get_service_info`: Get detailed Azure Search service information
+  - Parameters: resource_group, search_service_name
+  - Returns: Service tier, capacity, features, semantic search status
+
+## Tool Component Dependencies
+
+The MCP tools require specific server components to be initialized:
+
+### Component Requirements by Tool
+| Tool | Required Component | Fallback Behavior |
+|------|-------------------|-------------------|
+| search_code | enhanced_search | Returns error if unavailable |
+| search_code_raw | enhanced_search | Returns error if unavailable |
+| search_microsoft_docs | None (standalone) | Always available |
+| generate_code | code_gen | Returns error if unavailable |
+| analyze_context | context_aware | Returns error if unavailable |
+| explain_ranking | enhanced_search | Returns error if unavailable |
+| preview_query_processing | intent_classifier, query_rewriter | Partial results if components missing |
+| index_rebuild | indexer_automation | Returns error if unavailable |
+| github_index_repo | remote_indexer | Returns error if unavailable |
+| manage_index | index_automation, rest_ops | Returns error if unavailable |
+| manage_documents | data_automation, rest_ops | Returns error if unavailable |
+| manage_indexer | rest_ops, indexer_automation | Returns error if unavailable |
+| create_datasource | rest_ops | Returns error if unavailable |
+| create_skillset | rest_ops | Returns error if unavailable |
+| index_status | index_automation | Returns error if unavailable |
+| validate_index_schema | index_automation | Returns error if unavailable |
+| health_check | None (checks all) | Always available |
+| cache_stats | cache_manager | Returns error if unavailable |
+| cache_clear | cache_manager | Returns error if unavailable |
+| submit_feedback | feedback_collector | Returns error if unavailable |
+| track_search_click | enhanced_search or feedback_collector | Tries both backends |
+| track_search_outcome | enhanced_search or feedback_collector | Tries both backends |
+
+### Admin Mode Requirements
+Tools requiring `MCP_ADMIN_MODE=true` environment variable:
+- All tools under "Admin Tools" category
+- All tools under "Azure Management Tools" category except `health_check` and `index_status`
+- Document modification operations in `manage_documents` (upload, delete, cleanup)
+- Index modification operations in `manage_index` (create, recreate, delete)
+- Indexer modification operations in `manage_indexer` (run, reset, create, delete)
+
+### Confirmation Requirements
+Tools requiring explicit `confirm=true` parameter:
+- `index_rebuild` - Full indexer rebuild
+- `github_index_repo` - GitHub repository indexing
+- `rebuild_index` - Complete index drop and rebuild
 
 ## Coding standards
 - Language: Python 3.12+ with type hints

@@ -172,7 +172,8 @@
       }
     ]
   },
-  "semantic": {
+  "semanticSearch": {
+    "defaultConfiguration": "semantic-config",
     "configurations": [
       {
         "name": "semantic-config",

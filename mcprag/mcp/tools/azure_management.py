@@ -645,7 +645,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 "documents": stats.get("documentCount", 0),
                 "storage_size_mb": round(stats.get("storageSize", 0) / (1024 * 1024), 2),
                 "vector_search": bool(index_def.get("vectorSearch")),
-                "semantic_search": bool(index_def.get("semanticSearch"))
+                "semantic_search": bool(index_def.get("semanticSearch") or index_def.get("semantic"))
             })
 
         except Exception as e:

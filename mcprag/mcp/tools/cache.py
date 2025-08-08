@@ -38,10 +38,7 @@ def register_cache_tools(mcp, server: "MCPServer") -> None:
         """Clear cache."""
         # Validation
         if not validate_cache_scope(scope):
-            return err(f"Invalid scope: {scope}. Must be 'all' or 'pattern'")
-
-        if scope == "pattern" and not pattern:
-            return err("Pattern required when scope is 'pattern'")
+            return err(f"Invalid scope: {scope}. Must be one of: 'all', 'search', 'embeddings', 'results'")
 
         if not check_component(server.cache_manager, "Cache manager"):
             return err("Cache manager not available")
@@ -53,14 +50,23 @@ def register_cache_tools(mcp, server: "MCPServer") -> None:
         try:
             if scope == "all":
                 await server.cache_manager.clear()
-            elif pattern:
-                # Check if clear_pattern method exists
-                if hasattr(server.cache_manager, "clear_pattern"):
-                    # Use getattr to safely call the method
+            else:
+                # For specific scopes, use clear_pattern if available
+                # The scope itself can be used as a pattern prefix
+                if hasattr(server.cache_manager, "clear_scope"):
+                    clear_method = getattr(server.cache_manager, "clear_scope")
+                    await clear_method(scope)
+                elif hasattr(server.cache_manager, "clear_pattern"):
+                    # Use pattern-based clearing with scope as prefix
                     clear_method = getattr(server.cache_manager, "clear_pattern")
-                    await clear_method(pattern)
+                    if pattern:
+                        # Combine scope and pattern
+                        await clear_method(f"{scope}:{pattern}")
+                    else:
+                        # Clear all entries in the scope
+                        await clear_method(f"{scope}:*")
                 else:
-                    return err("Cache pattern clearing not supported")
+                    return err(f"Scope-based cache clearing not supported for scope: {scope}")
 
             stats = await server.cache_manager.get_stats()
             return ok({"cleared": True, "cache_stats": stats})
