@@ -11,8 +11,8 @@ export interface Message {
 export interface ToolCall {
   id: string
   name: string
-  arguments: any
-  result?: any
+  arguments: unknown
+  result?: unknown
 }
 
 export interface FileNode {

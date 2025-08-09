@@ -1,4 +1,5 @@
 import { useToolCalls } from '../store/toolCalls.state'
+import '../styles/ribbon.css'
 
 export function RunningRibbon() {
   const ribbonCount = useToolCalls((state) => state.ribbonCount)

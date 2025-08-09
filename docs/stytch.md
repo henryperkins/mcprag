@@ -99,6 +99,41 @@ MCP supports two main token formats:
 
 Each of these is appropriate for different levels of complexity or scaling requirements.
 
+---
+
+## mcprag Integration Quickstart
+
+This repository’s remote server exposes practical endpoints that map the concepts above to a working flow.
+
+- Dev mode (local only): set `MCP_DEV_MODE=true` to bypass auth for testing. Do not use `DEV_MODE`; the server reads `MCP_DEV_MODE` via `Config.DEV_MODE`.
+- Core endpoints:
+  - `POST /auth/login` — send magic link (Stytch)
+  - `GET /auth/callback?token=…` — complete login and mint session token
+  - `GET /auth/me` — return current session (Authorization required)
+  - `POST /auth/logout` — invalidate current session (Authorization required)
+  - `POST /auth/verify-mfa` — verify TOTP for admin tier
+  - `POST /auth/m2m/token` — service account token (Stytch or dev mock)
+
+Quick checks (dev mode)
+```bash
+export MCP_DEV_MODE=true
+python -m mcprag.remote_server
+
+curl -s http://localhost:8001/health | jq .dev_mode   # true
+curl -s http://localhost:8001/auth/me -H 'Authorization: Bearer dev' | jq
+```
+
+Connect from Claude Code (SSE)
+```bash
+claude mcp add --transport sse mcprag http://localhost:8001/mcp/sse \
+  --header "Authorization: Bearer dev"
+```
+
+Production flow
+- Unset `MCP_DEV_MODE` and configure `STYTCH_PROJECT_ID`, `STYTCH_SECRET`, `STYTCH_ENV`.
+- Call `POST /auth/login` → user clicks email link → server handles `GET /auth/callback?token=…`.
+- Use the returned `token` as `Authorization: Bearer <token>` when connecting.
+
 ## **Example: how an end-to-end OAuth flow works with MCP**
 
 ![Example OAuth 2.1 MCP authentication and authorization flow.](https://cdn.sanity.io/images/3jwyzebk/production/f2d9e9e0ee84fd22b5e42cac4edee2c5e9e02384-1600x1059.png?auto=format&fit=max&w=3840&q=75)

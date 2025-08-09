@@ -43,6 +43,9 @@ class AuthProxyMCP:
             sig = inspect.signature(func)
             parameters = {}
             for param_name, param in sig.parameters.items():
+                # Skip transport/framework context parameter from public schema
+                if param_name == 'ctx':
+                    continue
                 param_type = "string"  # Default type
                 if param.annotation != inspect.Parameter.empty:
                     # Try to infer type from annotation

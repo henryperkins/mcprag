@@ -1,0 +1,81 @@
+@layer components {
+  /* File Tree Container */
+  .file-tree-container {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    height: 100%;
+    min-width: 0;
+  }
+
+  .file-tree-header {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+    font-weight: var(--weight-semibold);
+    color: var(--color-primary);
+    font-size: var(--font-sm);
+  }
+
+  .file-tree-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-2) 0;
+  }
+
+  /* File Tree Item */
+  .file-tree-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition-fast);
+    font-size: var(--font-sm);
+  }
+
+  .file-tree-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .file-tree-item.selected {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  /* File Tree Icons */
+  .file-tree-icon {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--font-xs);
+    width: 1rem;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* File and Folder Names */
+  .file-tree-folder {
+    color: var(--color-info);
+    font-weight: var(--weight-medium);
+  }
+
+  .file-tree-file {
+    color: var(--text-secondary);
+  }
+
+  /* Nested Structure */
+  .file-tree-children {
+    position: relative;
+  }
+
+  .file-tree-children::before {
+    content: '';
+    position: absolute;
+    left: 1.5rem;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border-subtle);
+    opacity: 0.5;
+  }
+}

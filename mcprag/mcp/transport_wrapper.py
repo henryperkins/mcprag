@@ -90,6 +90,16 @@ class TransportWrapper:
             kwargs.pop("auth_token", None)
             kwargs.pop("request", None)
 
+            # If the original handler expects a FastMCP Context (commonly named 'ctx'),
+            # inject a placeholder when not provided so HTTP/SSE paths don't fail.
+            try:
+                import inspect
+                sig = inspect.signature(handler)
+                if 'ctx' in sig.parameters and 'ctx' not in kwargs:
+                    kwargs['ctx'] = None  # Tools that need it should guard for None
+            except Exception:
+                pass
+
             if iscoroutinefunction(handler):
                 return await handler(**kwargs)  # type: ignore[arg-type]
             # Run sync handler in thread to avoid blocking event loop

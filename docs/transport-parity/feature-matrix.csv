@@ -24,3 +24,4 @@ Observability (logs/metrics/traces),"Same fields","Same fields","Same fields",Ye
 SSE timeouts,"N/A","Standard timeouts","Long read/send timeouts (24h)",Yes,"proxy_read/send_timeout 86400s; X-Accel-Buffering no","docs/MCP_TRANSPORT_PARITY_GUIDE_V2.md:537-544"
 Discovery endpoints (OAuth 2.1),"N/A",".well-known endpoints","Proxied to server",Yes,"RFC 9728 protected resource + AS metadata","docs/MCP_TRANSPORT_PARITY_GUIDE_V2.md:95-129"
 Tool tier visibility,"list_tools filters by tier","list_tools filters by tier","list_tools filters by tier",Yes,"TransportWrapper.list_tools enforces tier visibility","docs/MCP_TRANSPORT_PARITY_GUIDE.md:188-205"
+Framework ctx parameter,"FastMCP Context available","Hidden; wrapper injects placeholder","Hidden; wrapper injects placeholder",Yes,"auth_proxy strips ctx from schema; wrapper provides None when absent","mcprag/mcp/tools/auth_proxy.py; mcprag/mcp/transport_wrapper.py"

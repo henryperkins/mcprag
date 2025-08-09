@@ -6,6 +6,7 @@ import {
   Terminal, User, Bot, CheckCircle, XCircle, AlertTriangle, 
   Info, Download, Clock, DollarSign
 } from 'lucide-react'
+import '../styles/transcript.css'
 
 export function Transcript() {
   const { messages } = useMessages()
@@ -30,15 +31,14 @@ export function Transcript() {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#0b0f14] overflow-hidden">
+    <div className="transcript">
       {/* Export button */}
-      <div className="flex justify-end p-2 border-b border-white/10">
+      <div className="transcript-header">
         <button
           onClick={exportTranscript}
-          className="flex items-center gap-2 px-3 py-1 text-xs text-white/60 
-                   hover:text-white/80 hover:bg-white/5 rounded transition-colors"
+          className="transcript-export-button"
         >
-          <Download className="w-3 h-3" />
+          <Download className="transcript-export-icon" />
           Export Transcript
         </button>
       </div>
@@ -46,14 +46,14 @@ export function Transcript() {
       {/* Messages */}
       <div 
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+        className="transcript-messages"
       >
         {messages.length === 0 && (
-          <div className="flex items-center justify-center h-full text-white/40">
-            <div className="text-center">
-              <Terminal className="w-12 h-12 mx-auto mb-4 text-white/20" />
-              <p className="text-sm">Ready to start a conversation</p>
-              <p className="text-xs mt-2">Type a prompt below to begin</p>
+          <div className="transcript-empty">
+            <div className="transcript-empty-content">
+              <Terminal className="transcript-empty-icon" />
+              <p className="transcript-empty-title">Ready to start a conversation</p>
+              <p className="transcript-empty-subtitle">Type a prompt below to begin</p>
             </div>
           </div>
         )}
@@ -91,27 +91,35 @@ function SystemMessage({ message }: { message: Extract<SDKMessage, { type: 'syst
   if (message.subtype !== 'init') return null
 
   return (
-    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 text-xs">
-      <div className="flex items-center gap-2 mb-2">
-        <Info className="w-4 h-4 text-blue-400" />
-        <span className="font-semibold text-blue-400">Session Initialized</span>
+    <div className="message-system">
+      <div className="message-system-header">
+        <Info className="message-system-icon" />
+        <span className="message-system-title">Session Initialized</span>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-white/60">
-        <div>Model: <span className="text-white/80">{message.model}</span></div>
-        <div>CWD: <span className="text-white/80 font-mono">{message.cwd}</span></div>
-        <div>Mode: <span className="text-white/80">{message.permissionMode}</span></div>
+      <div className="message-system-grid">
+        <div className="message-system-item">
+          Model: <span className="message-system-value">{message.model}</span>
+        </div>
+        <div className="message-system-item">
+          CWD: <span className="message-system-value message-system-mono">{message.cwd}</span>
+        </div>
+        <div className="message-system-item">
+          Mode: <span className="message-system-value">{message.permissionMode}</span>
+        </div>
         {message.session_id && (
-          <div>Session: <span className="text-white/80 font-mono">{message.session_id.slice(0, 8)}</span></div>
+          <div className="message-system-item">
+            Session: <span className="message-system-value message-system-mono">{message.session_id.slice(0, 8)}</span>
+          </div>
         )}
         {message.tools && message.tools.length > 0 && (
-          <div className="col-span-2">
-            Tools: <span className="text-white/80">{message.tools.length} available</span>
+          <div className="message-system-item message-system-full">
+            Tools: <span className="message-system-value">{message.tools.length} available</span>
           </div>
         )}
         {message.mcp_servers && message.mcp_servers.length > 0 && (
-          <div className="col-span-2">
+          <div className="message-system-item message-system-full">
             MCP Servers: {message.mcp_servers.map(s => (
-              <span key={s.name} className="ml-2 px-2 py-0.5 bg-white/5 rounded text-white/60">
+              <span key={s.name} className="message-system-badge">
                 {s.name}
               </span>
             ))}
@@ -130,13 +138,13 @@ function UserMessage({ message }: { message: Extract<SDKMessage, { type: 'user' 
       ).join('')
 
   return (
-    <div className="flex gap-3">
-      <div className="flex-shrink-0 w-8 h-8 bg-white/10 rounded-full flex items-center justify-center">
-        <User className="w-4 h-4 text-white/60" />
+    <div className="message">
+      <div className="message-avatar message-avatar-user">
+        <User className="message-avatar-icon message-avatar-icon-user" />
       </div>
-      <div className="flex-1">
-        <div className="text-xs text-white/40 mb-1">You</div>
-        <div className="text-white/90 text-sm whitespace-pre-wrap">
+      <div className="message-content">
+        <div className="message-label">You</div>
+        <div className="message-text">
           {content}
         </div>
       </div>
@@ -147,7 +155,7 @@ function UserMessage({ message }: { message: Extract<SDKMessage, { type: 'user' 
 function AssistantMessage({ message }: { message: Extract<SDKMessage, { type: 'assistant' }> }) {
   const renderContent = () => {
     if (typeof message.content === 'string') {
-      return <div className="text-white/90 text-sm whitespace-pre-wrap">{message.content}</div>
+      return <div className="message-text">{message.content}</div>
     }
 
     return (
@@ -155,21 +163,21 @@ function AssistantMessage({ message }: { message: Extract<SDKMessage, { type: 'a
         {message.content.map((block: ContentBlock, idx: number) => {
           if (block.type === 'text') {
             return (
-              <div key={idx} className="text-white/90 text-sm whitespace-pre-wrap">
+              <div key={idx} className="message-text">
                 {block.text}
               </div>
             )
           }
           if (block.type === 'tool_use') {
             return (
-              <div key={idx} className="bg-white/5 border border-white/10 rounded p-2 text-xs">
-                <div className="flex items-center gap-2 text-emerald-400">
-                  <Terminal className="w-3 h-3" />
+              <div key={idx} className="message-tool-use">
+                <div className="message-tool-use-header">
+                  <Terminal className="message-tool-use-icon" />
                   <span>Using tool: {block.name}</span>
                 </div>
-                {block.input && (
-                  <pre className="mt-2 text-white/60 overflow-x-auto">
-                    {JSON.stringify(block.input, null, 2)}
+                {block.input !== undefined && block.input !== null && (
+                  <pre className="message-tool-use-input">
+                    {String(JSON.stringify(block.input, null, 2))}
                   </pre>
                 )}
               </div>
@@ -182,12 +190,12 @@ function AssistantMessage({ message }: { message: Extract<SDKMessage, { type: 'a
   }
 
   return (
-    <div className="flex gap-3">
-      <div className="flex-shrink-0 w-8 h-8 bg-emerald-500/20 rounded-full flex items-center justify-center">
-        <Bot className="w-4 h-4 text-emerald-400" />
+    <div className="message">
+      <div className="message-avatar message-avatar-assistant">
+        <Bot className="message-avatar-icon message-avatar-icon-assistant" />
       </div>
-      <div className="flex-1">
-        <div className="text-xs text-white/40 mb-1">Claude</div>
+      <div className="message-content">
+        <div className="message-label">Claude</div>
         {renderContent()}
       </div>
     </div>
@@ -201,9 +209,9 @@ function ResultMessage({ message }: { message: Extract<SDKMessage, { type: 'resu
   const isInterrupted = message.subtype === 'interrupted'
 
   const getIcon = () => {
-    if (isSuccess) return <CheckCircle className="w-4 h-4 text-emerald-400" />
-    if (isInterrupted) return <AlertTriangle className="w-4 h-4 text-yellow-400" />
-    return <XCircle className="w-4 h-4 text-red-400" />
+    if (isSuccess) return <CheckCircle className="message-result-icon message-result-icon-success" />
+    if (isInterrupted) return <AlertTriangle className="message-result-icon message-result-icon-warning" />
+    return <XCircle className="message-result-icon message-result-icon-error" />
   }
 
   const getTitle = () => {
@@ -214,66 +222,66 @@ function ResultMessage({ message }: { message: Extract<SDKMessage, { type: 'resu
     return 'Completed'
   }
 
-  const getBorderColor = () => {
-    if (isSuccess) return 'border-emerald-500/30'
-    if (isInterrupted) return 'border-yellow-500/30'
-    return 'border-red-500/30'
+  const getResultClass = () => {
+    if (isSuccess) return 'message-result message-result-success'
+    if (isInterrupted) return 'message-result message-result-warning'
+    return 'message-result message-result-error'
   }
 
   return (
-    <div className={`bg-white/5 border ${getBorderColor()} rounded-lg p-4 text-xs`}>
-      <div className="flex items-center gap-2 mb-3">
+    <div className={getResultClass()}>
+      <div className="message-result-header">
         {getIcon()}
-        <span className="font-semibold text-white/80">{getTitle()}</span>
+        <span className="message-result-title">{getTitle()}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 text-white/60">
+      <div className="message-result-stats">
         {message.num_turns !== undefined && (
-          <div className="flex items-center gap-1">
-            <Terminal className="w-3 h-3" />
-            Turns: <span className="text-white/80">{message.num_turns}</span>
+          <div className="message-result-stat">
+            <Terminal className="message-result-stat-icon" />
+            Turns: <span className="message-result-stat-value">{message.num_turns}</span>
           </div>
         )}
         {message.duration_ms !== undefined && (
-          <div className="flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            Time: <span className="text-white/80">{message.duration_ms}ms</span>
+          <div className="message-result-stat">
+            <Clock className="message-result-stat-icon" />
+            Time: <span className="message-result-stat-value">{message.duration_ms}ms</span>
           </div>
         )}
         {message.duration_api_ms !== undefined && (
-          <div className="flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            API: <span className="text-white/80">{message.duration_api_ms}ms</span>
+          <div className="message-result-stat">
+            <Clock className="message-result-stat-icon" />
+            API: <span className="message-result-stat-value">{message.duration_api_ms}ms</span>
           </div>
         )}
         {message.total_cost_usd !== undefined && (
-          <div className="flex items-center gap-1">
-            <DollarSign className="w-3 h-3" />
-            Cost: <span className="text-emerald-400">${message.total_cost_usd.toFixed(4)}</span>
+          <div className="message-result-stat">
+            <DollarSign className="message-result-stat-icon" />
+            Cost: <span className="message-result-stat-cost">${message.total_cost_usd.toFixed(4)}</span>
           </div>
         )}
       </div>
 
       {isMaxTurns && (
-        <div className="mt-3 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded">
-          <p className="text-yellow-400 text-xs">
+        <div className="message-result-alert message-result-alert-warning">
+          <p>
             Reached the maximum number of turns. Consider increasing max turns in settings.
           </p>
         </div>
       )}
 
       {message.error && (
-        <div className="mt-3 p-2 bg-red-500/10 border border-red-500/30 rounded">
-          <p className="text-red-400 text-xs font-mono">{message.error}</p>
+        <div className="message-result-alert message-result-alert-error">
+          <p>{message.error}</p>
         </div>
       )}
 
       {message.stderr && (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-white/60 hover:text-white/80">
+        <details className="message-result-details">
+          <summary className="message-result-details-summary">
             View stderr output
           </summary>
-          <pre className="mt-2 p-2 bg-black/30 rounded text-xs text-white/60 overflow-x-auto">
+          <pre className="message-result-details-content">
             {message.stderr}
           </pre>
         </details>
@@ -286,20 +294,20 @@ function ToolResultMessage({ message }: { message: Extract<SDKMessage, { type: '
   const isError = message.is_error
 
   return (
-    <div className={`ml-8 bg-white/5 border ${isError ? 'border-red-500/30' : 'border-white/10'} rounded p-2 text-xs`}>
-      <div className="flex items-center gap-2 mb-1">
+    <div className={isError ? 'message-tool-result message-tool-result-error' : 'message-tool-result message-tool-result-success'}>
+      <div className="message-tool-result-header">
         {isError ? (
-          <XCircle className="w-3 h-3 text-red-400" />
+          <XCircle className="message-tool-result-icon message-tool-result-icon-error" />
         ) : (
-          <CheckCircle className="w-3 h-3 text-emerald-400" />
+          <CheckCircle className="message-tool-result-icon message-tool-result-icon-success" />
         )}
-        <span className="text-white/60">Tool Result</span>
+        <span className="message-tool-result-label">Tool Result</span>
       </div>
-      {message.content && (
-        <pre className="text-white/60 overflow-x-auto text-xs">
+      {message.content !== undefined && message.content !== null && (
+        <pre className="message-tool-result-content">
           {typeof message.content === 'string' 
             ? message.content 
-            : JSON.stringify(message.content, null, 2)}
+            : String(JSON.stringify(message.content, null, 2))}
         </pre>
       )}
     </div>
@@ -308,7 +316,7 @@ function ToolResultMessage({ message }: { message: Extract<SDKMessage, { type: '
 
 function ChunkMessage({ message }: { message: Extract<SDKMessage, { type: 'chunk' }> }) {
   return (
-    <div className="text-white/80 text-sm whitespace-pre-wrap font-mono">
+    <div className="message-chunk">
       {message.data}
     </div>
   )

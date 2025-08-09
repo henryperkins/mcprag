@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useId } from 'react'
+import { usePerformanceMonitor } from '../store/unified.adapter'
 
 export interface SlashCommand {
   command: string
@@ -37,6 +38,10 @@ export function SlashMenu({
   onSelectedIndexChange
 }: SlashMenuProps) {
   const [filteredCommands, setFilteredCommands] = useState(commands)
+  const listboxRef = useRef<HTMLDivElement>(null)
+  const optionRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  const listboxId = useId()
+  const { markInteraction } = usePerformanceMonitor()
 
   useEffect(() => {
     if (filter) {
@@ -45,51 +50,164 @@ export function SlashMenu({
         cmd.description.toLowerCase().includes(filter.toLowerCase())
       )
       setFilteredCommands(filtered)
+      // Reset selection when filter changes
+      if (filtered.length > 0 && selectedIndex >= filtered.length) {
+        onSelectedIndexChange(0)
+      }
     } else {
       setFilteredCommands(commands)
     }
-  }, [filter])
+  }, [filter, selectedIndex, onSelectedIndexChange])
 
+  // Keyboard navigation
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isOpen) return
+    if (!isOpen) return
 
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        onSelectedIndexChange(Math.min(selectedIndex + 1, filteredCommands.length - 1))
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        onSelectedIndexChange(Math.max(selectedIndex - 1, 0))
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        if (filteredCommands[selectedIndex]) {
-          onSelect(filteredCommands[selectedIndex].command)
-        }
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
+    const handleKeyDown = (e: KeyboardEvent) => {
+      let handled = false
+      
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault()
+          onSelectedIndexChange(Math.min(selectedIndex + 1, filteredCommands.length - 1))
+          handled = true
+          break
+          
+        case 'ArrowUp':
+          e.preventDefault()
+          onSelectedIndexChange(Math.max(selectedIndex - 1, 0))
+          handled = true
+          break
+          
+        case 'Home':
+          e.preventDefault()
+          onSelectedIndexChange(0)
+          handled = true
+          break
+          
+        case 'End':
+          e.preventDefault()
+          onSelectedIndexChange(filteredCommands.length - 1)
+          handled = true
+          break
+          
+        case 'Enter':
+          e.preventDefault()
+          if (filteredCommands[selectedIndex]) {
+            onSelect(filteredCommands[selectedIndex].command)
+            markInteraction('slashmenu:select', { command: filteredCommands[selectedIndex].command })
+          }
+          handled = true
+          break
+          
+        case 'Escape':
+          e.preventDefault()
+          onClose()
+          markInteraction('slashmenu:close')
+          handled = true
+          break
+      }
+      
+      if (handled) {
+        e.stopPropagation()
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, selectedIndex, filteredCommands, onSelect, onClose, onSelectedIndexChange])
+    // Use capture phase to ensure we handle events first
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [isOpen, selectedIndex, filteredCommands, onSelect, onClose, onSelectedIndexChange, markInteraction])
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (isOpen && selectedIndex >= 0) {
+      const selectedOption = optionRefs.current.get(selectedIndex)
+      if (selectedOption) {
+        selectedOption.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }
+    }
+  }, [selectedIndex, isOpen])
+
+  // Announce changes to screen readers
+  useEffect(() => {
+    if (isOpen && filteredCommands[selectedIndex]) {
+      const cmd = filteredCommands[selectedIndex]
+      const announcement = `${cmd.command}. ${cmd.description}`
+      
+      // Create temporary live region for announcement
+      const liveRegion = document.createElement('div')
+      liveRegion.setAttribute('role', 'status')
+      liveRegion.setAttribute('aria-live', 'polite')
+      liveRegion.setAttribute('aria-atomic', 'true')
+      liveRegion.style.position = 'absolute'
+      liveRegion.style.left = '-10000px'
+      liveRegion.textContent = announcement
+      document.body.appendChild(liveRegion)
+      
+      setTimeout(() => {
+        document.body.removeChild(liveRegion)
+      }, 100)
+    }
+  }, [selectedIndex, filteredCommands, isOpen])
 
   if (!isOpen) return null
 
+  const activeDescendantId = selectedIndex >= 0 ? `${listboxId}-option-${selectedIndex}` : undefined
+
   return (
-    <div className="slash-menu">
-      {filteredCommands.map((cmd, index) => (
-        <div 
-          key={cmd.command}
-          className={`slash-menu-item ${index === selectedIndex ? 'selected' : ''}`}
-          onClick={() => onSelect(cmd.command)}
-        >
-          <span className="slash-command">{cmd.command}</span>
-          {cmd.args && <span className="slash-args"> {cmd.args}</span>}
-          <span className="slash-description">{cmd.description}</span>
+    <div 
+      ref={listboxRef}
+      className="slash-menu"
+      role="listbox"
+      aria-label="Slash commands"
+      aria-activedescendant={activeDescendantId}
+      id={listboxId}
+      tabIndex={0}
+    >
+      {filteredCommands.length === 0 ? (
+        <div className="slash-menu-empty text-muted" role="option" aria-selected="false">
+          No commands match "{filter}"
         </div>
-      ))}
+      ) : (
+        filteredCommands.map((cmd, index) => (
+          <div 
+            key={cmd.command}
+            ref={el => {
+              if (el) optionRefs.current.set(index, el)
+              else optionRefs.current.delete(index)
+            }}
+            id={`${listboxId}-option-${index}`}
+            className={`slash-menu-item ${index === selectedIndex ? 'selected' : ''}`}
+            onClick={() => {
+              onSelect(cmd.command)
+              markInteraction('slashmenu:click-select', { command: cmd.command })
+            }}
+            role="option"
+            aria-selected={index === selectedIndex}
+            aria-describedby={`${listboxId}-desc-${index}`}
+          >
+            <span className="slash-command text-info" aria-label={`Command: ${cmd.command}`}>
+              {cmd.command}
+            </span>
+            {cmd.args && (
+              <span className="slash-args text-muted" aria-label={`Arguments: ${cmd.args}`}>
+                {' '}{cmd.args}
+              </span>
+            )}
+            <span 
+              id={`${listboxId}-desc-${index}`}
+              className="slash-description text-secondary"
+            >
+              {cmd.description}
+            </span>
+          </div>
+        ))
+      )}
+      
+      {/* Instructions for screen reader users */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {filteredCommands.length} commands available. Use arrow keys to navigate, Enter to select, Escape to close.
+      </div>
     </div>
   )
 }

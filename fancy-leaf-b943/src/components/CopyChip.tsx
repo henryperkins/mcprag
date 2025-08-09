@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import '../styles/copy-chip.css';
 
 interface CopyChipProps {
   code: string;
@@ -21,18 +22,14 @@ export const CopyChip: React.FC<CopyChipProps> = ({ code, language }) => {
   return (
     <div className="code-block-wrapper">
       <div className="code-block-header">
-        {language && <span className="code-language fg-ansi-8">{language}</span>}
+        {language && <span className="code-language">{language}</span>}
         <button
-          className="copy-button"
+          className={`copy-button ${copied ? 'copy-button-success' : ''}`}
           onClick={handleCopy}
           role="button"
           aria-label={copied ? 'Copied' : 'Copy code'}
         >
-          {copied ? (
-            <span className="fg-ansi-10">✓ Copied</span>
-          ) : (
-            <span className="fg-ansi-7">Copy</span>
-          )}
+          {copied ? '✓ Copied' : 'Copy'}
         </button>
       </div>
       <pre className="code-block">

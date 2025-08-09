@@ -5,6 +5,7 @@ import { useSession } from '../store/session.state'
 import { useHistory } from '../store/history.state'
 import { useMessages } from '../store/messages.state'
 import { Send, Square, FileText } from 'lucide-react'
+import '../styles/prompt-bar.css'
 
 interface PromptBarProps {
   onSubmit: (prompt: string) => void
@@ -106,31 +107,31 @@ export function PromptBar({ onSubmit, onInterrupt }: PromptBarProps) {
   }
 
   return (
-    <div className="border-t border-white/10 bg-[#0b0f14] p-4">
-      <div className="flex flex-col gap-2">
+    <div className="prompt-bar">
+      <div className="prompt-bar-inner">
         {/* Mode badges */}
-        <div className="flex items-center gap-2 text-xs">
-          <span className="px-2 py-0.5 bg-white/5 rounded text-white/60">
+        <div className="prompt-bar-badges">
+          <span className="prompt-bar-badge">
             Format: {controls.outputFormat}
           </span>
-          <span className="px-2 py-0.5 bg-white/5 rounded text-white/60">
+          <span className="prompt-bar-badge">
             Mode: {controls.permissionMode}
           </span>
           {controls.verbose && (
-            <span className="px-2 py-0.5 bg-emerald-500/20 rounded text-emerald-400">
+            <span className="prompt-bar-badge prompt-bar-badge-verbose">
               Verbose
             </span>
           )}
           {controls.systemPrompt && (
-            <span className="px-2 py-0.5 bg-blue-500/20 rounded text-blue-400 flex items-center gap-1">
-              <FileText className="w-3 h-3" />
+            <span className="prompt-bar-badge prompt-bar-badge-system">
+              <FileText className="prompt-bar-badge-icon" />
               System Prompt
             </span>
           )}
         </div>
 
         {/* Input area */}
-        <div className="relative flex items-end gap-2">
+        <div className="prompt-bar-input-area">
           <textarea
             ref={textareaRef}
             value={prompt}
@@ -144,37 +145,34 @@ export function PromptBar({ onSubmit, onInterrupt }: PromptBarProps) {
             }
             disabled={isRunning}
             rows={1}
-            className="flex-1 bg-[#0f1520] border border-white/10 rounded-lg px-4 py-3 
-                     text-white placeholder-white/40 outline-none focus:border-emerald-500/50
-                     font-mono text-sm resize-none disabled:opacity-50 disabled:cursor-not-allowed
-                     min-h-[48px] max-h-[200px]"
+            className="prompt-bar-textarea"
             style={{ height: 'auto' }}
           />
           
           <button
             onClick={isRunning ? onInterrupt : handleSubmit}
             disabled={!isRunning && !prompt.trim()}
-            className={`p-3 rounded-lg transition-colors ${
+            className={`prompt-bar-button ${
               isRunning
-                ? 'bg-red-500 hover:bg-red-600 text-white'
-                : 'bg-emerald-500 hover:bg-emerald-600 text-white disabled:bg-white/10 disabled:text-white/30'
+                ? 'prompt-bar-button-interrupt'
+                : 'prompt-bar-button-submit'
             }`}
           >
             {isRunning ? (
-              <Square className="w-5 h-5" />
+              <Square className="prompt-bar-button-icon" />
             ) : (
-              <Send className="w-5 h-5" />
+              <Send className="prompt-bar-button-icon" />
             )}
           </button>
         </div>
 
         {/* Keyboard shortcuts hint */}
-        <div className="flex items-center gap-4 text-xs text-white/40">
+        <div className="prompt-bar-shortcuts">
           <span>↑/↓ History</span>
           <span>Enter Send</span>
           <span>Shift+Enter Newline</span>
           <span>Ctrl+L Clear</span>
-          {isRunning && <span className="text-red-400">Ctrl+C Interrupt</span>}
+          {isRunning && <span className="prompt-bar-shortcut-interrupt">Ctrl+C Interrupt</span>}
         </div>
       </div>
     </div>

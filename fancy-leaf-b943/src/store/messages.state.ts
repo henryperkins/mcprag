@@ -2,8 +2,8 @@ import { create } from 'zustand'
 
 export type ContentBlock = 
   | { type: 'text'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: any }
-  | { type: 'tool_result'; tool_use_id: string; content?: any; is_error?: boolean }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content?: unknown; is_error?: boolean }
 
 export type SDKMessage = 
   | {
@@ -41,12 +41,12 @@ export type SDKMessage =
       type: 'tool_call'
       call_id: string
       name: string
-      arguments?: any
+      arguments?: unknown
     }
   | {
       type: 'tool_result'
       call_id: string
-      content?: any
+      content?: unknown
       is_error?: boolean
     }
   | {

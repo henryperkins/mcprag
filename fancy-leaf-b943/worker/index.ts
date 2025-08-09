@@ -45,7 +45,7 @@ interface SDKMessage {
   duration_ms?: number
   duration_api_ms?: number
   total_cost_usd?: number
-  [key: string]: any // Allow additional properties
+  [key: string]: unknown // Allow additional properties
 }
 
 export default {
@@ -102,7 +102,7 @@ export default {
                   const queryOptions = {
                     prompt: body.prompt,
                     abortController,
-                    options: {} as any,
+                    options: {} as Record<string, unknown>,
                   }
                   
                   // Add optional parameters based on SDK documentation
@@ -216,7 +216,7 @@ export default {
           { ok: false, message: 'Session not found' },
           { status: 404, headers: corsHeaders }
         )
-      } catch (error) {
+      } catch {
         return Response.json(
           { error: 'Invalid request' },
           { status: 400, headers: corsHeaders }
@@ -255,7 +255,7 @@ export default {
     // Legacy stream endpoint (for backward compatibility)
     if (url.pathname === '/api/stream' && request.method === 'POST') {
       // Redirect to /api/query
-      const body = await request.json() as any
+      const body = await request.json() as Record<string, unknown>
       return fetch(new URL('/api/query', url.origin), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -4,11 +4,11 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #0d0d0d;
-  color: #e8e8e8;
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.5;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-md);
+  line-height: var(--leading-normal);
   overflow: hidden;
   /* Ensure proper text direction */
   direction: ltr;

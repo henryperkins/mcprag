@@ -206,6 +206,55 @@ When you select "Authenticate" for a server:
 - If your browser doesn't open automatically, copy the provided URL
 - OAuth authentication works with both SSE and HTTP transports
 
+## Quick Start: Connect to the mcprag Server (SSE)
+
+The mcprag server exposes a Server‑Sent Events endpoint and REST tool routes. For Claude Code, prefer the SSE transport.
+
+1) Start the server
+```bash
+# Development bypass (local only)
+export MCP_DEV_MODE=true
+python -m mcprag.remote_server
+```
+
+2) Verify health and dev mode
+```bash
+curl -s http://localhost:8001/health | jq .dev_mode
+# should print: true
+```
+
+3) Add mcprag as an SSE server in Claude Code
+```bash
+# In dev mode you can use a simple bearer like 'dev'
+claude mcp add --transport sse mcprag http://localhost:8001/mcp/sse \
+  --header "Authorization: Bearer dev"
+```
+
+4) Use it in chat
+```
+> /mcp   # verify connection and tools are listed
+> search the repo for auth code
+```
+
+Production auth
+- Disable dev mode and configure Stytch credentials (`STYTCH_PROJECT_ID`, `STYTCH_SECRET`, `STYTCH_ENV`).
+- Authenticate via your app’s flow (POST `/auth/login` ➜ GET `/auth/callback?token=...`).
+- Use the returned `token` as the bearer: `--header "Authorization: Bearer <token>"`.
+
+Optional: project-scoped configuration
+```json
+{
+  "mcpServers": {
+    "mcprag": {
+      "type": "sse",
+      "url": "http://localhost:8001/mcp/sse",
+      "headers": { "Authorization": "Bearer ${MCPRAG_TOKEN}" }
+    }
+  }
+}
+```
+Then export `MCPRAG_TOKEN` before launching Claude Code.
+
 ---
 
 ## Connect to a Postgres MCP Server

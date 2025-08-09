@@ -52,7 +52,7 @@ def register_tools(mcp: ModuleType, server: "MCPServer") -> None:
     register_cache_tools(mcp, server)
     register_admin_tools(mcp, server)
     register_azure_tools(mcp, server)
-    register_service_management_tools(server)
+    register_service_management_tools(mcp, server)
 
 
 # Export for backward compatibility

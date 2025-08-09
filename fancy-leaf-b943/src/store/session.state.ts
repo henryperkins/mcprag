@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { SDKMessage } from './messages.state'
 
 type InitMeta = {
   model: string
@@ -34,8 +35,8 @@ type SessionStore = {
   recentSessions: string[]
   isRunning: boolean
   
-  setInit: (msg: any) => void
-  setResult: (msg: any) => void
+  setInit: (msg: SDKMessage) => void
+  setResult: (msg: SDKMessage) => void
   setControls: (patch: Partial<SessionControls>) => void
   setSession: (id: string | null) => void
   rememberSession: (id: string) => void
@@ -63,7 +64,7 @@ export const useSession = create<SessionStore>()(
           const meta: InitMeta = {
             model: msg.model || 'unknown',
             cwd: msg.cwd || '/',
-            permissionMode: msg.permissionMode || 'default',
+            permissionMode: (msg.permissionMode as 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan') || 'default',
             tools: msg.tools || [],
             mcpServers: msg.mcp_servers || [],
             apiKeySource: msg.apiKeySource,

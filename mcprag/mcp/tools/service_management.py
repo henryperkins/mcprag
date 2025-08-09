@@ -216,10 +216,14 @@ async def get_service_metrics(
         return err(f"Error getting service metrics: {str(e)}")
 
 
-def register_service_management_tools(server):
-    """Register service management tools with the MCP server."""
+def register_service_management_tools(mcp, server):
+    """Register service management tools with the MCP server.
 
-    @server.mcp.tool()
+    Tools are registered via the provided `mcp` object so they route through
+    the transport wrapper for unified auth and transport parity.
+    """
+
+    @mcp.tool()
     async def configure_semantic_search(
         ctx: Context,
         action: str = "status",
@@ -354,7 +358,7 @@ def register_service_management_tools(server):
             logger.error(f"Error configuring semantic search: {e}", exc_info=True)
             return err(f"Error configuring semantic search: {str(e)}")
 
-    @server.mcp.tool()
+    @mcp.tool()
     async def get_service_info(
         ctx: Context,
         resource_group: Optional[str] = None,

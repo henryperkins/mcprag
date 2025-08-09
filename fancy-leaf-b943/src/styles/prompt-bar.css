@@ -1,0 +1,139 @@
+@layer components {
+  /* Prompt Bar Container */
+  .prompt-bar {
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+    padding: var(--space-4);
+  }
+
+  .prompt-bar-inner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  /* Mode Badges */
+  .prompt-bar-badges {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--font-xs);
+  }
+
+  .prompt-bar-badge {
+    padding: var(--space-0) var(--space-2);
+    background: var(--bg-surface);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+  }
+
+  .prompt-bar-badge-verbose {
+    background: rgba(var(--primary-rgb), 0.2);
+    color: var(--color-primary);
+  }
+
+  .prompt-bar-badge-system {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    background: rgba(var(--info-rgb), 0.2);
+    color: var(--color-info);
+  }
+
+  .prompt-bar-badge-icon {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+
+  /* Input Area */
+  .prompt-bar-input-area {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+  }
+
+  .prompt-bar-textarea {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3) var(--space-4);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-sm);
+    line-height: 1.5;
+    resize: none;
+    outline: none;
+    transition: border-color var(--transition-fast);
+    min-height: 3rem;
+    max-height: 12.5rem;
+  }
+
+  .prompt-bar-textarea::placeholder {
+    color: var(--text-dim);
+  }
+
+  .prompt-bar-textarea:focus {
+    border-color: var(--color-primary-dimmed);
+  }
+
+  .prompt-bar-textarea:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Submit/Interrupt Button */
+  .prompt-bar-button {
+    padding: var(--space-3);
+    border: none;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .prompt-bar-button-submit {
+    background: var(--color-primary);
+    color: white;
+  }
+
+  .prompt-bar-button-submit:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+  }
+
+  .prompt-bar-button-submit:disabled {
+    background: var(--bg-surface);
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+
+  .prompt-bar-button-interrupt {
+    background: var(--color-error);
+    color: white;
+  }
+
+  .prompt-bar-button-interrupt:hover {
+    background: var(--color-error-hover);
+  }
+
+  .prompt-bar-button-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  /* Keyboard Shortcuts */
+  .prompt-bar-shortcuts {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    font-size: var(--font-xs);
+    color: var(--text-dim);
+  }
+
+  .prompt-bar-shortcut-interrupt {
+    color: var(--color-error);
+  }
+}

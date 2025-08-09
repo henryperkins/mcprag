@@ -1,20 +1,46 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useSessionStore } from '../store/session';
+import { usePerformanceMonitor } from '../store/unified.adapter';
+import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom';
 import { renderAnsiToSpans } from '../utils/ansi';
+
+const MAX_VISIBLE_LINES = 2000;
+const BATCH_INTERVAL_MS = 16; // ~60fps
+const THROTTLE_INTERVAL_MS = 100;
 
 export const Terminal: React.FC = () => {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamBuffer, setStreamBuffer] = useState('');
+  const [showLoadMore, setShowLoadMore] = useState(false);
+  
   const inputRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
-  const rafRef = useRef<number>(0);
+  
+  // Batching refs
+  const streamBatchRef = useRef<string[]>([]);
+  const batchTimerRef = useRef<number>(0);
+  const lastRenderTimeRef = useRef<number>(0);
+  
+  // Performance monitoring
+  const { markInteraction, measureInteraction } = usePerformanceMonitor();
   
   const terminal = useSessionStore(state => state.terminal);
   const actions = useSessionStore(state => state.actions);
   const { transcript, history, historyIndex, sessionId } = terminal;
+  
+  // Window management - only render visible lines
+  const visibleTranscript = useMemo(() => {
+    if (transcript.length <= MAX_VISIBLE_LINES) {
+      setShowLoadMore(false);
+      return transcript;
+    }
+    
+    const start = Math.max(0, transcript.length - MAX_VISIBLE_LINES);
+    setShowLoadMore(start > 0);
+    return transcript.slice(start);
+  }, [transcript]);
   
   // Initialize session info on mount
   useEffect(() => {
@@ -29,14 +55,59 @@ MCP Servers: Connected\x1b[0m
 Type your prompt and press Enter to submit.
 `;
     actions.appendTranscript({ role: 'assistant', text: initMessage });
-  }, []);
+  }, [actions, sessionId]);
   
-  // Auto-scroll to bottom when transcript updates
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  // Batch stream updates with RAF
+  const flushBatch = useCallback(() => {
+    if (streamBatchRef.current.length === 0) {
+      batchTimerRef.current = 0;
+      return;
     }
-  }, [transcript]);
+    
+    const now = performance.now();
+    const timeSinceLastRender = now - lastRenderTimeRef.current;
+    
+    // Throttle if rendering too frequently
+    if (timeSinceLastRender < BATCH_INTERVAL_MS) {
+      batchTimerRef.current = requestAnimationFrame(flushBatch);
+      return;
+    }
+    
+    // Combine all batched chunks
+    const combinedText = streamBatchRef.current.join('');
+    streamBatchRef.current = [];
+    lastRenderTimeRef.current = now;
+    
+    // Update transcript
+    actions.appendTranscript({
+      role: 'assistant',
+      text: combinedText
+    });
+    
+    // Mark performance
+    markInteraction('terminal:batch-flush', {
+      chunkSize: combinedText.length,
+      timeSinceLastRender
+    });
+    
+    batchTimerRef.current = 0;
+  }, [actions, markInteraction]);
+  
+  // Add to stream batch
+  const addToStreamBatch = useCallback((text: string) => {
+    streamBatchRef.current.push(text);
+    
+    if (!batchTimerRef.current) {
+      batchTimerRef.current = requestAnimationFrame(flushBatch);
+    }
+  }, [flushBatch]);
+  
+  // Auto-scroll only when near bottom
+  useAutoScrollNearBottom(
+    outputRef,
+    [visibleTranscript],
+    40 // threshold in pixels
+  );
   
   // Update input from history navigation
   useEffect(() => {
@@ -52,39 +123,19 @@ Type your prompt and press Enter to submit.
     inputRef.current?.focus();
   }, []);
   
-  // Streaming renderer (60fps)
-  const streamRenderer = useCallback(() => {
-    if (streamBuffer.length > 0) {
-      // Take chunk of buffer (simulate token streaming)
-      const chunkSize = Math.min(10, streamBuffer.length);
-      const chunk = streamBuffer.slice(0, chunkSize);
-      setStreamBuffer(prev => prev.slice(chunkSize));
-      
-      // Append to last assistant message
-      actions.appendTranscript({
-        role: 'assistant',
-        text: chunk
-      });
-      
-      rafRef.current = requestAnimationFrame(streamRenderer);
-    } else {
-      setIsStreaming(false);
-    }
-  }, [streamBuffer, actions]);
-  
+  // Cleanup batch timer on unmount
   useEffect(() => {
-    if (isStreaming && streamBuffer.length > 0) {
-      rafRef.current = requestAnimationFrame(streamRenderer);
-    }
     return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
+      if (batchTimerRef.current) {
+        cancelAnimationFrame(batchTimerRef.current);
       }
     };
-  }, [isStreaming, streamBuffer, streamRenderer]);
+  }, []);
   
   const handleSubmit = async () => {
     if (!input.trim() || isStreaming) return;
+    
+    markInteraction('terminal:submit-start');
     
     const command = input.trim();
     setInput('');
@@ -128,10 +179,16 @@ Type your prompt and press Enter to submit.
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data === '[DONE]') {
+                // Flush any remaining batch
+                if (streamBatchRef.current.length > 0) {
+                  flushBatch();
+                }
                 setIsStreaming(false);
+                markInteraction('terminal:stream-complete');
+                measureInteraction('terminal:stream-complete', 'cc:terminal:submit-start');
                 break;
               }
-              setStreamBuffer(prev => prev + data);
+              addToStreamBatch(data);
             }
           }
         }
@@ -142,17 +199,21 @@ Type your prompt and press Enter to submit.
 \x1b[32m✓\x1b[0m Operation completed successfully
 \x1b[90mTelemetry: 42ms | Tokens: 128\x1b[0m`;
       
-      // Simulate streaming
-      for (let i = 0; i < mockResponse.length; i += 5) {
+      // Simulate batched streaming
+      const chunkSize = 10;
+      for (let i = 0; i < mockResponse.length; i += chunkSize) {
         await new Promise(resolve => setTimeout(resolve, 20));
-        setStreamBuffer(prev => prev + mockResponse.slice(i, i + 5));
+        addToStreamBatch(mockResponse.slice(i, i + chunkSize));
       }
       
-      // Ensure streaming state is reset after mock response
-      setTimeout(() => {
-        setIsStreaming(false);
-        setStreamBuffer('');
-      }, 1000);
+      // Final flush
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (streamBatchRef.current.length > 0) {
+        flushBatch();
+      }
+      setIsStreaming(false);
+      markInteraction('terminal:mock-complete');
+      measureInteraction('terminal:mock-complete', 'cc:terminal:submit-start');
     }
   };
   
@@ -161,24 +222,35 @@ Type your prompt and press Enter to submit.
     if (e.ctrlKey && e.key.toLowerCase() === 'c') {
       e.preventDefault();
       if (isStreaming) {
+        // Flush pending batches
+        if (streamBatchRef.current.length > 0) {
+          flushBatch();
+        }
         setIsStreaming(false);
-        setStreamBuffer('');
         actions.appendTranscript({
           role: 'assistant',
           text: '\x1b[31m^C\x1b[0m'
         });
+        markInteraction('terminal:interrupt');
       }
       setInput('');
       return;
     }
     
-    // Ctrl+V - Paste (let browser handle it naturally)
-    // Removed custom paste handling to allow natural contenteditable behavior
+    // Ctrl+V - Paste
+    if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+      e.preventDefault();
+      navigator.clipboard.readText().then(text => {
+        setInput(prev => prev + text);
+      });
+      return;
+    }
     
     // Ctrl+L - Clear
     if (e.ctrlKey && e.key.toLowerCase() === 'l') {
       e.preventDefault();
       actions.clearTranscript();
+      markInteraction('terminal:clear');
       return;
     }
     
@@ -209,31 +281,8 @@ Type your prompt and press Enter to submit.
     setInput(text);
   };
   
-  // Sync contenteditable with state
-  useEffect(() => {
-    if (inputRef.current && document.activeElement === inputRef.current) {
-      const selection = window.getSelection();
-      const range = selection?.getRangeAt(0);
-      const offset = range?.startOffset || 0;
-      
-      if (inputRef.current.textContent !== input) {
-        inputRef.current.textContent = input;
-        
-        // Restore cursor position
-        if (selection && inputRef.current.firstChild) {
-          const newRange = document.createRange();
-          const textNode = inputRef.current.firstChild;
-          newRange.setStart(textNode, Math.min(offset, textNode.textContent?.length || 0));
-          newRange.collapse(true);
-          selection.removeAllRanges();
-          selection.addRange(newRange);
-        }
-      }
-    }
-  }, [input]);
-  
-  // Update cursor position
-  useEffect(() => {
+  // Throttled cursor position update
+  const updateCursorPosition = useCallback(() => {
     if (cursorRef.current && inputRef.current) {
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
@@ -241,16 +290,34 @@ Type your prompt and press Enter to submit.
         const rect = range.getBoundingClientRect();
         const inputRect = inputRef.current.getBoundingClientRect();
         
-        cursorRef.current.style.left = `${rect.right - inputRect.left}px`;
-        cursorRef.current.style.top = `${rect.top - inputRect.top}px`;
+        requestAnimationFrame(() => {
+          if (cursorRef.current) {
+            cursorRef.current.style.left = `${rect.right - inputRect.left}px`;
+            cursorRef.current.style.top = `${rect.top - inputRect.top}px`;
+          }
+        });
       }
     }
-  });
+  }, []);
+  
+  useEffect(() => {
+    const throttledUpdate = () => {
+      requestAnimationFrame(updateCursorPosition);
+    };
+    
+    const interval = setInterval(throttledUpdate, THROTTLE_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [updateCursorPosition]);
+  
+  const handleLoadMore = () => {
+    // This would load more transcript history if implemented
+    markInteraction('terminal:load-more');
+  };
   
   return (
     <div className="terminal-root">
       <div className="terminal-header">
-        <span className="terminal-header-title fg-ansi-10">Claude Code Terminal</span>
+        <span className="terminal-header-title text-brand">Claude Code Terminal</span>
         <div className="terminal-header-session">
           <span className="terminal-header-session-id" title={`Session ID: ${sessionId}`}>
             {sessionId}
@@ -266,16 +333,25 @@ Type your prompt and press Enter to submit.
         </div>
       </div>
       
-      <div ref={outputRef} className="terminal-output">
-        {transcript.map((msg, idx) => (
-          <div key={idx} className="terminal-line">
+      <div ref={outputRef} className="terminal-output" style={{ flex: 1, overflowY: 'auto' }}>
+        {showLoadMore && (
+          <button 
+            className="terminal-load-more"
+            onClick={handleLoadMore}
+            aria-label="Load older output"
+          >
+            ▲ Load older output ({transcript.length - visibleTranscript.length} hidden lines)
+          </button>
+        )}
+        {visibleTranscript.map((msg, idx) => (
+          <div key={`${msg.timestamp}-${idx}`} className="terminal-line">
             {renderAnsiToSpans(msg.text)}
           </div>
         ))}
       </div>
       
       <div className="terminal-input">
-        <span className="terminal-prompt fg-ansi-2">
+        <span className="terminal-prompt text-prompt">
           ➜ ~Claude_Code:model-session
         </span>
         <div
@@ -288,11 +364,13 @@ Type your prompt and press Enter to submit.
           role="textbox"
           aria-label="Terminal input"
           aria-multiline="false"
-        />
+        >
+          {input}
+        </div>
         {!isStreaming && <span ref={cursorRef} className="cursor block" />}
       </div>
       
-      <div className="terminal-footer fg-ansi-8">
+      <div className="terminal-footer text-muted">
         {isStreaming ? (
           <span>Streaming... Press Ctrl+C to interrupt</span>
         ) : (

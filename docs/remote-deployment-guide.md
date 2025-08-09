@@ -240,6 +240,20 @@ export STYTCH_PROJECT_ID=""
 export STYTCH_SECRET=""
 ```
 
+Verify the session helper endpoints while in dev mode:
+```bash
+curl -s http://localhost:8001/auth/me -H 'Authorization: Bearer dev' | jq
+curl -s -X POST http://localhost:8001/auth/logout -H 'Authorization: Bearer dev'
+```
+
+Auth endpoints available:
+- POST `/auth/login` — request magic link
+- GET `/auth/callback?token=...` — complete login and create session
+- GET `/auth/me` — inspect current session (requires `Authorization`)
+- POST `/auth/logout` — invalidate current session (requires `Authorization`)
+- POST `/auth/verify-mfa` — verify TOTP for admin tier
+- POST `/auth/m2m/token` — service token (Stytch or dev-mode mock)
+
 ## Security Best Practices
 
 1. **Use environment-specific keys**

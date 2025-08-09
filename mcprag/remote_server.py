@@ -143,7 +143,8 @@ class RemoteMCPServer(MCPServer):
                 "version": self.version,
                 "components": components,
                 "transport": ["rest", "sse"],
-                "authentication": "stytch" if self.auth.enabled else "disabled"
+                "authentication": "stytch" if self.auth.enabled else "disabled",
+                "dev_mode": getattr(Config, 'DEV_MODE', False),
             }
 
         # Authentication endpoints
@@ -185,6 +186,25 @@ class RemoteMCPServer(MCPServer):
                 await self.auth.update_session_mfa(session_id, True)
 
             return result
+
+        # Session helpers
+        @app.get("/auth/me")
+        async def auth_me(user=Depends(self.auth.get_current_user)):
+            """Return the authenticated user's session info."""
+            return user
+
+        @app.post("/auth/logout")
+        async def auth_logout(authorization: str = Header(None)):
+            """Invalidate the current session token (logout)."""
+            if not authorization or not authorization.startswith("Bearer "):
+                raise HTTPException(401, "Missing or invalid authorization header")
+            token = authorization.replace("Bearer ", "").strip()
+            try:
+                await self.auth._delete_session(token)
+            except Exception:
+                # Don't leak details; treat missing sessions as logged out
+                pass
+            return {"status": "ok", "logged_out": True}
 
         # M2M authentication
         @app.post("/auth/m2m/token")
@@ -437,6 +457,8 @@ class RemoteMCPServer(MCPServer):
                         "login": "POST /auth/login",
                         "callback": "GET /auth/callback",
                         "verify_mfa": "POST /auth/verify-mfa",
+                        "me": "GET /auth/me",
+                        "logout": "POST /auth/logout",
                         "m2m_token": "POST /auth/m2m/token"
                     },
                     "tools": {
@@ -460,9 +482,22 @@ class RemoteMCPServer(MCPServer):
             params: Tool parameters
             result: Execution result
         """
-        # Skip feedback collection for now due to method compatibility issues
-        # TODO: Implement proper feedback tracking when feedback collector interface is clarified
-        pass
+        # Send to feedback collector if available
+        try:
+            if getattr(self, "feedback_collector", None) is not None:
+                collector = self.feedback_collector
+                # Use a generic hook name expected by tests; args kept minimal
+                if hasattr(collector, "track_tool_usage"):
+                    await collector.track_tool_usage(  # type: ignore[attr-defined]
+                        user=user,
+                        tool=tool,
+                        params=params,
+                        result=result,
+                        timestamp=datetime.utcnow().isoformat(),
+                    )
+        except Exception:
+            # Never fail request due to feedback collection issues
+            logger.debug("Feedback collection failed for audit log", exc_info=True)
 
         # Log to standard logger
         logger.info(

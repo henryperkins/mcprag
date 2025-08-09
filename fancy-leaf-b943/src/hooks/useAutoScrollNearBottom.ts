@@ -55,7 +55,7 @@ export function useAutoScrollNearBottom<T extends HTMLElement = HTMLElement>(
     else if (!wasNearBottom && isNearBottomRef.current) {
       userHasScrolledRef.current = false;
     }
-  }, [checkIfNearBottom]);
+  }, [checkIfNearBottom, ref]);
 
   // Set up scroll listener
   useEffect(() => {

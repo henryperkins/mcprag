@@ -1,46 +1,65 @@
 @layer tokens, base, components, utilities, overrides;
 
-@import './styles/components.misc.css' layer(components);
-
 /* ===== Design Tokens Layer ===== */
 @layer tokens {
   :root {
-    /* ANSI Color Palette - Terminal Colors */
-    --ansi-0: #000000;  /* Black */
-    --ansi-1: #cc0000;  /* Red */
-    --ansi-2: #4e9a06;  /* Green */
-    --ansi-3: #c4a000;  /* Yellow */
-    --ansi-4: #3465a4;  /* Blue */
-    --ansi-5: #75507b;  /* Magenta */
-    --ansi-6: #06989a;  /* Cyan */
-    --ansi-7: #d3d7cf;  /* White */
-    --ansi-8: #555753;  /* Bright Black */
-    --ansi-9: #ef2929;  /* Bright Red */
-    --ansi-10: #8ae234; /* Bright Green */
-    --ansi-11: #fce94f; /* Bright Yellow */
-    --ansi-12: #729fcf; /* Bright Blue */
-    --ansi-13: #ad7fa8; /* Bright Magenta */
-    --ansi-14: #34e2e2; /* Bright Cyan */
-    --ansi-15: #eeeeec; /* Bright White */
+    /* Font Stack */
+    --font-mono: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    
+    /* ANSI Color Palette - Terminal Colors (Enhanced) */
+    --ansi-0: #1c1e26;  /* Black */
+    --ansi-1: #e95678;  /* Red */
+    --ansi-2: #29d398;  /* Green */
+    --ansi-3: #fab795;  /* Yellow */
+    --ansi-4: #26bbd9;  /* Blue */
+    --ansi-5: #ee64ae;  /* Magenta */
+    --ansi-6: #59e3e3;  /* Cyan */
+    --ansi-7: #e3e6ee;  /* White */
+    --ansi-8: #565867;  /* Bright Black */
+    --ansi-9: #ec6a88;  /* Bright Red */
+    --ansi-10: #3fdaa4; /* Bright Green */
+    --ansi-11: #fbc3a7; /* Bright Yellow */
+    --ansi-12: #3fc6de; /* Bright Blue */
+    --ansi-13: #f075b7; /* Bright Magenta */
+    --ansi-14: #6be6e6; /* Bright Cyan */
+    --ansi-15: #f0f1f4; /* Bright White */
     
     /* Semantic Color Tokens */
-    --color-primary: var(--ansi-12);
-    --color-success: var(--ansi-10);
-    --color-warning: var(--ansi-11);
-    --color-error: var(--ansi-9);
-    --color-info: var(--ansi-14);
-    --color-muted: var(--ansi-8);
+    --color-primary: #26bbd9;
+    --color-primary-hover: #3fc6de;
+    --color-primary-active: #1ea8c7;
+    --color-success: #29d398;
+    --color-success-hover: #3fdaa4;
+    --color-warning: #fab795;
+    --color-warning-hover: #fbc3a7;
+    --color-error: #e95678;
+    --color-error-hover: #ec6a88;
+    --color-info: #59e3e3;
+    --color-info-hover: #6be6e6;
+    --color-muted: #565867;
     
-    /* Background Tokens */
-    --bg-primary: #0d0d0d;
-    --bg-secondary: #1a1a1a;
-    --bg-tertiary: #242424;
-    --bg-elevated: #2a2a2a;
+    /* Background Tokens - Dark Theme */
+    --bg-primary: #0a0b0f;
+    --bg-secondary: #0f1117;
+    --bg-tertiary: #161820;
+    --bg-elevated: #1c1e26;
+    --bg-overlay: #232530;
+    --bg-surface: #282a36;
+    --bg-hover: rgba(38, 187, 217, 0.08);
+    --bg-active: rgba(38, 187, 217, 0.12);
+    
+    /* Glass Morphism */
+    --glass-bg: rgba(15, 17, 23, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-blur: 10px;
     
     /* Text Tokens */
-    --text-primary: #e8e8e8;
-    --text-secondary: #d3d7cf;
-    --text-muted: #888888;
+    --text-primary: #f0f1f4;
+    --text-secondary: #b4b8c5;
+    --text-muted: #707485;
+    --text-dim: #565867;
+    --text-inverse: #0a0b0f;
     
     /* Spacing Scale */
     --space-1: 4px;
@@ -50,11 +69,18 @@
     --space-5: 20px;
     --space-6: 24px;
     --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
     
     /* Border Radius */
-    --radius-sm: 2px;
-    --radius-md: 4px;
-    --radius-lg: 6px;
+    --radius-xs: 2px;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --radius-2xl: 16px;
+    --radius-full: 9999px;
     
     /* Typography Scale */
     --font-xs: 11px;
@@ -62,55 +88,233 @@
     --font-md: 14px;
     --font-lg: 16px;
     --font-xl: 18px;
+    --font-2xl: 20px;
+    --font-3xl: 24px;
     
     /* Line Heights */
     --leading-tight: 1.2;
+    --leading-snug: 1.375;
     --leading-normal: 1.5;
-    --leading-relaxed: 1.75;
+    --leading-relaxed: 1.625;
+    --leading-loose: 1.75;
+    
+    /* Font Weights */
+    --weight-normal: 400;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+    --weight-bold: 700;
     
     /* Transitions */
-    --transition-fast: 150ms ease;
-    --transition-base: 250ms ease;
-    --transition-slow: 350ms ease;
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-spring: 500ms cubic-bezier(0.68, -0.55, 0.265, 1.55);
 
+    /* Focus & Selection */
     --focus-ring-color: var(--color-primary);
-    --selection-bg: rgba(114, 159, 207, 0.3);
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 2px;
+    --selection-bg: rgba(38, 187, 217, 0.25);
+
+    /* Borders */
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-default: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --border-focus: var(--color-primary);
+    
+    /* Shadows */
+    --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 2px 4px 0 rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 8px -1px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 16px -2px rgba(0, 0, 0, 0.6);
+    --shadow-xl: 0 16px 32px -4px rgba(0, 0, 0, 0.7);
+    --shadow-glow: 0 0 24px rgba(38, 187, 217, 0.2);
+    
+    /* Z-Index Scale */
+    --z-base: 0;
+    --z-dropdown: 10;
+    --z-sticky: 20;
+    --z-overlay: 30;
+    --z-modal: 40;
+    --z-popover: 50;
+    --z-tooltip: 60;
+    --z-notification: 70;
+  }
+  
+  /* Light Theme (future implementation) */
+  [data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #f1f3f5;
+    --bg-elevated: #e9ecef;
+    --bg-overlay: #dee2e6;
+    --bg-surface: #ced4da;
+    
+    --text-primary: #212529;
+    --text-secondary: #495057;
+    --text-muted: #6c757d;
+    --text-dim: #adb5bd;
+    --text-inverse: #ffffff;
+    
+    --border-subtle: rgba(0, 0, 0, 0.08);
+    --border-default: rgba(0, 0, 0, 0.12);
+    --border-strong: rgba(0, 0, 0, 0.16);
+    
+    --glass-bg: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(0, 0, 0, 0.08);
   }
 }
 
+/* Tailwind layers */
+@tailwind base;
+
 @layer base {
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  html, body { width: 100%; height: 100%; overflow: hidden; }
-  #root { width: 100%; height: 100%; }
-
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
-  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
-
-  ::selection { background: var(--selection-bg); }
-
-  :focus-visible {
-    outline: 2px solid var(--focus-ring-color);
-    outline-offset: 2px;
+  * { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box;
   }
 
+  html { 
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  
+  html, body { 
+    width: 100%; 
+    height: 100%; 
+    overflow: hidden;
+    background: var(--bg-primary);
+  }
+  
+  #root { 
+    width: 100%; 
+    height: 100%;
+    position: relative;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar { 
+    width: 10px; 
+    height: 10px; 
+  }
+  
+  ::-webkit-scrollbar-track { 
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+  }
+  
+  ::-webkit-scrollbar-thumb { 
+    background: var(--bg-overlay);
+    border-radius: var(--radius-md);
+    border: 2px solid var(--bg-tertiary);
+    transition: background var(--transition-fast);
+  }
+  
+  ::-webkit-scrollbar-thumb:hover { 
+    background: var(--bg-surface);
+  }
+  
+  ::-webkit-scrollbar-thumb:active {
+    background: var(--color-primary);
+  }
+  
+  ::-webkit-scrollbar-corner {
+    background: var(--bg-tertiary);
+  }
+
+  /* Selection */
+  ::selection { 
+    background: var(--selection-bg);
+    color: var(--text-primary);
+  }
+
+  /* Focus States */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--radius-sm);
+  }
+  
+  /* Remove focus for mouse users */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Button Reset & Base Styles */
   button {
     font-family: inherit;
     font-size: inherit;
+    font-weight: var(--weight-medium);
     border: none;
     background: none;
     color: inherit;
     cursor: pointer;
     padding: 0;
+    transition: all var(--transition-fast);
+    position: relative;
+    user-select: none;
+  }
+  
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
-  a { color: var(--color-primary); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  /* Link Styles */
+  a { 
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+    position: relative;
+  }
+  
+  a:hover { 
+    color: var(--color-primary-hover);
+  }
+  
+  a:active {
+    color: var(--color-primary-active);
+  }
+  
+  /* Code/Pre Elements */
+  code, pre {
+    font-family: var(--font-mono);
+    font-size: var(--font-sm);
+  }
+  
+  /* Input Styles */
+  input, textarea, select {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    transition: all var(--transition-fast);
+  }
+  
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--border-focus);
+    background: var(--bg-hover);
+  }
+  
+  /* Placeholder Styles */
+  ::placeholder {
+    color: var(--text-dim);
+    opacity: 1;
+  }
+  
+  /* Disabled State */
+  :disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
-@import './styles/terminal.css' layer(components);
-@import './styles/panels.css' layer(components);
-@import './styles/animations.css' layer(components);
-@import './styles/utilities.css' layer(utilities);
+@tailwind components;
+
+@tailwind utilities;

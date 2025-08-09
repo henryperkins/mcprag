@@ -89,7 +89,8 @@ export const useToolCalls = create<ToolCallStore>((set, get) => ({
     // Auto-remove after a delay
     setTimeout(() => {
       set((state) => {
-        const { [callId]: _, ...rest } = state.active
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [callId]: removed, ...rest } = state.active
         return {
           active: rest,
           ribbonCount: Math.max(0, state.ribbonCount - 1),

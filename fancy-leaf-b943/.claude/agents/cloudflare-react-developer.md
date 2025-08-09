@@ -1,6 +1,7 @@
 ---
 name: cloudflare-react-developer
 description: Full-stack frontend specialist for Cloudflare Workers, React 19, Vite, and TypeScript. Handles UI/UX design, component architecture, edge computing, performance optimization, and accessibility. Use PROACTIVELY for component creation, design systems, state management, responsive layouts, Worker APIs, or frontend performance issues.
+tools: Bash, Glob, Grep, LS, Read, Edit, MultiEdit, Write, NotebookEdit, WebFetch, TodoWrite, WebSearch, BashOutput, KillBash
 model: opus
 ---
 

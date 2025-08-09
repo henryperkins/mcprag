@@ -1,0 +1,29 @@
+@layer components {
+  /* Running Ribbon */
+  .ribbon {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: var(--z-notification);
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-primary),
+      transparent
+    );
+    background-size: 200% 100%;
+    animation: ribbon-slide 2s linear infinite;
+  }
+
+  @keyframes ribbon-slide {
+    0% {
+      background-position: -100% 0;
+    }
+    100% {
+      background-position: 100% 0;
+    }
+  }
+}

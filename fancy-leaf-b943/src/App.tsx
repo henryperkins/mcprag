@@ -7,6 +7,8 @@ function App() {
   // Apply dark theme by default
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'dark');
+    // Enable Tailwind dark variants without introducing a light theme
+    document.documentElement.classList.add('dark');
   }, []);
   
   return (

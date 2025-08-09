@@ -1,4 +1,4 @@
-import { useStore } from './useStore';
+import { useStore, type FileNode } from './useStore';
 import { useSession } from './session.state';
 import { useSessionStore } from './session';
 
@@ -46,8 +46,8 @@ export interface UnifiedState {
   
   // Files state
   files: {
-    tree: any[]; // FileNode type from useStore
-    selected: any | null;
+    tree: FileNode[]; // FileNode type from useStore
+    selected: FileNode | null;
   };
 }
 
@@ -153,7 +153,7 @@ export function useUnifiedFiles() {
  * Performance monitoring hook - adds UserTiming marks
  */
 export function usePerformanceMonitor() {
-  const markInteraction = (name: string, metadata?: Record<string, any>) => {
+  const markInteraction = (name: string, metadata?: Record<string, unknown>) => {
     if (typeof window !== 'undefined' && window.performance) {
       const mark = `cc:${name}`;
       performance.mark(mark, {

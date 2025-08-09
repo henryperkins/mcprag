@@ -1,3 +1,4 @@
+@layer components {
 /* Panel Layout Styles */
 .panel-container {
   width: 100vw;
@@ -5,6 +6,7 @@
   display: flex;
   background: var(--term-bg, #0d0d0d);
   overflow: hidden;
+}
 }
 
 .panel-group {
