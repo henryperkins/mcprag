@@ -1,26 +1,4 @@
-/* Global Reset and Base Styles */
-:root {
-  /* Color Scheme */
-  color-scheme: dark;
-  
-  /* Typography */
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html, body {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
+@layer tokens, base, components, utilities, overrides;
 
 /* ===== Design Tokens Layer ===== */
 @layer tokens {
@@ -92,5 +70,45 @@ html, body {
     --transition-fast: 150ms ease;
     --transition-base: 250ms ease;
     --transition-slow: 350ms ease;
+
+    --focus-ring-color: var(--color-primary);
+    --selection-bg: rgba(114, 159, 207, 0.3);
   }
 }
+
+@layer base {
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  #root { width: 100%; height: 100%; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+
+  ::selection { background: var(--selection-bg); }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring-color);
+    outline-offset: 2px;
+  }
+
+  button {
+    font-family: inherit;
+    font-size: inherit;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  a { color: var(--color-primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+}
+
+@import './styles/terminal.css' layer(components);
+@import './styles/panels.css' layer(components);
+@import './styles/animations.css' layer(components);
+@import './styles/utilities.css' layer(utilities);

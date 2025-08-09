@@ -1,0 +1,19 @@
+@layer utilities {
+  .text-brand { color: var(--ansi-10); }
+  .text-info { color: var(--color-info); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-muted { color: var(--text-muted); }
+  .text-success { color: var(--color-success); }
+  .text-accent { color: var(--color-primary); }
+  .text-prompt { color: var(--ansi-2); }
+
+  .bg-warning { background-color: rgba(252, 233, 79, 0.15); }
+
+  .sr-only {
+    position: absolute !important;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+}
