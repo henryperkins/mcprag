@@ -122,6 +122,7 @@ export function Header() {
           {/* Session Controls */}
           <div className="relative">
             <button
+              id="session-button"
               ref={sessionButtonRef}
               onClick={() => setShowSessionMenu(!showSessionMenu)}
               className="flex items-center gap-2 px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
