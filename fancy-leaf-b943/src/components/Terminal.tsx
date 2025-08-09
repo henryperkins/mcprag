@@ -172,14 +172,8 @@ Type your prompt and press Enter to submit.
       return;
     }
     
-    // Ctrl+V - Paste
-    if (e.ctrlKey && e.key.toLowerCase() === 'v') {
-      e.preventDefault();
-      navigator.clipboard.readText().then(text => {
-        setInput(prev => prev + text);
-      });
-      return;
-    }
+    // Ctrl+V - Paste (let browser handle it naturally)
+    // Removed custom paste handling to allow natural contenteditable behavior
     
     // Ctrl+L - Clear
     if (e.ctrlKey && e.key.toLowerCase() === 'l') {
@@ -215,6 +209,29 @@ Type your prompt and press Enter to submit.
     setInput(text);
   };
   
+  // Sync contenteditable with state
+  useEffect(() => {
+    if (inputRef.current && document.activeElement === inputRef.current) {
+      const selection = window.getSelection();
+      const range = selection?.getRangeAt(0);
+      const offset = range?.startOffset || 0;
+      
+      if (inputRef.current.textContent !== input) {
+        inputRef.current.textContent = input;
+        
+        // Restore cursor position
+        if (selection && inputRef.current.firstChild) {
+          const newRange = document.createRange();
+          const textNode = inputRef.current.firstChild;
+          newRange.setStart(textNode, Math.min(offset, textNode.textContent?.length || 0));
+          newRange.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
+        }
+      }
+    }
+  }, [input]);
+  
   // Update cursor position
   useEffect(() => {
     if (cursorRef.current && inputRef.current) {
@@ -249,7 +266,7 @@ Type your prompt and press Enter to submit.
         </div>
       </div>
       
-      <div ref={outputRef} className="terminal-output" style={{ flex: 1, overflowY: 'auto' }}>
+      <div ref={outputRef} className="terminal-output">
         {transcript.map((msg, idx) => (
           <div key={idx} className="terminal-line">
             {renderAnsiToSpans(msg.text)}
@@ -271,9 +288,7 @@ Type your prompt and press Enter to submit.
           role="textbox"
           aria-label="Terminal input"
           aria-multiline="false"
-        >
-          {input}
-        </div>
+        />
         {!isStreaming && <span ref={cursorRef} className="cursor block" />}
       </div>
       
