@@ -286,7 +286,7 @@ export const FileTree: React.FC = () => {
         aria-multiselectable="false"
         onKeyDown={handleKeyDown}
       >
-        {mockFileTree.map(node => renderNode(node))}
+        {mockFileTree.map((node, i, arr) => renderNode(node, 0, i + 1, arr.length))}
       </div>
       
       {/* Instructions for screen reader users */}
