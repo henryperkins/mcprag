@@ -197,7 +197,7 @@ export const FileTree: React.FC = () => {
     }
   }, [visibleNodes, focusedPath, expanded, toggleExpand, selectNode]);
   
-  const renderNode = (node: FileNode, depth = 0): React.ReactNode => {
+  const renderNode = (node: FileNode, depth = 0, posInSet?: number, setSize?: number): React.ReactNode => {
     const isExpanded = expanded.has(node.path);
     const isSelected = selected === node.path;
     const isFocused = focusedPath === node.path;
@@ -227,8 +227,8 @@ export const FileTree: React.FC = () => {
           aria-expanded={node.type === 'folder' ? isExpanded : undefined}
           aria-selected={isSelected}
           aria-level={depth + 1}
-          aria-setsize={node.type === 'folder' && node.children ? node.children.length : undefined}
-          aria-posinset={1}
+          aria-setsize={setSize}
+          aria-posinset={posInSet}
           tabIndex={isFocused ? 0 : -1}
         >
           <span className="file-tree-icon text-muted" aria-hidden="true">
@@ -240,7 +240,7 @@ export const FileTree: React.FC = () => {
         </div>
         {node.type === 'folder' && isExpanded && node.children && (
           <div role="group">
-            {node.children.map(child => renderNode(child, depth + 1))}
+            {node.children.map((child, i, arr) => renderNode(child, depth + 1, i + 1, arr.length))}
           </div>
         )}
       </div>

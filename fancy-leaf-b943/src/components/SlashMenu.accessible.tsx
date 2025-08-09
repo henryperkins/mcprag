@@ -162,7 +162,7 @@ export function SlashMenu({
       aria-label="Slash commands"
       aria-activedescendant={activeDescendantId}
       id={listboxId}
-      tabIndex={-1}
+      tabIndex={0}
     >
       {filteredCommands.length === 0 ? (
         <div className="slash-menu-empty text-muted" role="option" aria-selected="false">
