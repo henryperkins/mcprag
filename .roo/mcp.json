@@ -50,6 +50,27 @@
       "args": [
         "mcp-remote",
         "https://browser.mcp.cloudflare.com/sse"
+      ],
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--browser=",
+        "--headless=",
+        "--viewport-size="
+      ],
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
       ]
     }
   }

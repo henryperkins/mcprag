@@ -4,156 +4,187 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a React + TypeScript application built with Vite and deployed to Cloudflare Workers. It combines a React frontend with a Cloudflare Worker backend API, enabling edge-deployed full-stack applications.
+Cloudflare Workers-based React Terminal UI application built with Vite, TypeScript, and React 19. This is a Claude Code terminal interface that runs on Cloudflare's edge network and provides an interactive Claude assistant experience.
 
-## Essential Commands
+## Development Commands
 
-```bash
-# Development
-npm run dev          # Start Vite dev server with HMR
+### Package Management
+- `npm install` or `yarn install` - Install dependencies
+- `npm ci` or `yarn install --frozen-lockfile` - Install dependencies for CI/CD
+- `npm update` or `yarn upgrade` - Update dependencies
 
-# Build & Preview
-npm run build        # TypeScript check + Vite build
-npm run preview      # Build and preview production build locally
+### Build Commands
+- `npm run build` - Build TypeScript and Vite production bundle
+- `npm run dev` - Start Vite development server
+- `npm run preview` - Build and preview production bundle
+- `npm run deploy` - Build and deploy to Cloudflare Workers
+- `npm run cf-typegen` - Generate Cloudflare types
 
-# Code Quality
-npm run lint         # Run ESLint
+### Testing Commands
+- No test scripts configured yet (consider adding Vitest or Jest)
+- Integration test script available: `./test-integration.sh`
 
-# Deployment
-npm run deploy       # Build and deploy to Cloudflare Workers
-npm run cf-typegen   # Generate TypeScript types from Cloudflare configuration
+### Code Quality Commands
+- `npm run lint` - Run ESLint for code linting
+- No lint:fix script configured (add `eslint . --fix`)
+- No format script configured (consider adding Prettier)
+- No explicit typecheck script (runs via `tsc -b` in build)
+
+### Development Tools
+- No Storybook configured
+- No bundle analyzer configured (consider vite-bundle-visualizer)
+- No clean script (add `rm -rf dist node_modules/.vite`)
+
+## Technology Stack
+
+### Core Technologies
+- **JavaScript/TypeScript** - Primary programming languages
+- **Node.js** - Runtime environment
+- **npm/yarn** - Package management
+
+### Frameworks & Libraries
+- **React 19** - Latest React with hooks and functional components
+- **Zustand** - State management (v5.0.7)
+- **Monaco Editor** - Code editor component
+- **Lucide React** - Icon library
+- **Sonner** - Toast notifications
+- **React Resizable Panels** - Layout management
+- **@anthropic-ai/claude-code** - Claude Code SDK (v1.0.70)
+
+### Build Tools
+- **Vite 7** - Primary build tool and dev server
+- **@vitejs/plugin-react-swc** - React Fast Refresh with SWC
+- **@cloudflare/vite-plugin** - Cloudflare Workers integration
+- **Wrangler** - Cloudflare Workers CLI and deployment tool
+- **TypeScript 5.8** - Type checking and compilation
+
+### Testing Framework
+- No testing framework configured
+- Recommended: Add Vitest for unit tests (integrates well with Vite)
+- Consider @testing-library/react for component testing
+
+### Code Quality Tools
+- **ESLint 9** - JavaScript/TypeScript linter with:
+  - typescript-eslint v8.35
+  - eslint-plugin-react-hooks
+  - eslint-plugin-react-refresh
+- **TypeScript 5.8** - Static type checking
+- No Prettier configured (recommend adding)
+- No Husky configured (consider for pre-commit hooks)
+
+## Project Structure Guidelines
+
+### Current File Organization
+```
+src/
+├── components/     # React UI components (Terminal, Header, etc.)
+├── hooks/         # Custom React hooks (useAutoScrollNearBottom)
+├── utils/         # Utility functions (ansi, crypto, persist)
+├── store/         # Zustand state management
+│   ├── history.state.ts
+│   ├── messages.state.ts
+│   ├── session.state.ts
+│   └── toolCalls.state.ts
+├── styles/        # CSS modules (terminal.css, animations.css)
+├── assets/        # Static assets (SVGs)
+└── worker/        # Cloudflare Worker code
 ```
 
-## Architecture
+### Naming Conventions (Current Project)
+- **Files**: PascalCase for components (`Terminal.tsx`), camelCase for utilities (`ansi.ts`)
+- **Components**: PascalCase (`Terminal`, `ChatPane`, `Header`)
+- **Functions**: camelCase (`useAutoScrollNearBottom`, `parseAnsi`)
+- **State files**: `.state.ts` suffix for Zustand stores
+- **Types**: Defined in component files or `vite-env.d.ts`
 
-### Frontend (React SPA)
-- **Entry Point**: `src/main.tsx` - React app bootstrap with StrictMode
-- **Main Component**: `src/App.tsx` - Root component with example API integration
-- **Build System**: Vite with React SWC plugin for fast builds and HMR
-- **Assets**: Static assets in `public/` and `src/assets/`
+## TypeScript Guidelines
 
-### Backend (Cloudflare Worker)
-- **Entry Point**: `worker/index.ts` - Cloudflare Worker handling API routes
-- **API Pattern**: Routes starting with `/api/` are handled by the Worker
-- **Configuration**: `wrangler.jsonc` defines Worker settings and bindings
-- **TypeScript**: Separate `tsconfig.worker.json` for Worker-specific types
+### Type Safety
+- Enable strict mode in `tsconfig.json`
+- Use explicit types for function parameters and return values
+- Prefer interfaces over types for object shapes
+- Use union types for multiple possible values
+- Avoid `any` type - use `unknown` when type is truly unknown
 
-### Build Configuration
-- **TypeScript**: Project references split between app, node, and worker contexts
-- **Vite Config**: Uses `@cloudflare/vite-plugin` for Worker integration
-- **ESLint**: Configured with TypeScript and React hooks plugins
+### Best Practices
+- Use type guards for runtime type checking
+- Leverage utility types (`Partial`, `Pick`, `Omit`, etc.)
+- Create custom types for domain-specific data
+- Use enums for finite sets of values
+- Document complex types with JSDoc comments
 
-## Key Patterns
+## Code Quality Standards
 
-### API Communication
-The frontend communicates with the Worker backend through `/api/` endpoints. Example from `src/App.tsx`:
-```typescript
-fetch('/api/')
-  .then((res) => res.json())
-  .then((data) => setName(data.name))
-```
+### ESLint Configuration
+- Use recommended ESLint rules for JavaScript/TypeScript
+- Enable React-specific rules if using React
+- Configure import/export rules for consistent module usage
+- Set up accessibility rules for inclusive development
 
-### Worker Request Handling
-The Worker checks URL pathname to route API vs static asset requests:
-```typescript
-if (url.pathname.startsWith("/api/")) {
-  return Response.json({ name: "Cloudflare" });
-}
-```
+### Prettier Configuration
+- Use consistent indentation (2 spaces recommended)
+- Set maximum line length (80-100 characters)
+- Use single quotes for strings
+- Add trailing commas for better git diffs
 
-### TypeScript Configuration
-The project uses TypeScript project references to separate:
-- `tsconfig.app.json` - React application code
-- `tsconfig.node.json` - Node.js tooling (Vite config)
-- `tsconfig.worker.json` - Cloudflare Worker code
+### Testing Standards
+- Aim for 80%+ test coverage
+- Write unit tests for utilities and business logic
+- Use integration tests for component interactions
+- Implement e2e tests for critical user flows
+- Follow AAA pattern (Arrange, Act, Assert)
 
-## Claude Code Web UI
+## Performance Optimization
 
-This project includes a **terminal-style web interface** that closely replicates the Claude Code CLI experience in the browser. The design prioritizes authenticity over modern web UI patterns.
+### Bundle Optimization
+- Use code splitting for large applications
+- Implement lazy loading for routes and components
+- Optimize images and assets
+- Use tree shaking to eliminate dead code
+- Analyze bundle size regularly
 
-### Terminal Interface Features
+### Runtime Performance
+- Implement proper memoization (React.memo, useMemo, useCallback)
+- Use virtualization for large lists
+- Optimize re-renders in React applications
+- Implement proper error boundaries
+- Use web workers for heavy computations
 
-- **Authentic CLI Look**: Deep blue/black gradient background with monospace font throughout
-- **Terminal Prompt**: Green prompt prefix showing `➜ ~Claude_Code:model-session` just like the CLI
-- **Session Initialization Display**: Shows Model, CWD, Mode, Session ID, Tools, and MCP servers on startup
-- **CLI-style Message Rendering**: 
-  - User input in yellow with full prompt prefix
-  - Assistant responses in white without prefixes
-  - Tool calls with purple tool names and emoji markers (🔧)
-  - Results with checkmarks/warning symbols and telemetry data
-- **Contenteditable Input**: Single-line terminal input with blinking cursor
-- **Keyboard-First Navigation**: All interactions via keyboard shortcuts
-- **Footer Status**: Shows available shortcuts and streaming status
+## Security Guidelines
 
-### Keyboard Shortcuts
-- `Enter`: Submit prompt
-- `Shift+Enter`: New line in prompt  
-- `↑/↓`: Navigate command history per session
-- `Ctrl+L`: Clear terminal (like real terminal)
-- `Ctrl+C`: Interrupt running operation
+### Dependencies
+- Regularly audit dependencies with `npm audit`
+- Keep dependencies updated
+- Use lock files (`package-lock.json`, `yarn.lock`)
+- Avoid dependencies with known vulnerabilities
 
-### Terminal Layout
-- **Header Bar**: "Claude Code" title with session ID
-- **Terminal Body**: Scrollable area with session info and message history
-- **Current Prompt**: Active input line with blinking cursor
-- **Footer**: Available keyboard shortcuts and status
+### Code Security
+- Sanitize user inputs
+- Use HTTPS for API calls
+- Implement proper authentication and authorization
+- Store sensitive data securely (environment variables)
+- Use Content Security Policy (CSP) headers
 
 ## Development Workflow
 
-1. Run `npm run dev` to start the Vite dev server with Cloudflare runtime emulation
-2. Frontend changes in `src/` trigger HMR
-3. Worker changes in `worker/` require restart
-4. Test production build with `npm run preview`
-5. Deploy to Cloudflare with `npm run deploy`
+### Before Starting
+1. Check Node.js version (16+ required)
+2. Install dependencies with `npm install`
+3. Configure Cloudflare settings in `wrangler.jsonc`
+4. Build project with `npm run build` to verify TypeScript
 
-### Testing the Terminal UI
-1. Open http://localhost:5173 in your browser
-2. You'll see a terminal interface that looks like the Claude Code CLI
-3. Type prompts and press Enter to see mock responses
-4. Use keyboard shortcuts to navigate like a real terminal
-5. In production, replace mock Worker with actual Claude Code SDK integration
+### During Development
+1. Use TypeScript for type safety
+2. Run linter frequently to catch issues early
+3. Write tests for new features
+4. Use meaningful commit messages
+5. Review code changes before committing
 
-## Cloudflare Workers Best Practices
-
-### Code Standards
-- Use TypeScript for type safety
-- Use ES modules exclusively (no CommonJS)
-- Minimize external dependencies to reduce bundle size
-- Never hardcode secrets - use environment variables or Wrangler secrets
-- Implement comprehensive error handling with meaningful error messages
-
-### Available Platform Services
-When developing features, leverage these Cloudflare services through bindings:
-- **KV**: Key-value storage for simple data
-- **D1**: SQLite database for relational data
-- **R2**: Object storage for files and media
-- **Durable Objects**: Stateful, consistent computing for real-time features
-- **Queues**: Async task processing
-- **Workers AI**: AI model inference
-- **Vectorize**: Vector embeddings for semantic search
-
-### Performance Considerations
-- Minimize cold starts by keeping Worker code lightweight
-- Implement strategic caching for frequently accessed data
-- Use streaming for large responses or AI-generated content
-- Be aware of Workers platform limits (CPU time, memory, subrequest limits)
-
-### Security Guidelines
-- Validate all incoming requests
-- Implement proper CORS headers for API endpoints
-- Use appropriate security headers (CSP, X-Frame-Options, etc.)
-- Sanitize user inputs before processing
-- Implement rate limiting for API endpoints
-
-### React + Workers Integration Patterns
-- The Worker serves as both static asset server and API backend
-- SPA routing handled by `not_found_handling: "single-page-application"` in wrangler.jsonc
-- API routes should be prefixed with `/api/` for clear separation
-- Use `fetch()` from React to interact with Worker API endpoints
-- Consider implementing WebSocket support for real-time features using Durable Objects
-
-### Deployment Considerations
-- Set appropriate `compatibility_date` in wrangler.jsonc
-- Configure observability for production monitoring
-- Use environment-specific configurations for staging/production
-- Consider implementing preview deployments for pull requests
+### Before Committing
+1. Check linting: `npm run lint`
+2. Test production build: `npm run build`
+3. Preview locally: `npm run preview`
+4. Consider adding:
+   - `npm run typecheck` script
+   - Prettier formatting
+   - Test suite

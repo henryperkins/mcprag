@@ -278,7 +278,9 @@
 
 /* Ensure spans render inline with proper text flow */
 .terminal-line span {
-  display: inline;
+  /* Remove display: inline to allow natural flow */
   direction: ltr;
   unicode-bidi: normal;
+  /* Preserve whitespace in spans */
+  white-space: inherit;
 }

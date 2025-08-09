@@ -129,7 +129,6 @@ function createSpan(text: string, state: AnsiState, key: number): ReactNode {
   // Always wrap text in a span element for consistent rendering
   return React.createElement('span', {
     key,
-    className: classes.length > 0 ? classes.join(' ') : undefined,
-    style: { display: 'inline' }
+    className: classes.length > 0 ? classes.join(' ') : undefined
   }, text);
 }

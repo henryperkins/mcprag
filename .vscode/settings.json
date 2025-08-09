@@ -1,5 +1,6 @@
 {
     "git.ignoreLimitWarning": true,
     "python-envs.pythonProjects": [],
-    "python.analysis.autoImportCompletions": true
+    "python.analysis.autoImportCompletions": true,
+    "agentTodos.collapsedMode": false
 }
