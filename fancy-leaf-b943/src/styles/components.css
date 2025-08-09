@@ -540,3 +540,62 @@
   .chat-message-status-icon { font-size: var(--font-sm); }
 }
 
+@layer components {
+  /* Claude Code-style welcome callout (terra-cotta only here) */
+  .cc-callout { 
+    margin: var(--space-6) var(--space-8);
+    border: 1px solid #DA7756;
+    background: linear-gradient(180deg, rgba(218,119,86,.08), transparent);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+  }
+  .cc-callout-title {
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: 4px 10px; border-radius: 8px;
+    border: 1px solid #DA7756; background: rgba(218,119,86,.08);
+    font-weight: var(--weight-semibold);
+  }
+  .cc-callout-body { color: var(--text-secondary); white-space: pre-wrap; margin-top: var(--space-3); }
+  .cc-strong { color: var(--text-primary); }
+
+  /* Prompt shell like screenshots */
+  .terminal-input { 
+    background: transparent; border-top: none; box-shadow: none;
+    padding: var(--space-3) var(--space-8);
+  }
+  .terminal-input-shell {
+    display: flex; align-items: center; gap: var(--space-3);
+    border: 1px solid var(--border-default);
+    background: var(--bg-secondary);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .terminal-prompt-tile {
+    width: 28px; height: 28px; display: grid; place-items: center;
+    border: 1px solid var(--border-subtle); border-radius: 8px;
+    background: var(--bg-tertiary); color: var(--text-primary); font-weight: 700;
+  }
+  .terminal-input-field {
+    flex: 1; min-height: 28px;
+    background: transparent; border: 0; padding: 0;
+  }
+  .terminal-input-field:focus { box-shadow: none; }
+
+  /* Cursor tint a bit subtler */
+  .cursor.block { background: rgba(var(--primary-rgb), .55); }
+
+  /* Slash list under the prompt (not a floating popover) */
+  .slash-menu { 
+    position: static; margin-top: var(--space-3);
+    background: transparent; border: 0; border-radius: 0;
+    padding: 0; max-height: none;
+  }
+  .slash-menu-item {
+    display: grid; grid-template-columns: 200px 1fr; column-gap: var(--space-4);
+    padding: 6px 4px; border-radius: 6px;
+  }
+  .slash-menu-item:hover, .slash-menu-item.selected {
+    background: var(--bg-hover);
+  }
+  .slash-command { color: var(--text-primary); }
+  .slash-description { color: var(--text-secondary); }
+}

@@ -4,6 +4,8 @@ import { useSessionStore } from '../store/session';
 import { usePerformanceMonitor } from '../store/unified.adapter';
 import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom';
 import { renderAnsiToSpans } from '../utils/ansi';
+import { claudeService, type ClaudeMessage } from '../services/claude';
+import { toast } from 'sonner';
 
 const MAX_VISIBLE_LINES = 2000;
 const BATCH_INTERVAL_MS = 16; // ~60fps
@@ -13,6 +15,7 @@ export const Terminal: React.FC = () => {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [showLoadMore, setShowLoadMore] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
   
   const inputRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -42,20 +45,8 @@ export const Terminal: React.FC = () => {
     return transcript.slice(start);
   }, [transcript]);
   
-  // Initialize session info on mount
-  useEffect(() => {
-    const initMessage = `\x1b[32m➜ Claude Code Terminal\x1b[0m
-\x1b[90mModel: Claude 3.5 Sonnet
-CWD: ${window.location.pathname}
-Mode: Interactive
-Session ID: ${sessionId}
-Tools: Available
-MCP Servers: Connected\x1b[0m
-
-Type your prompt and press Enter to submit.
-`;
-    actions.appendTranscript({ role: 'assistant', text: initMessage });
-  }, [actions, sessionId]);
+  // Leave transcript empty at start; we'll show a styled intro block in the UI
+  useEffect(() => { /* intro is handled by a styled callout block */ }, []);
   
   // Batch stream updates with RAF
   const flushBatch = useCallback(() => {
@@ -139,81 +130,101 @@ Type your prompt and press Enter to submit.
     
     const command = input.trim();
     setInput('');
+    setShowIntro(false);
     
     // Add to history and transcript
     actions.pushHistory(command);
     actions.appendTranscript({
       role: 'user',
-      text: `\x1b[32m➜ ~Claude_Code:model-session\x1b[0m \x1b[33m${command}\x1b[0m`
+      text: `\x1b[32m➜ ~Claude_Code:${sessionId || 'new-session'}\x1b[0m \x1b[33m${command}\x1b[0m`
     });
     
     // Start streaming response
     setIsStreaming(true);
     
     try {
-      const response = await fetch('/api/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream'
-        },
-        body: JSON.stringify({ prompt: command })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                // Flush any remaining batch
-                if (streamBatchRef.current.length > 0) {
-                  flushBatch();
-                }
-                setIsStreaming(false);
-                markInteraction('terminal:stream-complete');
-                measureInteraction('terminal:stream-complete', 'cc:terminal:submit-start');
-                break;
+      await claudeService.sendPrompt(command, {
+        sessionId: sessionId || undefined,
+        continueSession: !!sessionId,
+        maxTurns: 3,
+        permissionMode: 'acceptEdits',
+        allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'WebSearch', 'Grep', 'Glob'],
+        onMessage: (message: ClaudeMessage) => {
+          // Handle different message types
+          switch (message.type) {
+            case 'system':
+              if (message.subtype === 'init' && message.content) {
+                addToStreamBatch(`\x1b[90m${message.content}\x1b[0m\n`);
               }
-              addToStreamBatch(data);
-            }
+              break;
+              
+            case 'assistant':
+              if (message.content) {
+                addToStreamBatch(message.content);
+              }
+              break;
+              
+            case 'tool-call':
+              if (message.toolName) {
+                addToStreamBatch(`\n\x1b[35m🔧 Tool:\x1b[0m ${message.toolName}\n`);
+                if (message.toolArguments) {
+                  const argsStr = JSON.stringify(message.toolArguments, null, 2);
+                  addToStreamBatch(`\x1b[90m${argsStr}\x1b[0m\n`);
+                }
+              }
+              break;
+              
+            case 'tool-output':
+              if (message.toolResult) {
+                const resultStr = typeof message.toolResult === 'string' 
+                  ? message.toolResult 
+                  : JSON.stringify(message.toolResult, null, 2);
+                addToStreamBatch(`\x1b[32m✓\x1b[0m ${resultStr}\n`);
+              }
+              break;
+              
+            case 'result':
+              if (message.content) {
+                addToStreamBatch(`\n${message.content}\n`);
+              }
+              if (message.duration_ms || message.total_cost_usd) {
+                const stats = [];
+                if (message.duration_ms) stats.push(`${message.duration_ms}ms`);
+                if (message.total_cost_usd) stats.push(`$${message.total_cost_usd.toFixed(4)}`);
+                if (message.num_turns) stats.push(`${message.num_turns} turns`);
+                if (stats.length > 0) {
+                  addToStreamBatch(`\n\x1b[90mTelemetry: ${stats.join(' | ')}\x1b[0m\n`);
+                }
+              }
+              break;
           }
-        }
-      }
-    } catch {
-      // Fallback mock response for development
-      const mockResponse = `\x1b[35m🔧 Tool:\x1b[0m Executing command...
-\x1b[32m✓\x1b[0m Operation completed successfully
-\x1b[90mTelemetry: 42ms | Tokens: 128\x1b[0m`;
+        },
+        onError: (error: Error) => {
+          console.error('Claude service error:', error);
+          toast.error(`Error: ${error.message}`);
+          addToStreamBatch(`\n\x1b[31m✗ Error:\x1b[0m ${error.message}\n`);
+        },
+        onComplete: () => {
+          // Flush any remaining batch
+          if (streamBatchRef.current.length > 0) {
+            flushBatch();
+          }
+          setIsStreaming(false);
+          markInteraction('terminal:stream-complete');
+          measureInteraction('terminal:stream-complete', 'cc:terminal:submit-start');
+        },
+      });
+    } catch (error) {
+      console.error('Failed to send prompt:', error);
+      toast.error('Failed to connect to Claude service');
+      addToStreamBatch(`\n\x1b[31m✗ Connection Error\x1b[0m\n`);
       
-      // Simulate batched streaming
-      const chunkSize = 10;
-      for (let i = 0; i < mockResponse.length; i += chunkSize) {
-        await new Promise(resolve => setTimeout(resolve, 20));
-        addToStreamBatch(mockResponse.slice(i, i + chunkSize));
-      }
-      
-      // Final flush
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Flush and cleanup
       if (streamBatchRef.current.length > 0) {
         flushBatch();
       }
       setIsStreaming(false);
-      markInteraction('terminal:mock-complete');
-      measureInteraction('terminal:mock-complete', 'cc:terminal:submit-start');
+      markInteraction('terminal:error');
     }
   };
   
@@ -222,6 +233,9 @@ Type your prompt and press Enter to submit.
     if (e.ctrlKey && e.key.toLowerCase() === 'c') {
       e.preventDefault();
       if (isStreaming) {
+        // Abort the Claude service request
+        claudeService.abort();
+        
         // Flush pending batches
         if (streamBatchRef.current.length > 0) {
           flushBatch();
@@ -334,6 +348,14 @@ Type your prompt and press Enter to submit.
       </div>
       
       <div ref={outputRef} className="terminal-output" style={{ flex: 1, overflowY: 'auto' }}>
+        {showIntro && (
+          <div className="cc-callout" role="note" aria-label="Welcome">
+            <div className="cc-callout-title">* Welcome to <span className="cc-strong">Claude Code</span>!</div>
+            <div className="cc-callout-body">
+              {`/help for help, /status for your current setup\n\ncwd: ${window.location.pathname}`}
+            </div>
+          </div>
+        )}
         {showLoadMore && (
           <button 
             className="terminal-load-more"
@@ -351,31 +373,27 @@ Type your prompt and press Enter to submit.
       </div>
       
       <div className="terminal-input">
-        <span className="terminal-prompt text-prompt">
-          ➜ ~Claude_Code:model-session
-        </span>
-        <div
-          ref={inputRef}
-          className="terminal-input-field"
-          contentEditable={!isStreaming}
-          onKeyDown={handleKeyDown}
-          onInput={handleInput}
-          suppressContentEditableWarning
-          role="textbox"
-          aria-label="Terminal input"
-          aria-multiline="false"
-        >
-          {input}
+        <div className="terminal-input-shell" role="group" aria-label="Prompt">
+          <span className="terminal-prompt-tile" aria-hidden="true">›</span>
+          <div
+            ref={inputRef}
+            className="terminal-input-field"
+            contentEditable={!isStreaming}
+            onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            suppressContentEditableWarning
+            role="textbox"
+            aria-label="Terminal input"
+            aria-multiline="false"
+          >
+            {input}
+          </div>
         </div>
         {!isStreaming && <span ref={cursorRef} className="cursor block" />}
       </div>
       
       <div className="terminal-footer text-muted">
-        {isStreaming ? (
-          <span>Streaming... Press Ctrl+C to interrupt</span>
-        ) : (
-          <span>Enter: Submit | Shift+Enter: Newline | ↑/↓: History | Ctrl+L: Clear | Ctrl+C: Interrupt</span>
-        )}
+        {isStreaming ? <span>Streaming... Press Ctrl+C to interrupt</span> : <span>? for shortcuts</span>}
       </div>
     </div>
   );

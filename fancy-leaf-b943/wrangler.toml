@@ -1,0 +1,71 @@
+name = "claude-code-gateway"
+main = "src/worker-gateway.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Account and deployment settings
+account_id = "YOUR_ACCOUNT_ID" # Replace with your Cloudflare account ID
+workers_dev = true
+route = { pattern = "claude.yourdomain.com/*", zone_name = "yourdomain.com" }
+
+# Environment variables
+[vars]
+BRIDGE_URL = "https://bridge.yourdomain.com/exec" # Your bridge via Cloudflare Tunnel
+TURNSTILE_SECRET = "" # Optional: Cloudflare Turnstile for bot protection
+ACCESS_JWT_SECRET = "" # Optional: For Cloudflare Access integration
+
+# Durable Objects binding
+[[durable_objects.bindings]]
+name = "SESSION"
+class_name = "SessionDO"
+script_name = "claude-code-gateway"
+
+# D1 Database for transcripts and metadata
+[[d1_databases]]
+binding = "DB"
+database_name = "claude-code"
+database_id = "YOUR_D1_DATABASE_ID" # Create with: wrangler d1 create claude-code
+
+# KV Namespace for user preferences (fast reads)
+[[kv_namespaces]]
+binding = "USER_PREFS"
+id = "YOUR_KV_NAMESPACE_ID" # Create with: wrangler kv namespace create USER_PREFS
+
+# R2 Bucket for file attachments
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "claude-code-files"
+
+# Queue for background jobs
+[[queues.producers]]
+binding = "JOBS"
+queue = "claude-code-jobs"
+
+[[queues.consumers]]
+queue = "claude-code-jobs"
+max_batch_size = 10
+max_batch_timeout = 30
+
+# Development overrides
+[env.development]
+vars = { BRIDGE_URL = "http://localhost:8787/exec" }
+
+# Production settings
+[env.production]
+route = { pattern = "claude-api.yourdomain.com/*", zone_name = "yourdomain.com" }
+logpush = true
+
+# Build configuration
+[build]
+command = "npm run build"
+watch_paths = ["src/**/*.ts"]
+
+# Upload rules (exclude files)
+[upload]
+exclude = ["node_modules", ".git", "*.env", "*.log", "dist"]
+
+# Migrations for D1
+[[migrations]]
+tag = "v1"
+new_classes = ["SessionDO"]
+new_sqlite_databases = ["claude-code"]
