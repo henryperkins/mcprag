@@ -17,6 +17,21 @@ interface QueryBody {
   disallowedTools?: string[]
 }
 
+// Frontend format from /api/claude/stream
+interface ClaudeStreamBody {
+  text: string
+  opts?: {
+    sessionId?: string
+    maxTurns?: number
+    permissionMode?: 'auto' | 'acceptAll' | 'acceptEdits' | 'confirmAll'
+    systemPrompt?: string
+    allowedTools?: string[]
+    cwd?: string
+    continueSession?: boolean
+    forceCLI?: boolean
+  }
+}
+
 // Define environment bindings
 export interface Env {
   ANTHROPIC_API_KEY?: string
@@ -65,9 +80,29 @@ export default {
     }
 
     // Query endpoint - main Claude Code interaction
-    if (url.pathname === '/api/query' && request.method === 'POST') {
+    // Support both /api/query and /api/claude/stream endpoints
+    if ((url.pathname === '/api/query' || url.pathname === '/api/claude/stream') && request.method === 'POST') {
       try {
-        const body: QueryBody = await request.json()
+        const rawBody = await request.json() as QueryBody | ClaudeStreamBody
+        
+        // Normalize the body format
+        let body: QueryBody
+        if ('text' in rawBody) {
+          // Frontend format from /api/claude/stream
+          const streamBody = rawBody as ClaudeStreamBody
+          body = {
+            prompt: streamBody.text,
+            sessionId: streamBody.opts?.sessionId,
+            maxTurns: streamBody.opts?.maxTurns,
+            permissionMode: streamBody.opts?.permissionMode,
+            systemPrompt: streamBody.opts?.systemPrompt,
+            allowedTools: streamBody.opts?.allowedTools,
+            // Additional opts properties can be handled here
+          }
+        } else {
+          // Standard QueryBody format
+          body = rawBody as QueryBody
+        }
         
         // Check if API key is configured (for production)
         const hasApiKey = !!env.ANTHROPIC_API_KEY
@@ -224,6 +259,16 @@ export default {
       }
     }
 
+    // Session creation endpoint (used by frontend)
+    if (url.pathname === '/api/session/create' && request.method === 'POST') {
+      const sessionId = crypto.randomUUID()
+      
+      return Response.json(
+        { sessionId },
+        { headers: corsHeaders }
+      )
+    }
+    
     // Sessions endpoint
     if (url.pathname === '/api/sessions' && request.method === 'GET') {
       // Return active sessions (in production, this might query a database)

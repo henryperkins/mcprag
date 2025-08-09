@@ -31,20 +31,50 @@ if ! wrangler whoami &> /dev/null; then
 fi
 
 echo -e "${GREEN}✓ Authenticated${NC}"
-ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account_id')
+# Get account info - newer wrangler versions don't support --json
+ACCOUNT_INFO=$(wrangler whoami 2>/dev/null | grep -oP 'Account ID: \K[a-f0-9]{32}' || true)
+if [ -z "$ACCOUNT_INFO" ]; then
+    # Try alternative method
+    ACCOUNT_INFO=$(wrangler whoami 2>&1 | grep -oP '│\s+\K[a-f0-9]{32}' || true)
+fi
+ACCOUNT_ID="$ACCOUNT_INFO"
+
+if [ -z "$ACCOUNT_ID" ]; then
+    echo -e "${YELLOW}⚠️  Could not auto-detect Account ID${NC}"
+    echo "Please enter your Cloudflare Account ID:"
+    read -r ACCOUNT_ID
+fi
+
 echo "Account ID: $ACCOUNT_ID"
 echo ""
 
 # Step 1: Create D1 Database
 echo "1️⃣ Creating D1 Database..."
 DB_NAME="claude-code"
-if wrangler d1 list | grep -q "$DB_NAME"; then
+if wrangler d1 list 2>/dev/null | grep -q "$DB_NAME"; then
     echo -e "${YELLOW}⚠️  Database '$DB_NAME' already exists${NC}"
-    DB_ID=$(wrangler d1 list --json | jq -r ".[] | select(.name==\"$DB_NAME\") | .uuid")
+    # Extract ID from list output
+    DB_ID=$(wrangler d1 list 2>/dev/null | grep "$DB_NAME" | awk '{print $1}' | head -1)
 else
-    DB_OUTPUT=$(wrangler d1 create "$DB_NAME" --json)
-    DB_ID=$(echo "$DB_OUTPUT" | jq -r '.uuid')
-    echo -e "${GREEN}✓ Created database: $DB_NAME${NC}"
+    echo "Creating database..."
+    DB_OUTPUT=$(wrangler d1 create "$DB_NAME" 2>&1)
+    # Try multiple methods to extract database ID
+    DB_ID=$(echo "$DB_OUTPUT" | grep -oP '"database_id":\s*"\K[^"]+' || true)
+    if [ -z "$DB_ID" ]; then
+        DB_ID=$(echo "$DB_OUTPUT" | grep -oP 'database_id = "\K[^"]+' || true)
+    fi
+    if [ -z "$DB_ID" ]; then
+        DB_ID=$(echo "$DB_OUTPUT" | grep -oP '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || true)
+    fi
+    
+    if [ -n "$DB_ID" ]; then
+        echo -e "${GREEN}✓ Created database: $DB_NAME${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Could not extract database ID automatically${NC}"
+        echo "Database was created. Please find the database_id in the output above."
+        echo "It looks like: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+        read -p "Enter the Database ID: " DB_ID
+    fi
 fi
 echo "   Database ID: $DB_ID"
 
@@ -65,8 +95,8 @@ KV_NAME="USER_PREFS"
 KV_OUTPUT=$(wrangler kv namespace create "$KV_NAME" --preview false 2>&1 || true)
 if echo "$KV_OUTPUT" | grep -q "already exists"; then
     echo -e "${YELLOW}⚠️  KV namespace '$KV_NAME' already exists${NC}"
-    # Get existing ID
-    KV_ID=$(wrangler kv namespace list --json | jq -r ".[] | select(.title==\"claude-code-gateway-$KV_NAME\") | .id")
+    # Get existing ID from list
+    KV_ID=$(wrangler kv namespace list 2>/dev/null | grep -E "(claude-code-gateway-)?$KV_NAME" | awk '{print $1}' | head -1)
 else
     KV_ID=$(echo "$KV_OUTPUT" | grep -oP 'id = "\K[^"]+')
     echo -e "${GREEN}✓ Created KV namespace: $KV_NAME${NC}"
@@ -77,7 +107,7 @@ echo ""
 # Step 3: Create R2 Bucket
 echo "3️⃣ Creating R2 Bucket..."
 R2_BUCKET="claude-code-files"
-if wrangler r2 bucket list | grep -q "$R2_BUCKET"; then
+if wrangler r2 bucket list 2>/dev/null | grep -q "$R2_BUCKET"; then
     echo -e "${YELLOW}⚠️  R2 bucket '$R2_BUCKET' already exists${NC}"
 else
     wrangler r2 bucket create "$R2_BUCKET"
@@ -105,7 +135,7 @@ echo ""
 # Step 4: Create Queue
 echo "4️⃣ Creating Queue..."
 QUEUE_NAME="claude-code-jobs"
-if wrangler queues list | grep -q "$QUEUE_NAME"; then
+if wrangler queues list 2>/dev/null | grep -q "$QUEUE_NAME"; then
     echo -e "${YELLOW}⚠️  Queue '$QUEUE_NAME' already exists${NC}"
 else
     wrangler queues create "$QUEUE_NAME"
@@ -142,7 +172,8 @@ echo "Building and deploying..."
 npm run build
 wrangler deploy
 
-WORKER_URL=$(wrangler deployments list --json | jq -r '.[0].url' 2>/dev/null || echo "https://claude-code-gateway.workers.dev")
+# Try to get worker URL from deployment
+WORKER_URL=$(wrangler deployments list 2>/dev/null | grep -oP 'https://[^\s]+' | head -1 || echo "https://claude-code-gateway.workers.dev")
 echo -e "${GREEN}✓ Worker deployed${NC}"
 echo "   URL: $WORKER_URL"
 echo ""
