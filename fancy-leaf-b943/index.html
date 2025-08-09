@@ -12,6 +12,8 @@
     <link rel="apple-touch-icon" href="/icons/icon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Claude Code</title>
+    <!-- Ensure CSS loads even before JS hydrates -->
+    <link rel="stylesheet" href="/src/index.css" />
   </head>
   <body>
     <div id="root"></div>

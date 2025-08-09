@@ -1,7 +1,7 @@
 // PostCSS config
 export default {
   plugins: {
-    '@tailwindcss/postcss': {},
+    // Tailwind handled via @tailwindcss/vite plugin
     autoprefixer: {},
   },
 }

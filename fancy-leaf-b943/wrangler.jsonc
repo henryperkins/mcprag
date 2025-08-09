@@ -8,6 +8,7 @@
 	"main": "worker/index.ts",
 	"compatibility_date": "2025-08-06",
 	"assets": {
+		"directory": "./dist/client",
 		"not_found_handling": "single-page-application"
 	},
 	"observability": {
@@ -38,6 +39,9 @@
 		// Optional: Use Google Vertex AI instead of Anthropic API
 		"CLAUDE_CODE_USE_VERTEX": ""
 	},
+	"routes": [
+		{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
+	],
 	"env": {
 		"production": {
 			"vars": {
@@ -49,7 +53,10 @@
 				"CLAUDE_CODE_USE_BEDROCK": "",
 				// Optional: Use Google Vertex AI instead of Anthropic API
 				"CLAUDE_CODE_USE_VERTEX": ""
-			}
+			},
+			"routes": [
+				{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
+			]
 		}
 	}
 	/**

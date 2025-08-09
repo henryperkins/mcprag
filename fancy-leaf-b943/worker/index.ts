@@ -2,17 +2,35 @@ export interface Env {
   BRIDGE_URL: string
 }
 
-// CORS headers for cross-origin requests
-const CORS_HEADERS = {
-  'access-control-allow-origin': 'https://claude-workers.lakefrontdigital.io',
-  'access-control-allow-headers': 'content-type',
-  'access-control-allow-methods': 'POST, GET, OPTIONS'
+// Build CORS headers dynamically to support local dev origins
+const makeCorsHeaders = (req: Request): Record<string, string> => {
+  const origin = req.headers.get('origin') || ''
+  let allowOrigin = '*'
+  try {
+    if (
+      origin && (
+        origin.startsWith('http://localhost') ||
+        origin.startsWith('http://127.0.0.1') ||
+        origin.endsWith('.workers.dev') ||
+        origin === 'https://claude-worker.lakefrontdigital.io'
+      )
+    ) {
+      allowOrigin = origin
+    }
+  } catch {
+    // ignore parsing errors; fall back to '*'
+  }
+  return {
+    'access-control-allow-origin': allowOrigin,
+    'access-control-allow-headers': 'content-type',
+    'access-control-allow-methods': 'POST, GET, OPTIONS',
+  }
 }
 
-const json = (data: unknown, init: ResponseInit = {}) => {
+const json = (req: Request, data: unknown, init: ResponseInit = {}) => {
   const headers = {
     'content-type': 'application/json',
-    ...CORS_HEADERS,
+    ...makeCorsHeaders(req),
     ...(init.headers || {})
   }
   return new Response(JSON.stringify(data), { status: 200, ...init, headers })
@@ -29,7 +47,7 @@ const sseProxy = async (req: Request, env: Env) => {
   const upstream = await fetch(bridge.toString(), init)
 
   if (!upstream.ok || !upstream.body) {
-    return json({ error: `Bridge error: ${upstream.status}` }, { status: 502 })
+    return json(req, { error: `Bridge error: ${upstream.status}` }, { status: 502 })
   }
 
   // stream back to client
@@ -44,7 +62,7 @@ const sseProxy = async (req: Request, env: Env) => {
       'cache-control': 'no-cache',
       'x-accel-buffering': 'no',
       'connection': 'keep-alive',
-      ...CORS_HEADERS
+      ...makeCorsHeaders(req)
     },
   })
 }
@@ -55,16 +73,16 @@ export default {
 
     // Handle OPTIONS preflight requests for CORS
     if (url.pathname.startsWith('/api/') && req.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS_HEADERS })
+      return new Response(null, { headers: makeCorsHeaders(req) })
     }
 
     // Health -> map to bridge /api/health
     if (url.pathname === '/api/health' && req.method === 'GET') {
       try {
         const r = await fetch(new URL('/api/health', new URL(env.BRIDGE_URL).origin).toString())
-        return json(await r.json(), { status: r.status })
+        return json(req, await r.json(), { status: r.status })
       } catch {
-        return json({ status: 'down' }, { status: 502 })
+        return json(req, { status: 'down' }, { status: 502 })
       }
     }
 
@@ -80,13 +98,13 @@ export default {
         headers: { 'content-type': 'application/json' },
         body: await req.text(),
       })
-      return json(await r.json(), { status: r.status })
+      return json(req, await r.json(), { status: r.status })
     }
 
     // Sessions -> forward to bridge
     if (url.pathname === '/api/sessions' && req.method === 'GET') {
       const r = await fetch(new URL('/api/sessions', new URL(env.BRIDGE_URL).origin).toString())
-      return json(await r.json(), { status: r.status })
+      return json(req, await r.json(), { status: r.status })
     }
 
     // Fallback to static asset handling (SPA mode configured in wrangler.jsonc)

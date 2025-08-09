@@ -8,6 +8,19 @@ export default {
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
   ],
+  safelist: [
+    // Custom token utilities used in studio components
+    'border-subtle',
+    'border-faint',
+    'text-muted',
+    'bg-bg-primary',
+    'bg-bg-primary/80',
+    'bg-bg-primary/85',
+    'bg-bg-elevated',
+    'bg-bg-elevated/60',
+    'bg-bg-tertiary',
+    'bg-bg-tertiary/90',
+  ],
   darkMode: 'class',
   theme: {
     extend: {
@@ -16,12 +29,11 @@ export default {
         success: 'var(--color-success)',
         info: 'var(--color-info)',
         muted: 'var(--text-muted)',
-        bg: {
-          primary: 'var(--bg-primary)',
-          secondary: 'var(--bg-secondary)',
-          tertiary: 'var(--bg-tertiary)',
-          elevated: 'var(--bg-elevated)',
-        },
+        // Flatten color keys to ensure utilities are generated predictably
+        'bg-primary': 'var(--bg-primary)',
+        'bg-secondary': 'var(--bg-secondary)',
+        'bg-tertiary': 'var(--bg-tertiary)',
+        'bg-elevated': 'var(--bg-elevated)',
       },
       borderColor: {
         subtle: 'var(--border-subtle)',
@@ -34,4 +46,3 @@ export default {
   },
   plugins: [forms(), typography()],
 }
-

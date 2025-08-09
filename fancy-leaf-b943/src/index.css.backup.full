@@ -1,8 +1,7 @@
-/* Tailwind v4 recommended import */
-@import "tailwindcss";
+@layer tokens, base, components, utilities, overrides;
 
-/* Custom layer declarations after Tailwind */
-@layer base {
+/* ===== Design Tokens Layer ===== */
+@layer tokens {
   :root {
     /* Font Stack */
     --font-mono: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -174,7 +173,9 @@
   }
 }
 
-/* Custom base styles */
+/* Tailwind layers */
+@tailwind base;
+
 @layer base {
   * { 
     margin: 0; 
@@ -337,6 +338,10 @@
     cursor: not-allowed;
   }
 }
+
+@tailwind components;
+
+@tailwind utilities;
 
 /* Project utilities (migrated from utilities.css) */
 @layer utilities {

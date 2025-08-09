@@ -1,0 +1,45 @@
+:root {
+  /* Fallbacks; your Tailwind tokens already exist. */
+  --bg-primary: #0f1115;
+  --bg-secondary: #0b0d12;
+  --bg-tertiary: #0a0c10;
+  --bg-elevated: #12151c;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-faint: rgba(255, 255, 255, 0.06);
+  --text-muted: rgba(255, 255, 255, 0.58);
+  --color-primary: #7aa2ff;
+  --color-success: #6ee7b7;
+  --color-info: #93c5fd;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+html, body, #root { height: 100%; background: var(--bg-primary); }
+
+kbd {
+  border-radius: 6px;
+  border: 1px solid var(--border-faint);
+  background: color-mix(in srgb, #fff 6%, transparent);
+  padding: 0 6px;
+}
+
+/* Smooth scroll containers */
+.scroll-smooth {
+  scroll-behavior: smooth;
+}
+
+/* Code block tweaks */
+.code-scroll { scrollbar-width: thin; }
+
+/* Minimal utility shims so custom token classes work in dev without Tailwind generating them */
+.border-subtle { border-color: var(--border-subtle) !important; }
+.border-faint { border-color: var(--border-faint) !important; }
+.text-muted { color: var(--text-muted) !important; }
+.bg-bg-primary { background-color: var(--bg-primary) !important; }
+.bg-bg-elevated { background-color: var(--bg-elevated) !important; }
+.bg-bg-tertiary { background-color: var(--bg-tertiary) !important; }
+
+/* Alpha variants using color-mix for readability */
+.bg-bg-primary\/80 { background-color: color-mix(in srgb, var(--bg-primary) 80%, transparent) !important; }
+.bg-bg-primary\/85 { background-color: color-mix(in srgb, var(--bg-primary) 85%, transparent) !important; }
+.bg-bg-elevated\/60 { background-color: color-mix(in srgb, var(--bg-elevated) 60%, transparent) !important; }
+.bg-bg-tertiary\/90 { background-color: color-mix(in srgb, var(--bg-tertiary) 90%, transparent) !important; }
