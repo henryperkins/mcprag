@@ -3,7 +3,7 @@
  * Handles SSE streaming, session coordination, and persistence
  */
 
-/// <reference path="./worker-types.d.ts" />
+import type {} from './worker-types.d.ts'
 
 // Environment bindings
 export interface Env {

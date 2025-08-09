@@ -29,12 +29,28 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
 	 */
 	"vars": {
+		// Bridge URL for Claude Code server - default to localhost for development
+		"BRIDGE_URL": "http://localhost:8787/api/claude/stream",
 		// Optional: Path to MCP servers configuration (JSON string)
 		"MCP_CONFIG": "",
 		// Optional: Use AWS Bedrock instead of Anthropic API
 		"CLAUDE_CODE_USE_BEDROCK": "",
 		// Optional: Use Google Vertex AI instead of Anthropic API
 		"CLAUDE_CODE_USE_VERTEX": ""
+	},
+	"env": {
+		"production": {
+			"vars": {
+				// Production Bridge URL via custom domain
+				"BRIDGE_URL": "https://bridge.claude-workers.lakefrontdigital.io/api/claude/stream",
+				// Optional: Path to MCP servers configuration (JSON string)
+				"MCP_CONFIG": "",
+				// Optional: Use AWS Bedrock instead of Anthropic API
+				"CLAUDE_CODE_USE_BEDROCK": "",
+				// Optional: Use Google Vertex AI instead of Anthropic API
+				"CLAUDE_CODE_USE_VERTEX": ""
+			}
+		}
 	}
 	/**
 	 * Note: Use secrets to store sensitive data.

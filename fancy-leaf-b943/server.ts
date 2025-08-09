@@ -1,35 +1,100 @@
-import express from 'express';
-import cors from 'cors';
-import { query, type QueryMessage } from '@anthropic-ai/claude-code';
+import express from 'express'
+import cors from 'cors'
+import crypto from 'node:crypto'
+import { query, type QueryMessage } from '@anthropic-ai/claude-code'
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const app = express()
+app.use(cors())
+app.use(express.json())
 
+type PermissionMode = 'acceptEdits' | 'plan' | 'ask'
 interface ClaudeRequestBody {
-  prompt: string;
+  prompt: string
+  sessionId?: string
   options?: {
-    systemPrompt?: string;
-    maxTurns?: number;
-    allowedTools?: string[];
-    continueSession?: boolean;
-    cwd?: string;
-    permissionMode?: 'acceptEdits' | 'plan' | 'ask';
-  };
+    systemPrompt?: string
+    maxTurns?: number
+    allowedTools?: string[]
+    continueSession?: boolean
+    cwd?: string
+    permissionMode?: PermissionMode
+    verbose?: boolean
+  }
 }
 
-app.post('/api/claude/stream', async (req, res) => {
-  const { prompt, options } = req.body as ClaudeRequestBody;
+if (!process.env.ANTHROPIC_API_KEY) {
+  // Fail fast so you notice during dev
+  console.warn('⚠️  ANTHROPIC_API_KEY not set. Set it in .dev.vars (dev) or via wrangler secret.')
+}
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
+// Track live streams so we can interrupt
+const sessions = new Map<
+  string,
+  { ended: boolean; end: () => void; abort?: AbortController }
+>()
+
+// Unified health
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'claude-code-bridge' })
+})
+
+// Minimal active sessions list
+app.get('/api/sessions', (_req, res) => {
+  res.json({ active: Array.from(sessions.keys()) })
+})
+
+// Interrupt by sessionId
+app.post('/api/interrupt', (req, res) => {
+  const { sessionId } = (req.body ?? {}) as { sessionId?: string }
+  if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
+  const sess = sessions.get(sessionId)
+  if (!sess) return res.status(404).json({ error: 'no such session' })
+  try {
+    sess.abort?.abort()
+    sess.end()
+    sessions.delete(sessionId)
+    return res.json({ ok: true, interrupted: sessionId })
+  } catch (e) {
+    return res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Main SSE endpoint used by the Worker
+app.post('/api/claude/stream', async (req, res) => {
+  const { prompt, sessionId: rawId, options } = req.body as ClaudeRequestBody
+  if (typeof prompt !== 'string' || !prompt.length) {
+    return res.status(400).json({ error: 'prompt required' })
+  }
+
+  const sessionId = rawId ?? crypto.randomUUID()
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`)
+    res.write(`data: ${JSON.stringify(data)}\n\n`)
+  }
+
+  // Heartbeat to keep proxies from killing the stream
+  const hb = setInterval(() => res.write(': hb\n\n'), 15000)
+
+  const abort = new AbortController()
+  sessions.set(sessionId, {
+    ended: false,
+    end: () => {
+      if (!res.writableEnded) res.end()
+      clearInterval(hb)
+    },
+    abort,
+  })
 
   try {
-    const messages: QueryMessage[] = [];
-    
-    for await (const message of query({
+    send('start', { sessionId })
+
+    const iterable = query({
       prompt,
       options: {
         systemPrompt: options?.systemPrompt,
@@ -38,39 +103,40 @@ app.post('/api/claude/stream', async (req, res) => {
         continueSession: options?.continueSession ?? false,
         cwd: options?.cwd ?? process.cwd(),
         permissionMode: options?.permissionMode ?? 'acceptEdits',
+        verbose: options?.verbose ?? false,
       },
-    })) {
-      messages.push(message);
-      
-      // Stream each message as SSE
-      res.write(`event: message\n`);
-      res.write(`data: ${JSON.stringify(message)}\n\n`);
+      // Some builds of the SDK may ignore AbortController; this is best-effort.
+      // @ts-expect-error: signal may not be typed in older versions
+      signal: abort.signal,
+    })
+
+    let count = 0
+    for await (const m of iterable as AsyncIterable<QueryMessage>) {
+      count++
+      send('message', { sessionId, ...m })
     }
-    
-    // Send completion event
-    res.write(`event: done\n`);
-    res.write(`data: ${JSON.stringify({ complete: true, messageCount: messages.length })}\n\n`);
-    res.end();
+
+    send('done', { sessionId, complete: true, messageCount: count })
   } catch (error) {
-    console.error('Claude query error:', error);
-    res.write(`event: error\n`);
-    res.write(`data: ${JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
-      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
-    })}\n\n`);
-    res.end();
+    send('error', {
+      sessionId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
+  } finally {
+    const s = sessions.get(sessionId)
+    s?.end()
+    sessions.delete(sessionId)
   }
-});
+})
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'claude-code-bridge' });
-});
+// Legacy simple health (kept for docs/scripts that call /health)
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'claude-code-bridge' }))
 
-const PORT = process.env.CLAUDE_BRIDGE_PORT || 8787;
-
+const PORT = process.env.CLAUDE_BRIDGE_PORT || 8787
 app.listen(PORT, () => {
-  console.log(`🤖 Claude Code bridge server running on http://localhost:${PORT}`);
-  console.log(`   Health check: http://localhost:${PORT}/health`);
-  console.log(`   Stream endpoint: POST http://localhost:${PORT}/api/claude/stream`);
-});
+  console.log(`🤖 Bridge on http://localhost:${PORT}`)
+  console.log(`   Health:  GET /api/health`)
+  console.log(`   Stream:  POST /api/claude/stream`)
+  console.log(`   Sessions GET /api/sessions`)
+  console.log(`   Interrupt POST /api/interrupt`)
+})

@@ -6,6 +6,7 @@ import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom';
 import { renderAnsiToSpans } from '../utils/ansi';
 import { claudeService, type ClaudeMessage } from '../services/claude';
 import { toast } from 'sonner';
+import { SlashMenu } from './SlashMenu';
 
 const MAX_VISIBLE_LINES = 2000;
 const BATCH_INTERVAL_MS = 16; // ~60fps
@@ -16,6 +17,10 @@ export const Terminal: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showLoadMore, setShowLoadMore] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
+  // Slash menu state
+  const [isSlashOpen, setIsSlashOpen] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [slashIndex, setSlashIndex] = useState(0);
   
   const inputRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -113,6 +118,13 @@ export const Terminal: React.FC = () => {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Close slash menu when streaming or input cleared
+  useEffect(() => {
+    if (isStreaming) {
+      setIsSlashOpen(false);
+    }
+  }, [isStreaming]);
   
   // Cleanup batch timer on unmount
   useEffect(() => {
@@ -125,6 +137,9 @@ export const Terminal: React.FC = () => {
   
   const handleSubmit = async () => {
     if (!input.trim() || isStreaming) return;
+
+    // If slash menu is open and input looks like a slash command, do not submit yet
+    if (isSlashOpen) return;
     
     markInteraction('terminal:submit-start');
     
@@ -229,6 +244,14 @@ export const Terminal: React.FC = () => {
   };
   
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    // While slash menu is open, let it handle arrows/enter/escape
+    if (isSlashOpen) {
+      // Allow typing and backspace to continue filtering; prevent history navigation
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === 'Escape' || e.key === 'Home' || e.key === 'End') {
+        // Let the SlashMenu's capture-phase handler consume this
+        return;
+      }
+    }
     // Ctrl+C - Interrupt
     if (e.ctrlKey && e.key.toLowerCase() === 'c') {
       e.preventDefault();
@@ -289,10 +312,23 @@ export const Terminal: React.FC = () => {
       return;
     }
   };
-  
+
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     const text = e.currentTarget.textContent || '';
     setInput(text);
+    // Simple slash command detection: show menu when input starts with '/'
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith('/')) {
+      setIsSlashOpen(true);
+      // Use the portion after the initial '/'
+      const idx = trimmed.indexOf(' ');
+      const filter = (idx === -1 ? trimmed : trimmed.slice(0, idx)).replace(/^\//, '');
+      setSlashFilter(filter);
+      setSlashIndex(0);
+    } else {
+      setIsSlashOpen(false);
+      setSlashFilter('');
+    }
   };
   
   // Throttled cursor position update
@@ -390,6 +426,33 @@ export const Terminal: React.FC = () => {
           </div>
         </div>
         {!isStreaming && <span ref={cursorRef} className="cursor block" />}
+
+        {/* Inline slash menu under the prompt, matching screenshot */}
+        <SlashMenu
+          isOpen={isSlashOpen}
+          filter={slashFilter}
+          onSelect={(cmd) => {
+            // Replace current input with the selected command and a space
+            const newVal = `${cmd} `;
+            setInput(newVal);
+            setIsSlashOpen(false);
+            // Put caret at end
+            requestAnimationFrame(() => {
+              const el = inputRef.current;
+              if (!el) return;
+              el.focus();
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              range.collapse(false);
+              const sel = window.getSelection();
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            });
+          }}
+          onClose={() => setIsSlashOpen(false)}
+          selectedIndex={slashIndex}
+          onSelectedIndexChange={setSlashIndex}
+        />
       </div>
       
       <div className="terminal-footer text-muted">
