@@ -1,6 +1,5 @@
 import { useToolCalls } from '../store/toolCalls.state'
 import { Loader2, CheckCircle, XCircle, Terminal } from 'lucide-react'
-import '../styles/tool-call.css'
 
 interface ToolCallLineProps {
   callId: string

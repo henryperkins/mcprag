@@ -6,7 +6,6 @@ import {
   Terminal, User, Bot, CheckCircle, XCircle, AlertTriangle, 
   Info, Download, Clock, DollarSign
 } from 'lucide-react'
-import '../styles/transcript.css'
 
 export function Transcript() {
   const { messages } = useMessages()

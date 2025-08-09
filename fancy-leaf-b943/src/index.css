@@ -38,6 +38,14 @@
     --color-info: #59e3e3;
     --color-info-hover: #6be6e6;
     --color-muted: #565867;
+
+    /* RGB variants for opacity utilities */
+    /* Add these alongside hex tokens to support rgba(var(--*-rgb), x) */
+    --primary-rgb: 38, 187, 217;   /* #26bbd9 */
+    --success-rgb: 41, 211, 152;   /* #29d398 */
+    --warning-rgb: 250, 183, 149;  /* #fab795 */
+    --error-rgb:   233,  86, 120;  /* #e95678 */
+    --info-rgb:     89, 227, 227;  /* #59e3e3 */
     
     /* Background Tokens - Dark Theme */
     --bg-primary: #0a0b0f;
@@ -195,6 +203,22 @@
     position: relative;
   }
 
+  /* App container (migrated from App.css) */
+  .app-container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-md);
+    line-height: var(--leading-normal);
+    overflow: hidden;
+    direction: ltr;
+    unicode-bidi: normal;
+  }
+
   /* Custom Scrollbar */
   ::-webkit-scrollbar { 
     width: 10px; 
@@ -318,3 +342,24 @@
 @tailwind components;
 
 @tailwind utilities;
+
+/* Project utilities (migrated from utilities.css) */
+@layer utilities {
+  .text-brand { color: var(--ansi-10); }
+  .text-info { color: var(--color-info); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-muted { color: var(--text-muted); }
+  .text-success { color: var(--color-success); }
+  .text-accent { color: var(--color-primary); }
+  .text-prompt { color: var(--ansi-2); }
+
+  .bg-warning { background-color: rgba(252, 233, 79, 0.15); }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+}

@@ -5,7 +5,6 @@ import { useSession } from '../store/session.state'
 import { useHistory } from '../store/history.state'
 import { useMessages } from '../store/messages.state'
 import { Send, Square, FileText } from 'lucide-react'
-import '../styles/prompt-bar.css'
 
 interface PromptBarProps {
   onSubmit: (prompt: string) => void

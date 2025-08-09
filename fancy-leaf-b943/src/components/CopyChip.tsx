@@ -1,5 +1,4 @@
 import React, { useState, useCallback } from 'react';
-import '../styles/copy-chip.css';
 
 interface CopyChipProps {
   code: string;
