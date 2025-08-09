@@ -84,6 +84,9 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  /* Ensure proper text flow */
+  direction: ltr;
+  unicode-bidi: normal;
 }
 
 /* Terminal Line */
@@ -98,6 +101,10 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  /* Ensure proper text direction */
+  direction: ltr;
+  unicode-bidi: normal;
+  text-align: left;
 }
 
 /* Tool Calls */
@@ -269,7 +276,9 @@
   height: 100%;
 }
 
-/* Ensure spans render inline */
+/* Ensure spans render inline with proper text flow */
 .terminal-line span {
   display: inline;
+  direction: ltr;
+  unicode-bidi: normal;
 }

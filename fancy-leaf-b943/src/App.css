@@ -10,6 +10,9 @@
   font-size: 14px;
   line-height: 1.5;
   overflow: hidden;
+  /* Ensure proper text direction */
+  direction: ltr;
+  unicode-bidi: normal;
 }
 
 /* Reset body defaults */

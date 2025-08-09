@@ -122,16 +122,14 @@ function createSpan(text: string, state: AnsiState, key: number): ReactNode {
   if (state.bg !== undefined) {
     classes.push(`bg-ansi-${state.bg}`);
   }
-  if (state.bold) classes.push('bold');
-  if (state.italic) classes.push('italic');
-  if (state.underline) classes.push('underline');
+  if (state.bold) classes.push('ansi-bold');
+  if (state.italic) classes.push('ansi-italic');
+  if (state.underline) classes.push('ansi-underline');
   
-  if (classes.length === 0) {
-    return text;
-  }
-  
+  // Always wrap text in a span element for consistent rendering
   return React.createElement('span', {
     key,
-    className: classes.join(' ')
+    className: classes.length > 0 ? classes.join(' ') : undefined,
+    style: { display: 'inline' }
   }, text);
 }
