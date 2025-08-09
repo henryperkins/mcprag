@@ -184,6 +184,7 @@ Type your prompt and press Enter to submit.
                   flushBatch();
                 }
                 setIsStreaming(false);
+                markInteraction('terminal:stream-complete');
                 measureInteraction('terminal:stream-complete', 'cc:terminal:submit-start');
                 break;
               }
@@ -211,6 +212,7 @@ Type your prompt and press Enter to submit.
         flushBatch();
       }
       setIsStreaming(false);
+      markInteraction('terminal:mock-complete');
       measureInteraction('terminal:mock-complete', 'cc:terminal:submit-start');
     }
   };

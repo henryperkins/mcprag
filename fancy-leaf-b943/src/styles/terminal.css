@@ -143,6 +143,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   gap: 12px;
   font-family: var(--font-mono);
+  position: relative;
 }
 
 .terminal-prompt {
@@ -183,6 +184,8 @@
   background: var(--term-cursor);
   animation: blink 1s infinite;
   vertical-align: text-bottom;
+  position: absolute;
+  pointer-events: none;
 }
 
 .cursor.block {
@@ -255,28 +258,6 @@
   font-family: var(--font-mono);
 }
 
-/* Scrollbar Styling */
-.terminal-output::-webkit-scrollbar {
-  width: 8px;
-}
-
-.terminal-output::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.terminal-output::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-}
-
-.terminal-output::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-/* Selection */
-.terminal-root ::selection {
-  background: var(--term-selection);
-}
 
 /* Make the terminal take full height */
 .terminal-container,

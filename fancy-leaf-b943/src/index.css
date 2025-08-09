@@ -1,5 +1,7 @@
 @layer tokens, base, components, utilities, overrides;
 
+@import './styles/components.misc.css' layer(components);
+
 /* ===== Design Tokens Layer ===== */
 @layer tokens {
   :root {

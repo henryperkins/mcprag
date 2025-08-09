@@ -1,0 +1,100 @@
+@layer components {
+  /* Slash menu */
+  .slash-menu {
+    background: #0f1520;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    min-width: 260px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 6px 0;
+    z-index: 60;
+  }
+  .slash-menu-item {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  .slash-menu-item:hover,
+  .slash-menu-item.selected {
+    background: rgba(255,255,255,0.06);
+  }
+  .slash-command { font-family: var(--font-mono, ui-monospace, monospace); }
+  .slash-args { opacity: 0.7; }
+  .slash-description { margin-left: auto; opacity: 0.7; font-size: 12px; }
+
+  /* Offline indicator */
+  .offline-indicator {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    color: var(--text-primary);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    z-index: 70;
+  }
+
+  /* PWA install prompt */
+  .pwa-install-prompt {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    background: #0f1520;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text-primary);
+    z-index: 70;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .pwa-install-title { font-weight: 600; margin-bottom: 6px; }
+  .pwa-install-buttons { display: flex; gap: 8px; margin-top: 10px; }
+  .pwa-install-button {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-primary);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .pwa-install-button:hover { background: rgba(255,255,255,0.12); }
+  .pwa-install-button.dismiss { opacity: 0.7; }
+
+  /* Chat pane */
+  .chat-pane-container {
+    display: flex; flex-direction: column;
+    background: var(--bg-secondary, #1a1a1a);
+    height: 100%;
+    min-width: 0;
+  }
+  .chat-pane-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-weight: 600;
+  }
+  .chat-pane-content {
+    flex: 1; overflow-y: auto;
+    padding: 12px;
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  .chat-empty { text-align: center; padding: 24px 0; }
+  .chat-message {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    outline: none;
+  }
+  .chat-message:focus { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+  .chat-message-role { font-size: 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .chat-message-text { white-space: pre-wrap; word-break: break-word; }
+  .chat-message-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .chat-message-time { font-size: 11px; }
+  .chat-message-status { margin-left: auto; }
+  .chat-message-status-icon { font-size: 12px; }
+}
