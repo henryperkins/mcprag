@@ -30,14 +30,26 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
 	 */
 	"vars": {
-		// Bridge URL for Claude Code server - default to localhost for development
-		"BRIDGE_URL": "http://localhost:8787/api/claude/stream",
-		// Optional: Path to MCP servers configuration (JSON string)
-		"MCP_CONFIG": "",
-		// Optional: Use AWS Bedrock instead of Anthropic API
-		"CLAUDE_CODE_USE_BEDROCK": "",
-		// Optional: Use Google Vertex AI instead of Anthropic API
-		"CLAUDE_CODE_USE_VERTEX": ""
+	  // Bridge URL for Claude Code server - default to localhost for development
+	  "BRIDGE_URL": "http://localhost:8787/api/claude/stream",
+	  // Optional: Path to MCP servers configuration (JSON string)
+	  "MCP_CONFIG": "",
+	  // Optional: Use AWS Bedrock instead of Anthropic API
+	  "CLAUDE_CODE_USE_BEDROCK": "",
+	  // Optional: Use Google Vertex AI instead of Anthropic API
+	  "CLAUDE_CODE_USE_VERTEX": "",
+	  // Public base URL for R2 assets (custom domain + bucket path prefix)
+	  // Example: https://claude-r2.lakefrontdigital.io/user-assets
+	  "R2_PUBLIC_BASE": "https://claude-r2.lakefrontdigital.io/user-assets"
+	},
+	/**
+	 * Local Development Settings
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#local-development-settings
+	 */
+	"dev": {
+	  "port": 8788,
+	  "inspector_port": 9330,
+	  "local_protocol": "http"
 	},
 	"routes": [
 		{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
@@ -52,13 +64,66 @@
 				// Optional: Use AWS Bedrock instead of Anthropic API
 				"CLAUDE_CODE_USE_BEDROCK": "",
 				// Optional: Use Google Vertex AI instead of Anthropic API
-				"CLAUDE_CODE_USE_VERTEX": ""
+				"CLAUDE_CODE_USE_VERTEX": "",
+				// Public base URL for R2 assets (custom domain + bucket path prefix)
+				"R2_PUBLIC_BASE": "https://claude-r2.lakefrontdigital.io/user-assets"
 			},
 			"routes": [
 				{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
 			]
 		}
-	}
+	},
+	/**
+	 * Resource Bindings
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	"kv_namespaces": [
+	  {
+	    "binding": "sessions_kv",
+	    "id": "4a4b6f01a56142f0b43803585276527a"
+	  }
+	],
+	"d1_databases": [
+	  {
+	    "binding": "DB",
+	    "database_name": "claude-code",
+	    "database_id": "f2cac7b3-8b37-49e6-b347-fdc130d07381"
+	  }
+	],
+	"r2_buckets": [
+	  {
+	    "binding": "FILES",
+	    "bucket_name": "user-assets"
+	  }
+	],
+	"durable_objects": {
+	  "bindings": [
+	    { "name": "SESSION", "class_name": "SessionDO" }
+	  ]
+	},
+	"migrations": [
+	  { "tag": "v1", "new_classes": ["SessionDO"] }
+	],
+	"queues": {
+	  "producers": [
+	    { "binding": "JOBS", "queue": "claude-code-jobs", "queue_id": "2b84a6f1a5b7442fbc0f37433d3c455f" }
+	  ],
+	  "consumers": [
+	    { "queue": "claude-code-jobs", "queue_id": "2b84a6f1a5b7442fbc0f37433d3c455f" }
+	  ]
+	},
+	// Secrets: bind names to be provided via `wrangler secret put` or Secrets Store
+	// Note: Wrangler CLI manages values; this declares bindings for typegen and clarity.
+	"secrets": [
+	  { "binding": "ANTHROPIC_API_KEY" },
+	  { "binding": "TURNSTILE_SECRET" },
+	  { "binding": "ACCESS_JWT_SECRET" }
+	],
+	// Secrets Store (organization-level). Wrangler may ignore this locally if your account
+	// is not provisioned; it is included here to document the binding ID requirement.
+	"secrets_store": {
+	  "id": "18af881cb87f4ee289a7937973a8c8bc"
+	},
 	/**
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/

@@ -342,6 +342,34 @@
 
 /* Project utilities (migrated from utilities.css) */
 @layer utilities {
+  .skeleton {
+    background: linear-gradient(90deg, #2a2e37 0%, #333844 50%, #2a2e37 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.2s ease-in-out infinite;
+  }
+
+  /* Skip Link for keyboard users */
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .skip-link:focus {
+    left: 8px;
+    top: 8px;
+    width: auto;
+    height: auto;
+    padding: 8px 12px;
+    background: #fff;
+    color: #000;
+    border-radius: 6px;
+    box-shadow: var(--shadow-sm);
+    z-index: var(--z-notification);
+  }
+
   .text-brand { color: var(--ansi-10); }
   .text-info { color: var(--color-info); }
   .text-secondary { color: var(--text-secondary); }
@@ -358,5 +386,14 @@
     padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0, 0, 0, 0);
     white-space: nowrap; border: 0;
+  }
+
+  /* Improve touch target size where applied */
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }

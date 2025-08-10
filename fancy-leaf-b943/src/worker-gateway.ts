@@ -10,16 +10,17 @@ export interface Env {
   // Configuration
   BRIDGE_URL: string; // Your Claude Code bridge endpoint (via Tunnel)
   ANTHROPIC_API_KEY?: string; // Optional if using bridge
-  
+  R2_PUBLIC_BASE?: string; // Public domain base for R2 (e.g. https://claude-r2.lakefrontdigital.io/user-assets)
+
   // Durable Objects
   SESSION: DurableObjectNamespace;
-  
+
   // Storage bindings
   DB: D1Database;
-  USER_PREFS: KVNamespace;
+  sessions_kv: KVNamespace;
   FILES: R2Bucket;
   JOBS: Queue;
-  
+
   // Security
   TURNSTILE_SECRET?: string;
   ACCESS_JWT_SECRET?: string;
@@ -30,7 +31,9 @@ export class SessionDO {
   private connections: Set<WebSocket> = new Set();
   private history: unknown[] = [];
   private activeToolCalls: Map<string, unknown> = new Map();
-  
+
+  constructor(private state: DurableObjectState, private env: Env) {}
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     
@@ -268,8 +271,8 @@ export default {
   async createSession(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
     const sessionId = crypto.randomUUID();
     const sessionDO = env.SESSION.get(env.SESSION.idFromName(sessionId));
-    
-    // Initialize session
+
+    // Initialize session in DO
     await sessionDO.fetch(new Request('http://do/append', {
       method: 'POST',
       body: JSON.stringify({
@@ -278,18 +281,38 @@ export default {
         timestamp: Date.now(),
       }),
     }));
-    
-    // Store session metadata in D1
-    await env.DB.prepare(`
-      INSERT INTO sessions (id, created_at, metadata)
-      VALUES (?, datetime('now'), ?)
-    `).bind(sessionId, JSON.stringify({
+
+    // Persist session metadata in KV for quick lookups (30 days TTL)
+    const kvKey = `session:${sessionId}`;
+    await env.sessions_kv.put(kvKey, JSON.stringify({
+      createdAt: Date.now(),
       userAgent: request.headers.get('User-Agent'),
       ip: request.headers.get('CF-Connecting-IP'),
-    })).run();
-    
+    }), { expirationTtl: 60 * 60 * 24 * 30 });
+
+    // Store session metadata in D1 using Sessions API for strong consistency
+    const s = env.DB.session();
+    try {
+      await s.exec('BEGIN');
+      await s.prepare(`
+        INSERT INTO sessions (id, created_at, metadata)
+        VALUES (?, datetime('now'), ?)
+      `).bind(sessionId, JSON.stringify({
+        userAgent: request.headers.get('User-Agent'),
+        ip: request.headers.get('CF-Connecting-IP'),
+      })).run();
+      await s.exec('COMMIT');
+    } catch (e) {
+      try { await s.exec('ROLLBACK'); } catch {}
+      throw e;
+    } finally {
+      await s.close();
+    }
+
+    // Set cookie for client session
+    const cookie = `sid=${sessionId}; Path=/; HttpOnly; SameSite=Lax`;
     return new Response(JSON.stringify({ sessionId }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': cookie },
     });
   },
   
@@ -315,50 +338,73 @@ export default {
   
   async saveTranscript(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
     const { sessionId, messages } = await request.json();
-    
-    await env.DB.prepare(`
-      INSERT INTO transcripts (session_id, messages, created_at)
-      VALUES (?, ?, datetime('now'))
-      ON CONFLICT(session_id) DO UPDATE SET
-        messages = ?,
-        updated_at = datetime('now')
-    `).bind(sessionId, JSON.stringify(messages), JSON.stringify(messages)).run();
-    
+
+    const s = env.DB.session();
+    try {
+      await s.exec('BEGIN');
+      await s.prepare(`
+        INSERT INTO transcripts (session_id, messages, created_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(session_id) DO UPDATE SET
+          messages = ?,
+          updated_at = datetime('now')
+      `).bind(sessionId, JSON.stringify(messages), JSON.stringify(messages)).run();
+      await s.exec('COMMIT');
+    } catch (e) {
+      try { await s.exec('ROLLBACK'); } catch {}
+      throw e;
+    } finally {
+      await s.close();
+    }
+
+    // Enqueue async job for further processing
+    await env.JOBS.send({
+      type: 'index_transcript',
+      sessionId,
+      length: Array.isArray(messages) ? messages.length : undefined,
+      ts: Date.now(),
+    });
+
     return new Response('OK', { headers: corsHeaders });
   },
   
   async loadTranscript(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get('sessionId');
-    
-    if (!sessionId) {
-      // List recent sessions
-      const result = await env.DB.prepare(`
-        SELECT id, created_at, 
-               json_extract(metadata, '$.prompt') as first_prompt
-        FROM sessions 
-        ORDER BY created_at DESC 
-        LIMIT 20
-      `).all();
-      
-      return new Response(JSON.stringify(result.results), {
+
+    const s = env.DB.session();
+    try {
+      if (!sessionId) {
+        // List recent sessions (consistent snapshot)
+        const result = await s.prepare(`
+          SELECT id, created_at,
+                 json_extract(metadata, '$.prompt') as first_prompt
+          FROM sessions
+          ORDER BY created_at DESC
+          LIMIT 20
+        `).all<{ id: string; created_at: string; first_prompt: string | null }>();
+
+        return new Response(JSON.stringify(result.results), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Load specific transcript
+      const result = await s.prepare(`
+        SELECT messages FROM transcripts
+        WHERE session_id = ?
+      `).bind(sessionId).first<{ messages?: string }>();
+
+      if (!result || !result.messages) {
+        return new Response('Not found', { status: 404, headers: corsHeaders });
+      }
+
+      return new Response(result.messages, {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    } finally {
+      await s.close();
     }
-    
-    // Load specific transcript
-    const result = await env.DB.prepare(`
-      SELECT messages FROM transcripts 
-      WHERE session_id = ?
-    `).bind(sessionId).first() as { messages?: string } | null;
-    
-    if (!result || !result.messages) {
-      return new Response('Not found', { status: 404, headers: corsHeaders });
-    }
-    
-    return new Response(result.messages, {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
   },
   
   async uploadFile(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
@@ -383,11 +429,26 @@ export default {
     });
     
     // Generate signed URL for access (1 hour expiry)
-    const url = await env.FILES.createSignedUrl(key, { expiresIn: 3600 });
-    
-    return new Response(JSON.stringify({ 
+    const signedUrl = await env.FILES.createSignedUrl(key, { expiresIn: 3600 });
+    // Public custom-domain URL (if configured): https://claude-r2.lakefrontdigital.io/user-assets/<key>
+    const publicUrl = env.R2_PUBLIC_BASE
+      ? `${env.R2_PUBLIC_BASE.replace(/\\/$/, '')}/${encodeURIComponent(key)}`
+      : undefined;
+
+    // Enqueue async job for file post-processing
+    await env.JOBS.send({
+      type: 'file_uploaded',
+      sessionId,
       key,
-      url,
+      size: file.size,
+      contentType: file.type,
+      ts: Date.now(),
+    });
+    
+    return new Response(JSON.stringify({
+      key,
+      url: publicUrl ?? signedUrl,
+      signedUrl,
       size: file.size,
       type: file.type,
     }), {
@@ -396,8 +457,10 @@ export default {
   },
   
   async saveToD1(env: Env, sessionId: string, transcript: string, metadata: unknown): Promise<void> {
+    const s = env.DB.session();
     try {
-      await env.DB.prepare(`
+      await s.exec('BEGIN');
+      await s.prepare(`
         INSERT INTO messages (session_id, content, metadata, created_at)
         VALUES (?, ?, ?, datetime('now'))
       `).bind(
@@ -405,8 +468,36 @@ export default {
         transcript,
         JSON.stringify(metadata)
       ).run();
+      await s.exec('COMMIT');
     } catch (error) {
+      try { await s.exec('ROLLBACK'); } catch {}
       console.error('Failed to save to D1:', error);
+    } finally {
+      await s.close();
+    }
+  },
+
+  // Cloudflare Queues consumer: process async jobs (indexing, post-processing)
+  async queue(batch: MessageBatch<any>, env: Env, ctx: ExecutionContext): Promise<void> {
+    for (const msg of batch.messages) {
+      try {
+        const data = msg.body as any;
+        switch (data?.type) {
+          case 'index_transcript':
+            // TODO: implement indexing/analytics; placeholder no-op
+            break;
+          case 'file_uploaded':
+            // TODO: generate thumbnails/scan/etc.; placeholder no-op
+            break;
+          default:
+            // Unknown job type; ignore
+            break;
+        }
+        await msg.ack?.();
+      } catch (e) {
+        // Let platform retry this message
+        await msg.retry?.();
+      }
     }
   },
 };

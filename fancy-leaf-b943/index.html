@@ -6,7 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#1e1e1e" />
     <meta name="description" content="Terminal-style web interface for Claude Code" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- PWA meta: use the standardized meta name instead of deprecated Apple-specific one -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="Claude Code" />
     <link rel="apple-touch-icon" href="/icons/icon.svg" />
@@ -16,6 +17,7 @@
     <link rel="stylesheet" href="/src/index.css" />
   </head>
   <body>
+    <a href="#main" class="skip-link">Skip to main content</a>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

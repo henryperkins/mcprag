@@ -103,8 +103,19 @@ export default {
 
     // Sessions -> forward to bridge
     if (url.pathname === '/api/sessions' && req.method === 'GET') {
-      const r = await fetch(new URL('/api/sessions', new URL(env.BRIDGE_URL).origin).toString())
-      return json(req, await r.json(), { status: r.status })
+      // Explicit handling so UI can surface bridge issues
+      if (!env.BRIDGE_URL) {
+        return json(req, { error: 'bridge_not_configured' }, { status: 501 })
+      }
+
+      try {
+        const upstream = new URL(env.BRIDGE_URL)
+        const r = await fetch(new URL('/api/sessions', upstream.origin).toString())
+        return json(req, await r.json(), { status: r.status })
+      } catch (err) {
+        // Network or DNS error – treat as downstream unavailable
+        return json(req, { error: 'bridge_unreachable' }, { status: 502 })
+      }
     }
 
     // Fallback to static asset handling (SPA mode configured in wrangler.jsonc)

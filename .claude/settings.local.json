@@ -24,7 +24,10 @@
       "mcp__mcprag__backup_index_schema",
       "mcp__mcprag__index_repository",
       "mcp__sequential-thinking__sequentialthinking",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(claude mcp add:*)",
+      "Bash(claude mcp remove:*)",
+      "Bash(claude mcp:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

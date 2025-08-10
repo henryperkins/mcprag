@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"dev:worker": "wrangler dev --port 8788 --inspector-port 9330",
+		"dev:worker": "wrangler dev --config wrangler.jsonc --port 8788 --inspector-port 9330",
 		"dev:server": "tsx watch server.ts",
 		"dev:all": "concurrently -k -p \"[{name}]\" -n \"Vite,Worker,Server\" -c \"cyan,yellow,magenta\" \"npm run dev\" \"npm run dev:worker\" \"npm run dev:server\"",
 		"build": "tsc -b && vite build",
@@ -16,13 +16,15 @@
 		"format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,md}\"",
 		"format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,md}\"",
 		"preview": "npm run build && vite preview",
-		"deploy": "npm run build && wrangler deploy --config dist/fancy_leaf_b943/wrangler.json",
-		"deploy:prod": "npm run build && wrangler deploy --config dist/fancy_leaf_b943/wrangler.json --env production",
+		"deploy": "npm run build && wrangler deploy --config wrangler.jsonc",
+		"deploy:prod": "npm run build && wrangler deploy --config wrangler.jsonc --env production",
 		"cf-typegen": "wrangler types",
 		"clean": "rm -rf dist node_modules/.vite dist-server",
 		"test": "vitest",
 		"test:watch": "vitest watch",
-		"test:coverage": "vitest run --coverage"
+		"test:coverage": "vitest run --coverage",
+		"d1:migrate:local": "wrangler d1 execute claude-code --file=./migrations/0001_create_tables.sql --local",
+		"d1:migrate:remote": "wrangler d1 execute claude-code --file=./migrations/0001_create_tables.sql --remote"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-code": "^1.0.70",
@@ -37,6 +39,7 @@
 		"react-dom": "^19.1.0",
 		"react-resizable-panels": "^3.0.4",
 		"react-router-dom": "^6.27.0",
+		"react-window": "^1.8.9",
 		"sonner": "^2.0.7",
 		"zustand": "^5.0.7"
 	},
@@ -72,6 +75,6 @@
 		"vite": "^7.0.4",
 		"vite-bundle-visualizer": "^1.2.1",
 		"vitest": "^2.1.8",
-		"wrangler": "^4.28.0"
+		"wrangler": "^4.28.1"
 	}
 }

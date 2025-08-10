@@ -1,9 +1,44 @@
 import React from 'react'
 import { Plus, Paperclip, Send } from 'lucide-react'
+import { SlashMenu } from '../components/SlashMenu'
+import { useSessionStore } from '../store/session'
 
-export default function Composer({ onSend }: { onSend: (text: string) => void }) {
+type Props = {
+  onSend: (text: string) => void
+  onCancel?: () => void
+  onClear?: () => void
+  isStreaming?: boolean
+}
+
+export default function Composer({ onSend, onCancel, onClear, isStreaming = false }: Props) {
   const [value, setValue] = React.useState('')
   const ref = React.useRef<HTMLTextAreaElement | null>(null)
+  const MAX_COMPOSER_HEIGHT_PX = 192 // 12rem
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    const h = Math.min(MAX_COMPOSER_HEIGHT_PX, el.scrollHeight)
+    el.style.height = `${h}px`
+    el.style.overflowY = el.scrollHeight > MAX_COMPOSER_HEIGHT_PX ? 'auto' : 'hidden'
+  }, [value])
+  // Slash menu state
+  const [isSlashOpen, setIsSlashOpen] = React.useState(false)
+  const [slashFilter, setSlashFilter] = React.useState('')
+  const [slashIndex, setSlashIndex] = React.useState(0)
+  // History
+  const history = useSessionStore((s) => s.terminal.history)
+  const historyIndex = useSessionStore((s) => s.terminal.historyIndex)
+  const actions = useSessionStore((s) => s.actions)
+
+  React.useEffect(() => {
+    if (historyIndex >= 0 && historyIndex < history.length) {
+      setValue(history[historyIndex])
+    } else if (historyIndex === -1) {
+      // Reset to empty when not navigating history
+      // no-op if user is typing
+    }
+  }, [historyIndex, history])
 
   return (
     <footer className="sticky bottom-0 z-20 border-t border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-primary) 85%, transparent)] backdrop-blur">
@@ -13,7 +48,9 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
           onSubmit={(e) => {
             e.preventDefault()
             const text = value.trim()
-            if (!text) return
+            // If slash menu is open, don't submit yet
+            if (!text || isSlashOpen) return
+            actions.pushHistory(text)
             onSend(text)
             setValue('')
             ref.current?.focus()
@@ -34,8 +71,59 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
             rows={1}
             placeholder="Message Claude…"
             value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="min-h-[44px] max-h-40 flex-1 resize-none bg-transparent px-1 py-2 outline-none placeholder:text-[color:var(--text-muted)]"
+            onChange={(e) => {
+              const next = e.target.value
+              setValue(next)
+              const trimmed = next.trimStart()
+              if (trimmed.startsWith('/')) {
+                setIsSlashOpen(true)
+                const idx = trimmed.indexOf(' ')
+                const filter = (idx === -1 ? trimmed : trimmed.slice(0, idx)).replace(/^\//, '')
+                setSlashFilter(filter)
+                setSlashIndex(0)
+              } else {
+                setIsSlashOpen(false)
+                setSlashFilter('')
+              }
+            }}
+             onInput={(e) => {
+               const el = e.currentTarget
+               el.style.height = 'auto'
+               const h = Math.min(MAX_COMPOSER_HEIGHT_PX, el.scrollHeight)
+               el.style.height = `${h}px`
+               el.style.overflowY = el.scrollHeight > MAX_COMPOSER_HEIGHT_PX ? 'auto' : 'hidden'
+             }}
+             onKeyDown={(e) => {
+              // Let SlashMenu handle its own navigation keys
+              if (isSlashOpen && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === 'Escape' || e.key === 'Home' || e.key === 'End')) {
+                return
+              }
+              // Ctrl+C: cancel streaming
+              if (e.ctrlKey && e.key.toLowerCase() === 'c') {
+                e.preventDefault()
+                if (isStreaming) onCancel?.()
+                setValue('')
+                return
+              }
+              // Ctrl+L: clear chat
+              if (e.ctrlKey && e.key.toLowerCase() === 'l') {
+                e.preventDefault()
+                onClear?.()
+                return
+              }
+              // History navigation
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                actions.historyPrev()
+                return
+              }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                actions.historyNext()
+                return
+              }
+            }}
+            className="min-h-[32px] max-h-48 w-full min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 outline-none placeholder:text-[color:var(--text-muted)]"
           />
 
           <div className="flex items-center gap-2">
@@ -56,6 +144,28 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
               <Send className="h-4 w-4" />
               Send
             </button>
+          </div>
+          {/* Inline slash menu under the composer */}
+          <div className="w-full">
+            <SlashMenu
+              isOpen={isSlashOpen}
+              filter={slashFilter}
+              onSelect={(cmd) => {
+                const next = `${cmd} `
+                setValue(next)
+                setIsSlashOpen(false)
+                // focus textarea and move cursor to end
+                requestAnimationFrame(() => {
+                  const el = ref.current
+                  if (!el) return
+                  el.focus()
+                  el.selectionStart = el.selectionEnd = next.length
+                })
+              }}
+              onClose={() => setIsSlashOpen(false)}
+              selectedIndex={slashIndex}
+              onSelectedIndexChange={setSlashIndex}
+            />
           </div>
         </form>
 

@@ -25,6 +25,7 @@ type SessionControls = {
   outputFormat: 'text' | 'json' | 'stream-json'
   systemPrompt?: string
   appendSystemPrompt?: string
+  model?: string
 }
 
 type SessionStore = {
@@ -55,6 +56,7 @@ export const useSession = create<SessionStore>()(
         permissionMode: 'default',
         verbose: false,
         outputFormat: 'stream-json',
+        model: undefined,
       },
       recentSessions: [],
       isRunning: false,

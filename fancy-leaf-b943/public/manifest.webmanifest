@@ -10,16 +10,20 @@
   "start_url": "/",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAQAAADZQZ1EAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAABpElEQVR42u3SMQ0AMAzDsOgp0X5bzgGAsEuY1/te+timQQCAwIECBAgQIAAAQIECBAgQIAAAQIECDQDw25PDs3y8nFO/Sdkr6woygkPF695vmGf6/MMxK63X8z9SMTLSgkAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQEAgrjmwigtX6ajssq+zCiUMZvzqyT+LB5ur/7YiX2b7syiaQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBBgAIDjY8+w2H5zmt5b9uCSt2W9sQsICBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQKAF6M8GfACRC0OtSuZAAAAAElFTkSuQmCC",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAB5klEQVR42u3SMQ2AMAgE0XjDkX1khVfKqVAC5MxAPNslK5pYbm3Z+5fv+rbT9efO2XE7+qiJBZ/YQAECBAmVZLAUqDwYqpAISkGBSIEhoAEJQwUKAAElBgUSBIaABCUUFCgABJQYFEgSGgAQlFBQoAASUGBRIEhoAEJRQUKBUl7j6uvubXlHZfjZwxpfG5lv9gmDX+0HteyPARbv7ucccYABCUUFCgABJQYFEgSGgAQlFBQoAASUGBRIEhoAEJRQUKAAElBgUSBIaABCUUFCgABJQYFEgSGgAQlFBQoAASUGBRIEhoAEJRQUKAAElBgUSEgaOzOxdvvnWdw+xn79vO+Of1/8+37mLDKAAElBgUSBIaABCUUFCgABJQYFEgSGgAQlFBQoAASUGBRIEhoAEJRQXaKzLAs0PtXRbase4/kx9E+QIAAAQIxMlfD2gvRTkAAAAASUVORK5CYII=",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     }
   ],
   "categories": ["developer", "productivity"],

@@ -6,7 +6,7 @@
 export interface Env {
   BRIDGE_URL: string;
   DB: D1Database;
-  USER_PREFS: KVNamespace;
+  KV: KVNamespace;
   FILES: R2Bucket;
   JOBS: Queue;
 }

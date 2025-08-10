@@ -4,13 +4,22 @@
 declare global {
   interface D1Database {
     prepare(query: string): D1PreparedStatement;
+    // D1 Sessions API
+    session(): D1Session;
   }
+  
+  interface D1Session {
+    prepare(query: string): D1PreparedStatement;
+    exec(query: string): Promise<void>;
+    close(): Promise<void>;
+  }
+  
 
   interface D1PreparedStatement {
     bind(...values: unknown[]): D1PreparedStatement;
     run(): Promise<D1Result>;
-    first(): Promise<unknown>;
-    all(): Promise<D1ResultSet>;
+    first<T = unknown>(): Promise<T | null>;
+    all<T = unknown>(): Promise<D1ResultSet<T>>;
   }
 
   interface D1Result {
@@ -52,6 +61,17 @@ declare global {
     send(message: unknown): Promise<void>;
   }
 
+  // Cloudflare Queues types (minimal)
+  interface Message<T = unknown> {
+    body: T;
+    retries: number;
+    ack(): Promise<void>;
+    retry(delaySeconds?: number): Promise<void>;
+  }
+  interface MessageBatch<T = unknown> {
+    messages: Message<T>[];
+  }
+
   interface DurableObjectNamespace {
     idFromName(name: string): DurableObjectId;
     get(id: DurableObjectId): DurableObjectStub;
@@ -63,6 +83,15 @@ declare global {
 
   interface DurableObjectStub {
     fetch(request: Request): Promise<Response>;
+  }
+
+  interface DurableObjectState {
+    storage: {
+      get<T = unknown>(key: string): Promise<T | undefined>;
+      put<T = unknown>(key: string, value: T): Promise<void>;
+      delete(key: string): Promise<void>;
+    };
+    waitUntil(promise: Promise<unknown>): void;
   }
 
   interface ExecutionContext {

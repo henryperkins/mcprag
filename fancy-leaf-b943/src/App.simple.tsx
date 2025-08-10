@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Terminal } from './components/Terminal';
+import { ChatPane } from './components/ChatPane';
 import { OfflineIndicator } from './components/OfflineIndicator';
 
 function App() {
@@ -11,7 +11,7 @@ function App() {
   return (
     <>
       <OfflineIndicator />
-      <Terminal />
+      <ChatPane />
     </>
   );
 }

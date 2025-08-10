@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { usePerformanceMonitor } from '../store/unified.adapter';
 
 interface FileNode {
@@ -50,7 +50,7 @@ const mockFileTree: FileNode[] = [
 ];
 
 
-export const FileTree: React.FC = () => {
+export const FileTree: React.FC<{ loading?: boolean }> = memo(function FileTree({ loading = false }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['/src', '/src/components']));
   const [selected, setSelected] = useState<string | null>(null);
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
@@ -284,15 +284,28 @@ export const FileTree: React.FC = () => {
         role="tree"
         aria-label="File explorer"
         aria-multiselectable="false"
+        aria-describedby="filetree-instructions"
+        tabIndex={0}
         onKeyDown={handleKeyDown}
       >
-        {mockFileTree.map((node, i, arr) => renderNode(node, 0, i + 1, arr.length))}
+        {loading ? (
+          <div className="p-2" aria-busy="true">
+            {/* basic skeleton lines to indicate loading the tree */}
+            <div className="skeleton" style={{ height: 12, width: '70%', borderRadius: 6, marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 12, width: '55%', borderRadius: 6, marginBottom: 8, marginLeft: 16 }} />
+            <div className="skeleton" style={{ height: 12, width: '62%', borderRadius: 6, marginBottom: 8, marginLeft: 16 }} />
+            <div className="skeleton" style={{ height: 12, width: '78%', borderRadius: 6, marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 12, width: '48%', borderRadius: 6 }} />
+          </div>
+        ) : (
+          mockFileTree.map((node, i, arr) => renderNode(node, 0, i + 1, arr.length))
+        )}
       </div>
       
       {/* Instructions for screen reader users */}
-      <div className="sr-only" aria-live="polite">
+      <div id="filetree-instructions" className="sr-only" aria-live="polite">
         Use arrow keys to navigate, Enter or Space to select or expand folders
       </div>
     </div>
   );
-};
+});

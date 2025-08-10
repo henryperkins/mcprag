@@ -2,10 +2,13 @@ import React from 'react'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import MessageList, { type Message } from './MessageList'
+import type { CodeCardProps } from './CodeCard'
 import Composer from './Composer'
 import { streamQuery } from './stream'
 import SessionsPane from './SessionsPane'
 import StatusBar from './StatusBar'
+import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom'
+import { useSession } from '../store/session.state'
 
 export default function ChatPage() {
   // Apply dark theme on mount
@@ -59,27 +62,106 @@ async def rate_limit_middleware(request: Request, call_next):
     },
   ])
 
-  const [, setStreaming] = React.useState(false)
+  const [isStreaming, setStreaming] = React.useState(false)
+  const abortRef = React.useRef<() => void>(() => {})
+  const sessionIdRef = React.useRef<string | null>(null)
+  const sess = useSession()
+  const bufferRef = React.useRef<string[]>([])
+  const rAFRef = React.useRef<number | null>(null)
+  const mainRef = React.useRef<HTMLDivElement | null>(null)
+  useAutoScrollNearBottom(mainRef, [messages], 80)
 
   async function handleSend(text: string) {
     setMessages((prev) => [...prev, { role: 'user', content: text }])
     setStreaming(true)
 
-    let assembled = ''
-    await streamQuery(text, {
-      onMessage: (chunk) => {
-        assembled += chunk + '\n'
+    const flush = () => {
+      rAFRef.current = null
+      const chunks = bufferRef.current
+      if (!chunks.length) return
+      const appended = chunks.join('\n') + '\n'
+      bufferRef.current = []
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        const content = last?.role === 'assistant' && last.content.startsWith('[streaming]')
+          ? last.content + appended
+          : '[streaming]\n' + appended
+        if (last?.role === 'assistant' && last.content.startsWith('[streaming]')) {
+          return [...prev.slice(0, -1), { ...last, content }]
+        }
+        return [...prev, { role: 'assistant', content }]
+      })
+    }
+
+    const scheduleFlush = () => {
+      if (rAFRef.current != null) return
+      rAFRef.current = requestAnimationFrame(flush)
+    }
+
+    const { abort, promise } = streamQuery(text, {
+      onStart: (sid) => { sessionIdRef.current = sid },
+      onInit: (payload) => { try { sess.setInit(payload) } catch {} },
+      onResult: (payload) => { try { sess.setResult(payload) } catch {} },
+      onToolCall: (payload) => {
+        const title = payload?.toolName ? `Tool: ${payload.toolName}` : 'Tool Call'
+        const code = payload?.toolArguments ? JSON.stringify(payload.toolArguments, null, 2) : ''
+        const card: CodeCardProps = {
+          title,
+          subtitle: payload?.toolId ? `id: ${payload.toolId}` : undefined,
+          language: 'json',
+          code,
+        }
         setMessages((prev) => {
           const last = prev[prev.length - 1]
-          if (last?.role === 'assistant' && last.content.startsWith('[streaming]')) {
-            return [...prev.slice(0, -1), { ...last, content: '[streaming]\n' + assembled }]
+          if (last?.role === 'assistant') {
+            const cards = [...(last.cards || []), card]
+            return [...prev.slice(0, -1), { ...last, cards }]
           }
-          return [...prev, { role: 'assistant', content: '[streaming]\n' + assembled }]
+          return [...prev, { role: 'assistant', content: '', cards: [card] }]
         })
       },
-      onDone: () => setStreaming(false),
-      onError: () => setStreaming(false),
+      onToolOutput: (payload) => {
+        const title = payload?.toolName ? `Result: ${payload.toolName}` : 'Tool Result'
+        const raw = payload?.toolResult
+        const code = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
+        const card: CodeCardProps = {
+          title,
+          subtitle: payload?.toolId ? `id: ${payload.toolId}` : undefined,
+          language: 'json',
+          code,
+        }
+        setMessages((prev) => {
+          const last = prev[prev.length - 1]
+          if (last?.role === 'assistant') {
+            const cards = [...(last.cards || []), card]
+            return [...prev.slice(0, -1), { ...last, cards }]
+          }
+          return [...prev, { role: 'assistant', content: '', cards: [card] }]
+        })
+      },
+      onMessage: (chunk) => {
+        bufferRef.current.push(chunk)
+        scheduleFlush()
+      },
+      onDone: () => {
+        // ensure last chunks render
+        flush()
+        setStreaming(false)
+        sess.setRunning(false)
+      },
+      onError: () => {
+        bufferRef.current = []
+        if (rAFRef.current) cancelAnimationFrame(rAFRef.current)
+        rAFRef.current = null
+        setStreaming(false)
+        sess.setRunning(false)
+      },
+    }, { 
+      sessionId: sessionIdRef.current ?? sess.currentSessionId ?? undefined,
+      model: sess.controls.model,
     })
+    abortRef.current = abort
+    await promise
   }
 
   return (
@@ -103,11 +185,31 @@ async def rate_limit_middleware(request: Request, call_next):
 
         <div className="flex-1 min-w-0 grid grid-rows-[auto,1fr,auto,auto] h-screen">
           <TopBar />
-          <main className="overflow-y-auto">
+          <main id="main" tabIndex={-1} ref={mainRef} className="overflow-y-auto">
             <MessageList messages={messages} />
           </main>
           <StatusBar messages={messages} />
-          <Composer onSend={handleSend} />
+          <Composer 
+            onSend={handleSend}
+            isStreaming={isStreaming}
+            onCancel={() => {
+              try { 
+                // Try server-side interrupt first if we have a session id
+                const sid = sessionIdRef.current
+                if (sid) {
+                  fetch('/api/interrupt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sid })
+                  }).catch(() => { /* ignore */ })
+                }
+                abortRef.current?.()
+              } catch {}
+              setStreaming(false)
+              sess.setRunning(false)
+            }}
+            onClear={() => { setMessages([]); sessionIdRef.current = null; sess.clearSession() }}
+          />
         </div>
       </div>
     </div>

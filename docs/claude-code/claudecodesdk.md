@@ -6,6 +6,47 @@ The Claude Code SDK enables running Claude Code as a subprocess, providing a way
 
 The SDK is available for command line, TypeScript, and Python usage.
 
+## Why use the Claude Code SDK?
+
+The Claude Code SDK provides all the building blocks you need to build production-ready agents:
+
+- Optimized Claude integration: automatic prompt caching and performance optimizations
+- Rich tool ecosystem: file operations, code execution, web search, and MCP extensibility
+- Advanced permissions: fine-grained control over agent capabilities
+- Production essentials: built-in error handling, session management, and monitoring
+
+## What can you build with the SDK?
+
+Examples of agent types you can create:
+
+**Coding agents**
+- SRE agents that diagnose and fix production issues
+- Security review bots that audit code for vulnerabilities
+- Oncall engineering assistants that triage incidents
+- Code review agents that enforce style and best practices
+
+**Business agents**
+- Legal assistants that review contracts and compliance
+- Finance advisors that analyze reports and forecasts
+- Customer support agents that resolve technical issues
+- Content creation assistants for marketing teams
+
+The SDK is available in TypeScript and Python, with a CLI for quick prototyping.
+
+## Quick start
+
+Get your first agent running:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Each agent generally:
+- Analyzes the prompt using Claude’s reasoning
+- Plans a multi-step approach
+- Executes actions via tools (file ops, bash, web search)
+- Produces actionable recommendations
+
 ## Authentication
 
 The Claude Code SDK supports multiple authentication methods:
@@ -472,6 +513,114 @@ echo '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"
 ```
 
 ## Examples
+
+### Building a web client (streaming + aborts + ANSI)
+
+When integrating the SDK’s streaming endpoint into a web app, use `fetch` streaming with an `AbortController` for cancel, batch updates with `requestAnimationFrame` for performance, and optionally parse ANSI off the main thread.
+
+Minimal client stream helper (TypeScript):
+
+```ts
+type StreamHandlers = {
+  onMessage: (line: string) => void;
+  onDone?: () => void;
+  onError?: (e: unknown) => void;
+};
+
+export function streamQuery(prompt: string, handlers: StreamHandlers, signal?: AbortSignal) {
+  const controller = new AbortController();
+  const effective = signal ?? controller.signal;
+
+  const promise = (async () => {
+    try {
+      const resp = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, outputFormat: 'stream-json' }),
+        signal: effective,
+      });
+      if (!resp.body) throw new Error('No response body');
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (line) handlers.onMessage(line);
+        }
+      }
+      const last = buffer.trim();
+      if (last) handlers.onMessage(last);
+      handlers.onDone?.();
+    } catch (e: any) {
+      if (e?.name === 'AbortError' || effective.aborted) return;
+      handlers.onError?.(e);
+    }
+  })();
+
+  return { abort: () => controller.abort(), promise };
+}
+```
+
+Batch UI updates with rAF (example usage):
+
+```ts
+const buffer: string[] = [];
+let rafId: number | null = null;
+
+const flush = () => {
+  rafId = null;
+  if (!buffer.length) return;
+  const appended = buffer.join('\n') + '\n';
+  buffer.length = 0;
+  setMessages((prev) => {
+    const last = prev[prev.length - 1];
+    const content = last?.role === 'assistant' && last.content.startsWith('[streaming]')
+      ? last.content + appended
+      : '[streaming]\n' + appended;
+    return last?.role === 'assistant' && last.content.startsWith('[streaming]')
+      ? [...prev.slice(0, -1), { ...last, content }]
+      : [...prev, { role: 'assistant', content }];
+  });
+};
+
+const schedule = () => { if (rafId == null) rafId = requestAnimationFrame(flush); };
+
+const { abort, promise } = streamQuery(input, {
+  onMessage: (chunk) => { buffer.push(chunk); schedule(); },
+  onDone: () => flush(),
+  onError: () => { buffer.length = 0; if (rafId) cancelAnimationFrame(rafId); rafId = null; },
+});
+
+// Ctrl+C mapping -> abort(); await promise;
+```
+
+Off-main-thread ANSI parsing (Web Worker):
+
+```ts
+// workers/ansiWorker.ts
+// Receive a string and return an array of tokens: { text, classes: string[] }
+self.onmessage = (e: MessageEvent<string>) => {
+  const tokens = parseAnsi(e.data); // implement or reuse your parser
+  (self as any).postMessage(tokens);
+};
+
+// Component usage
+const worker = new Worker(new URL('./workers/ansiWorker.ts', import.meta.url), { type: 'module' });
+worker.onmessage = (e) => setTokens(e.data);
+worker.postMessage(ansiText);
+```
+
+Accessibility and UX tips:
+- Use a “stick-to-bottom only when near bottom” autoscroll pattern.
+- Make controls keyboard-accessible; add skip links and landmarks.
+- Virtualize lists (e.g., large logs) and memoize components to avoid re-render cascades.
 
 ### Simple script integration
 

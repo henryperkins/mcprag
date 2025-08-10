@@ -1,7 +1,9 @@
 import React from 'react'
 import { Share2, ChevronDown, Sun, Moon, Monitor } from 'lucide-react'
+import { useSession } from '../store/session.state'
 
 export default function TopBar() {
+  const sess = useSession()
   type ThemeMode = 'light' | 'dark' | 'system';
   const [theme, setTheme] = React.useState<ThemeMode>(() => {
     const stored = (localStorage.getItem('theme') as ThemeMode) || 'system';
@@ -37,6 +39,19 @@ export default function TopBar() {
     setTheme((prev) => (prev === 'light' ? 'dark' : prev === 'dark' ? 'system' : 'light'));
 
   const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
+  const models = ['auto', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-opus'] as const
+  const [modelIdx, setModelIdx] = React.useState(() => {
+    const cur = sess.controls.model || 'auto'
+    const idx = models.indexOf(cur as any)
+    return idx >= 0 ? idx : 0
+  })
+  const currentModel = models[modelIdx]
+  const cycleModel = () => {
+    const next = (modelIdx + 1) % models.length
+    setModelIdx(next)
+    const value = models[next] === 'auto' ? undefined : models[next]
+    sess.setControls({ model: value as any })
+  }
   const themeLabel = theme.charAt(0).toUpperCase() + theme.slice(1);
 
   return (
@@ -44,9 +59,25 @@ export default function TopBar() {
       <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-5 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm text-[color:var(--text-muted)]">
-            <span className="truncate">4Hosts</span>
+            <span className="truncate">Studio</span>
             <span>•</span>
-            <span className="truncate">LLM Function Calling and Web Search Workflow</span>
+            <span className="truncate">Claude Code SDK</span>
+            {sess.currentSessionId && (
+              <span
+                className="ml-2 inline-flex items-center gap-1 rounded-full border border-[color:var(--border-faint)] bg-[color:color-mix(in srgb, var(--bg-elevated) 60%, transparent)] px-2 py-0.5 text-xs"
+                title={`Session: ${sess.currentSessionId}`}
+              >
+                <span className="inline-block h-2 w-2 rounded-full bg-[color:var(--color-success)]" aria-hidden="true" />
+                {sess.currentSessionId.slice(0, 8)}…
+                <button
+                  className="ml-1 opacity-80 hover:opacity-100"
+                  aria-label="Copy session id"
+                  onClick={() => navigator.clipboard.writeText(sess.currentSessionId!)}
+                >
+                  📋
+                </button>
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -69,8 +100,9 @@ export default function TopBar() {
           <button
             className="inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--border-faint)] bg-[color:color-mix(in srgb, var(--bg-elevated) 60%, transparent)] px-3 py-1.5 text-sm text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
             aria-label="Model selector"
+            onClick={cycleModel}
           >
-            Claude Opus 4
+            {currentModel}
             <ChevronDown className="h-4 w-4 opacity-80" />
           </button>
         </div>

@@ -17,9 +17,11 @@ interface ClaudeRequestBody {
     maxTurns?: number
     allowedTools?: string[]
     continueSession?: boolean
+    resumeSessionId?: string
     cwd?: string
     permissionMode?: PermissionMode
     verbose?: boolean
+    model?: string
   }
 }
 
@@ -102,6 +104,11 @@ app.post('/api/claude/stream', async (req, res) => {
         maxTurns: options?.maxTurns ?? 3,
         allowedTools: options?.allowedTools ?? ['Bash', 'Read', 'WebSearch', 'Edit', 'Write'],
         continueSession: options?.continueSession ?? false,
+        // If provided, resume explicit session
+        // @ts-expect-error: option may not be in older SDK typings
+        resumeSessionId: options?.resumeSessionId,
+        // @ts-expect-error: model option may be supported in newer SDKs
+        model: options?.model,
         cwd: options?.cwd ?? process.cwd(),
         permissionMode: options?.permissionMode ?? 'acceptEdits',
         verbose: options?.verbose ?? false,
