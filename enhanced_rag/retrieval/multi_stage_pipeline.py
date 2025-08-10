@@ -146,22 +146,60 @@ class MultiStageRetriever(Retriever):
                 query.intent or SearchIntent.IMPLEMENT
             )
 
-        # Execute stages in parallel
+        # Execute stages in parallel with timeouts
         stage_tasks = []
+        stage_timeout = 5.0  # 5 seconds per stage
+        
         for stage in stages:
-            stage_tasks.append(self._execute_stage(stage, query))
+            # Wrap each stage execution with a timeout
+            stage_task = asyncio.create_task(
+                asyncio.wait_for(
+                    self._execute_stage(stage, query),
+                    timeout=stage_timeout
+                )
+            )
+            stage_tasks.append(stage_task)
 
-        stage_results = await asyncio.gather(*stage_tasks)
+        # Gather with return_exceptions to handle failures gracefully
+        stage_results_raw = await asyncio.gather(*stage_tasks, return_exceptions=True)
+        
+        # Filter out failed stages and log warnings
+        stage_results = []
+        for idx, result in enumerate(stage_results_raw):
+            if isinstance(result, Exception):
+                stage_name = stages[idx] if idx < len(stages) else f"stage_{idx}"
+                if isinstance(result, asyncio.TimeoutError):
+                    logger.warning(f"Stage {stage_name} timed out after {stage_timeout}s")
+                else:
+                    logger.warning(f"Stage {stage_name} failed: {result}")
+                # Add empty result for failed stage
+                stage_results.append([])
+            else:
+                stage_results.append(result)
 
         # Fuse results using Reciprocal Rank Fusion (RRF)
 
         # Budget-pruning: trim candidate pool to fit context tokens
+        # Count total documents across all stages, not number of stages
+        total_docs = sum(len(stage_result) for stage_result in stage_results)
         approx_tokens_per_doc = 200
-        if (
-            token_budget_ctx
-            and len(stage_results) * approx_tokens_per_doc > token_budget_ctx
-        ):
-            stage_results = stage_results[: int(token_budget_ctx / approx_tokens_per_doc)]
+        
+        if token_budget_ctx and total_docs * approx_tokens_per_doc > token_budget_ctx:
+            # Calculate max docs we can keep
+            max_docs = int(token_budget_ctx / approx_tokens_per_doc)
+            
+            # Trim each stage proportionally
+            trimmed_stage_results = []
+            for stage_result in stage_results:
+                if max_docs <= 0:
+                    break
+                # Keep proportional number of docs from each stage
+                stage_proportion = len(stage_result) / total_docs if total_docs > 0 else 0
+                stage_max = max(1, int(max_docs * stage_proportion))
+                trimmed_stage_results.append(stage_result[:stage_max])
+                max_docs -= len(trimmed_stage_results[-1])
+            
+            stage_results = trimmed_stage_results
 
         fused_results = await self._fuse_results(stage_results, query)
 
@@ -438,17 +476,42 @@ class MultiStageRetriever(Retriever):
         stage_results: List[List[Tuple[str, float]]],
         query: SearchQuery
     ) -> List[SearchResult]:
-        """Fuse results from multiple stages using RRF"""
-        # RRF implementation
+        """Fuse results from multiple stages using stage-aware RRF with weighted scoring"""
+        # RRF implementation with stage weights
         k = 60  # RRF constant
         doc_scores = {}
+        doc_stage_scores = {}  # Track best score per stage for hybrid scoring
+        
+        # Define stage weights based on quality/relevance
+        # These weights can be adjusted based on intent or learned from feedback
+        stage_weights = {
+            0: 1.0,   # First stage (e.g., vector) - high weight
+            1: 0.8,   # Second stage (e.g., keyword) - medium-high weight  
+            2: 0.6,   # Third stage (e.g., semantic) - medium weight
+            3: 0.4,   # Fourth stage (e.g., pattern) - lower weight
+            4: 0.3,   # Fifth stage (e.g., dependency) - lowest weight
+        }
 
         for stage_idx, results in enumerate(stage_results):
+            stage_weight = stage_weights.get(stage_idx, 0.5)
+            
+            # Normalize scores within each stage for hybrid scoring
+            max_score = max((score for _, score in results), default=1.0)
+            
             for rank, (doc_id, score) in enumerate(results):
                 if doc_id not in doc_scores:
                     doc_scores[doc_id] = 0
-                # RRF formula: 1/(k+rank)
-                doc_scores[doc_id] += 1 / (k + rank + 1)
+                    doc_stage_scores[doc_id] = {}
+                
+                # Weighted RRF formula: weight * 1/(k+rank)
+                rrf_score = stage_weight * (1 / (k + rank + 1))
+                
+                # Hybrid scoring: combine RRF with normalized original score
+                normalized_score = score / max_score if max_score > 0 else 0
+                hybrid_score = 0.7 * rrf_score + 0.3 * stage_weight * normalized_score
+                
+                doc_scores[doc_id] += hybrid_score
+                doc_stage_scores[doc_id][f'stage_{stage_idx}_score'] = score
 
         # Sort by fused score
         sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
@@ -485,7 +548,12 @@ class MultiStageRetriever(Retriever):
                         setattr(result, 'vector_score', meta['vector_score'])
 
                 # Original search score used for tie-breaking in ranker
-                orig = meta.get('bm25_score') or meta.get('semantic_score') or getattr(result, '_original_score', None)
+                # Prioritize: bm25_score > semantic_score > vector_score > fused_score
+                orig = (meta.get('bm25_score') or 
+                       meta.get('semantic_score') or 
+                       meta.get('vector_score') or 
+                       getattr(result, '_original_score', None) or
+                       fused_score)
                 if orig is not None:
                     try:
                         setattr(result, '_original_score', float(orig))

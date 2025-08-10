@@ -1,5 +1,9 @@
 export interface Env {
   BRIDGE_URL: string
+  // Optional Secrets Store bindings (resolved via env.ANTHROPIC_API_KEY.get())
+  ANTHROPIC_API_KEY?: SecretsStoreSecret
+  TURNSTILE_SECRET?: SecretsStoreSecret
+  ACCESS_JWT_SECRET?: SecretsStoreSecret
 }
 
 // Build CORS headers dynamically to support local dev origins

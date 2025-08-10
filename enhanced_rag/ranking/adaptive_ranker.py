@@ -44,6 +44,10 @@ class AdaptiveRanker:
         self.weight_adjustments = defaultdict(lambda: defaultdict(float))
         self.last_update = datetime.now()
         self.performance_history = []
+        
+        # Background task management
+        self._background_task: Optional[asyncio.Task] = None
+        self._shutdown = False
 
         # Weight bounds
         self.min_weight = 0.05
@@ -260,15 +264,47 @@ class AdaptiveRanker:
     def _start_background_updater(self):
         """Start background task for periodic weight updates"""
         async def updater():
-            while True:
-                await asyncio.sleep(300)  # Update every 5 minutes
-                if self.queries_since_update >= self.update_interval:
-                    try:
-                        await self._update_weights()
-                    except Exception as e:
-                        logger.error(f"Background update error: {e}")
+            while not self._shutdown:
+                try:
+                    await asyncio.sleep(300)  # Update every 5 minutes
+                    if self._shutdown:
+                        break
+                    if self.queries_since_update >= self.update_interval:
+                        try:
+                            await self._update_weights()
+                        except Exception as e:
+                            logger.error(f"Background update error: {e}")
+                except asyncio.CancelledError:
+                    logger.info("Background updater cancelled")
+                    break
+                except Exception as e:
+                    logger.error(f"Unexpected error in background updater: {e}")
+                    await asyncio.sleep(60)  # Wait before retry
 
-        asyncio.create_task(updater())
+        try:
+            self._background_task = asyncio.create_task(updater())
+        except RuntimeError:
+            # Event loop not running yet, defer start
+            logger.debug("Event loop not ready, background updater will start later")
+    
+    async def start(self):
+        """Start the adaptive ranker and its background tasks"""
+        if self.enable_background_updates and not self._background_task:
+            self._shutdown = False
+            self._start_background_updater()
+            logger.info("Adaptive ranker background updater started")
+    
+    async def shutdown(self):
+        """Gracefully shutdown the adaptive ranker"""
+        self._shutdown = True
+        if self._background_task:
+            self._background_task.cancel()
+            try:
+                await asyncio.wait_for(self._background_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            self._background_task = None
+            logger.info("Adaptive ranker background updater stopped")
 
     def get_adaptation_stats(self) -> Dict[str, Any]:
         """Get statistics about adaptation"""

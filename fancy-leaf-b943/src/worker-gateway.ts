@@ -32,7 +32,11 @@ export class SessionDO {
   private history: unknown[] = [];
   private activeToolCalls: Map<string, unknown> = new Map();
 
-  constructor(private state: DurableObjectState, private env: Env) {}
+  constructor(state: DurableObjectState, env: Env) {
+    // Store state and env as needed
+    void state;
+    void env;
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -284,11 +288,15 @@ export default {
 
     // Persist session metadata in KV for quick lookups (30 days TTL)
     const kvKey = `session:${sessionId}`;
-    await env.sessions_kv.put(kvKey, JSON.stringify({
-      createdAt: Date.now(),
-      userAgent: request.headers.get('User-Agent'),
-      ip: request.headers.get('CF-Connecting-IP'),
-    }), { expirationTtl: 60 * 60 * 24 * 30 });
+    await env.sessions_kv.put(
+      kvKey, 
+      JSON.stringify({
+        createdAt: Date.now(),
+        userAgent: request.headers.get('User-Agent'),
+        ip: request.headers.get('CF-Connecting-IP'),
+      }),
+      { expirationTtl: 60 * 60 * 24 * 30 }
+    );
 
     // Store session metadata in D1 using Sessions API for strong consistency
     const s = env.DB.session();
@@ -432,7 +440,7 @@ export default {
     const signedUrl = await env.FILES.createSignedUrl(key, { expiresIn: 3600 });
     // Public custom-domain URL (if configured): https://claude-r2.lakefrontdigital.io/user-assets/<key>
     const publicUrl = env.R2_PUBLIC_BASE
-      ? `${env.R2_PUBLIC_BASE.replace(/\\/$/, '')}/${encodeURIComponent(key)}`
+      ? `${env.R2_PUBLIC_BASE.replace(/\/$/, '')}/${encodeURIComponent(key)}`
       : undefined;
 
     // Enqueue async job for file post-processing
@@ -478,7 +486,7 @@ export default {
   },
 
   // Cloudflare Queues consumer: process async jobs (indexing, post-processing)
-  async queue(batch: MessageBatch<any>, env: Env, ctx: ExecutionContext): Promise<void> {
+  async queue(batch: MessageBatch<any>): Promise<void> {
     for (const msg of batch.messages) {
       try {
         const data = msg.body as any;

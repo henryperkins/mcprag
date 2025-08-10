@@ -70,6 +70,12 @@
 			},
 			"routes": [
 				{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
+			],
+			// Bind Secrets Store secrets for production environment as well
+			"secrets_store_secrets": [
+			  { "binding": "ANTHROPIC_API_KEY", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ANTHROPIC_API_KEY" },
+			  { "binding": "TURNSTILE_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "TURNSTILE_SECRET" },
+			  { "binding": "ACCESS_JWT_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ACCESS_JWT_SECRET" }
 			]
 		}
 	},
@@ -112,21 +118,18 @@
 	    { "queue": "claude-code-jobs" }
 	  ]
 	},
-	// Secrets: bind names to be provided via `wrangler secret put` or Secrets Store
-	// Note: Wrangler CLI manages values; this declares bindings for typegen and clarity.
-	"secrets": [
-	  { "binding": "ANTHROPIC_API_KEY" },
-	  { "binding": "TURNSTILE_SECRET" },
-	  { "binding": "ACCESS_JWT_SECRET" }
+	// Bind org-level Secrets Store secrets to this Worker
+	"secrets_store_secrets": [
+	  { "binding": "ANTHROPIC_API_KEY", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ANTHROPIC_API_KEY" },
+	  { "binding": "TURNSTILE_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "TURNSTILE_SECRET" },
+	  { "binding": "ACCESS_JWT_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ACCESS_JWT_SECRET" }
 	],
-	// Secrets Store (organization-level). Wrangler may ignore this locally if your account
-	// is not provisioned; it is included here to document the binding ID requirement.
-	"secrets_store": {
-	  "id": "18af881cb87f4ee289a7937973a8c8bc"
-	},
 	/**
-	 * Note: Use secrets to store sensitive data.
-	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 * Secrets handling
+	 * - Do NOT declare secrets in wrangler.jsonc (unsupported and insecure)
+	 * - Local dev: use `.dev.vars` (already in repo) for values
+	 * - Production: prefer Secrets Store bindings via `secrets_store_secrets` or use `wrangler secret put <NAME>`
+	 * Docs: https://developers.cloudflare.com/workers/configuration/secrets/
 	 */
 	/**
 	 * Static Assets
