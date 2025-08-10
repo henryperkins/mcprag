@@ -9,6 +9,13 @@ from pydantic import BaseModel, Field
 from pathlib import Path
 import json
 
+# Field name constants
+CONTENT_VECTOR_FIELD = "content_vector"
+CONTENT_FIELD = "content"
+FILE_PATH_FIELD = "file_path"
+FUNCTION_NAME_FIELD = "function_name"
+REPOSITORY_FIELD = "repository"
+
 
 class AzureConfig(BaseModel):
     """Azure AI Search configuration"""
@@ -22,11 +29,13 @@ class AzureConfig(BaseModel):
         default_factory=lambda: os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota")
     )
     semantic_config_name: str = Field(default="enhanced-semantic-config")
-    
+    embedding_dimensions: int = Field(default=1536)
+    api_version: str = Field(default="2024-07-01")
+
     # Index settings
     replica_count: int = Field(default=1)
     partition_count: int = Field(default=1)
-    
+
     # Search settings
     top_k: int = Field(default=50)  # For semantic ranker
     search_timeout_seconds: int = Field(default=30)
@@ -47,7 +56,7 @@ class EmbeddingConfig(BaseModel):
         default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT", "")
     )
     api_key: str = Field(
-        default_factory=lambda: os.getenv("AZURE_OPENAI_KEY", 
+        default_factory=lambda: os.getenv("AZURE_OPENAI_KEY",
                                          os.getenv("AZURE_OPENAI_API_KEY",
                                                   os.getenv("OPENAI_API_KEY", "")))
     )
@@ -61,13 +70,13 @@ class ContextConfig(BaseModel):
     max_context_depth: int = Field(default=3)
     include_git_history: bool = Field(default=True)
     git_history_days: int = Field(default=7)
-    
+
     # Context weights
     file_weight: float = Field(default=1.0)
     module_weight: float = Field(default=0.7)
     project_weight: float = Field(default=0.5)
     cross_project_weight: float = Field(default=0.3)
-    
+
     # Performance settings
     cache_enabled: bool = Field(default=True)
     cache_ttl_seconds: int = Field(default=300)
@@ -79,12 +88,12 @@ class RetrievalConfig(BaseModel):
     enable_vector_search: bool = Field(default=True)
     enable_keyword_search: bool = Field(default=True)
     enable_hybrid_search: bool = Field(default=True)
-    
+
     # Stage weights
     semantic_weight: float = Field(default=0.7)
     vector_weight: float = Field(default=0.8)
     keyword_weight: float = Field(default=0.5)
-    
+
     # Retrieval settings
     max_results_per_stage: int = Field(default=100)
     min_relevance_score: float = Field(default=0.5)
@@ -97,16 +106,16 @@ class RankingConfig(BaseModel):
     # Scoring factors
     enable_context_boost: bool = Field(default=True)
     context_boost_factor: float = Field(default=2.0)
-    
+
     enable_recency_boost: bool = Field(default=True)
     recency_boost_days: int = Field(default=30)
     recency_boost_factor: float = Field(default=1.5)
-    
+
     enable_quality_boost: bool = Field(default=True)
     quality_metrics: List[str] = Field(default_factory=lambda: [
         "test_coverage", "documentation_score", "complexity_score"
     ])
-    
+
     # Result filtering
     max_results: int = Field(default=20)
     diversity_threshold: float = Field(default=0.3)
@@ -116,16 +125,16 @@ class RankingConfig(BaseModel):
 class LearningConfig(BaseModel):
     """Learning system configuration"""
     enabled: bool = Field(default=True)
-    
+
     # Feedback collection
     min_interactions_for_learning: int = Field(default=10)
     success_weight: float = Field(default=1.0)
     failure_weight: float = Field(default=0.3)
-    
+
     # Model updates
     update_frequency_hours: int = Field(default=24)
     min_confidence_for_update: float = Field(default=0.7)
-    
+
     # Storage
     feedback_storage_days: int = Field(default=90)
     anonymize_data: bool = Field(default=True)
@@ -137,11 +146,11 @@ class PerformanceConfig(BaseModel):
     context_timeout_ms: int = Field(default=200)
     search_timeout_ms: int = Field(default=500)
     ranking_timeout_ms: int = Field(default=100)
-    
+
     # Caching
     enable_result_cache: bool = Field(default=True)
     cache_size_mb: int = Field(default=100)
-    
+
     # Monitoring
     enable_metrics: bool = Field(default=True)
     metrics_sample_rate: float = Field(default=0.1)
@@ -158,7 +167,7 @@ class Config(BaseModel):
     ranking: RankingConfig = Field(default_factory=RankingConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
     performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
-    
+
     # Global settings
     debug: bool = Field(
         default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true"
@@ -166,19 +175,19 @@ class Config(BaseModel):
     log_level: str = Field(
         default_factory=lambda: os.getenv("LOG_LEVEL", "INFO")
     )
-    
+
     @classmethod
     def from_file(cls, path: str) -> "Config":
         """Load configuration from JSON file"""
         with open(path, 'r') as f:
             data = json.load(f)
         return cls(**data)
-    
+
     def save_to_file(self, path: str) -> None:
         """Save configuration to JSON file"""
         with open(path, 'w') as f:
             json.dump(self.model_dump(), f, indent=2)
-    
+
     @classmethod
     def from_env(cls) -> "Config":
         """Create configuration from environment variables"""

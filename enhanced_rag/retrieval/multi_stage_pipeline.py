@@ -149,7 +149,7 @@ class MultiStageRetriever(Retriever):
         # Execute stages in parallel with timeouts
         stage_tasks = []
         stage_timeout = 5.0  # 5 seconds per stage
-        
+
         for stage in stages:
             # Wrap each stage execution with a timeout
             stage_task = asyncio.create_task(
@@ -162,7 +162,7 @@ class MultiStageRetriever(Retriever):
 
         # Gather with return_exceptions to handle failures gracefully
         stage_results_raw = await asyncio.gather(*stage_tasks, return_exceptions=True)
-        
+
         # Filter out failed stages and log warnings
         stage_results = []
         for idx, result in enumerate(stage_results_raw):
@@ -183,11 +183,11 @@ class MultiStageRetriever(Retriever):
         # Count total documents across all stages, not number of stages
         total_docs = sum(len(stage_result) for stage_result in stage_results)
         approx_tokens_per_doc = 200
-        
+
         if token_budget_ctx and total_docs * approx_tokens_per_doc > token_budget_ctx:
             # Calculate max docs we can keep
             max_docs = int(token_budget_ctx / approx_tokens_per_doc)
-            
+
             # Trim each stage proportionally
             trimmed_stage_results = []
             for stage_result in stage_results:
@@ -198,7 +198,7 @@ class MultiStageRetriever(Retriever):
                 stage_max = max(1, int(max_docs * stage_proportion))
                 trimmed_stage_results.append(stage_result[:stage_max])
                 max_docs -= len(trimmed_stage_results[-1])
-            
+
             stage_results = trimmed_stage_results
 
         fused_results = await self._fuse_results(stage_results, query)
@@ -268,7 +268,7 @@ class MultiStageRetriever(Retriever):
 
         # Use enhanced queries if available, otherwise fall back to original
         queries_to_search = query.queries if query.queries else [query.query]
-        
+
         def _do_keyword(search_text):
             return with_retry(op_name="acs.keyword")(self.search_clients["main"].search)(
                 search_text=search_text,
@@ -282,14 +282,14 @@ class MultiStageRetriever(Retriever):
         # Execute searches for all query variants and merge results
         all_docs = []
         seen_ids = set()
-        
+
         for search_text in queries_to_search[:3]:  # Limit to first 3 variants for performance
             try:
                 # Run blocking SDK call in a thread to avoid blocking the event loop
                 results = await asyncio.to_thread(_do_keyword, search_text)
                 # Materialize results to allow multiple passes and capture metadata
                 docs = list(results)
-                
+
                 # Merge unique results
                 for doc in docs:
                     doc_id = doc.get('id')
@@ -298,7 +298,7 @@ class MultiStageRetriever(Retriever):
                         seen_ids.add(doc_id)
             except Exception as e:
                 logger.warning(f"Failed to search with query variant '{search_text}': {e}")
-                
+
         docs = all_docs
 
         # Capture original BM25 score and any snippet/highlights for later enrichment
@@ -350,10 +350,13 @@ class MultiStageRetriever(Retriever):
 
         # Enrich semantic search with facets, captions/answers, highlights, total count, search_fields and retries
         def _do_semantic():
+            # Get semantic config from config
+            sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
+
             return with_retry(op_name="acs.semantic")(self.search_clients["main"].search)(
                 search_text=query.query,
                 query_type=QueryType.SEMANTIC,
-                semantic_configuration_name="semantic-config",
+                semantic_configuration_name=sem_cfg,  # Use config value
                 # scoring_profile="code_quality_boost",  # Commented out - profile doesn't exist
                 filter=self._build_filter(query),
                 facets=["language,count:20", "repository,count:20", "tags,count:20"],
@@ -481,12 +484,12 @@ class MultiStageRetriever(Retriever):
         k = 60  # RRF constant
         doc_scores = {}
         doc_stage_scores = {}  # Track best score per stage for hybrid scoring
-        
+
         # Define stage weights based on quality/relevance
         # These weights can be adjusted based on intent or learned from feedback
         stage_weights = {
             0: 1.0,   # First stage (e.g., vector) - high weight
-            1: 0.8,   # Second stage (e.g., keyword) - medium-high weight  
+            1: 0.8,   # Second stage (e.g., keyword) - medium-high weight
             2: 0.6,   # Third stage (e.g., semantic) - medium weight
             3: 0.4,   # Fourth stage (e.g., pattern) - lower weight
             4: 0.3,   # Fifth stage (e.g., dependency) - lowest weight
@@ -494,22 +497,22 @@ class MultiStageRetriever(Retriever):
 
         for stage_idx, results in enumerate(stage_results):
             stage_weight = stage_weights.get(stage_idx, 0.5)
-            
+
             # Normalize scores within each stage for hybrid scoring
             max_score = max((score for _, score in results), default=1.0)
-            
+
             for rank, (doc_id, score) in enumerate(results):
                 if doc_id not in doc_scores:
                     doc_scores[doc_id] = 0
                     doc_stage_scores[doc_id] = {}
-                
+
                 # Weighted RRF formula: weight * 1/(k+rank)
                 rrf_score = stage_weight * (1 / (k + rank + 1))
-                
+
                 # Hybrid scoring: combine RRF with normalized original score
                 normalized_score = score / max_score if max_score > 0 else 0
                 hybrid_score = 0.7 * rrf_score + 0.3 * stage_weight * normalized_score
-                
+
                 doc_scores[doc_id] += hybrid_score
                 doc_stage_scores[doc_id][f'stage_{stage_idx}_score'] = score
 
@@ -549,9 +552,9 @@ class MultiStageRetriever(Retriever):
 
                 # Original search score used for tie-breaking in ranker
                 # Prioritize: bm25_score > semantic_score > vector_score > fused_score
-                orig = (meta.get('bm25_score') or 
-                       meta.get('semantic_score') or 
-                       meta.get('vector_score') or 
+                orig = (meta.get('bm25_score') or
+                       meta.get('semantic_score') or
+                       meta.get('vector_score') or
                        getattr(result, '_original_score', None) or
                        fused_score)
                 if orig is not None:

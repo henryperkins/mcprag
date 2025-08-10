@@ -9,11 +9,6 @@ from ..ranking.filter_manager import FilterManager
 
 from enhanced_rag.azure_integration.rest.operations import SearchOperations
 from enhanced_rag.azure_integration.rest.client import AzureSearchClient
-from azure.search.documents.models import (
-    VectorizedQuery,
-    VectorizableTextQuery,
-    QueryType,
-)
 # Note: Azure SDK SearchClient and AzureKeyCredential removed - using REST API only
 
 from ..core.config import get_config, Config
@@ -253,10 +248,12 @@ class HybridSearcher:
         # ------------------------------------------------------------------
         kw_sem_results: List[HybridSearchResult] = []
         try:
+            sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
+
             kw_sem_kwargs = self._sanitize_search_kwargs({
                 "search_text": query,
                 "query_type": QueryType.SEMANTIC,
-                "semantic_configuration_name": "semantic-config",
+                "semantic_configuration_name": sem_cfg,
                 "query_caption": "extractive",
                 "query_answer": "extractive",
                 "filter": filter_expr,
@@ -266,8 +263,9 @@ class HybridSearcher:
                 "timeout": (deadline_ms / 1000) if deadline_ms else None,
             })
             body = {
+                "search": query,
                 "queryType": "semantic",
-                "semanticConfiguration": "semantic-config",
+                "semanticConfiguration": sem_cfg,
                 "queryCaption": "extractive",
                 "queryAnswer": "extractive",
                 "filter": kw_sem_kwargs.get("filter"),
@@ -341,7 +339,24 @@ class HybridSearcher:
                     emb = self.embedder.generate_embedding(query)
                 except Exception:
                     emb = None
-            vq = VectorizedQuery(vector=emb, k_nearest_neighbors=top_k * 2, fields="content_vector") if emb else None
+            if vector_weight > 0 and self.embed_func:
+                emb = await self._get_embedding(query)
+
+            if emb:
+                options["vectorQueries"] = [{
+                    "kind": "vector",  # Add discriminator
+                    "vector": emb,
+                    "k": top_k * 2,
+                    "fields": "content_vector"
+                }]
+            else:
+                options["vectorQueries"] = [{
+                    "kind": "vector",  # Add discriminator
+                    "vector": [0.0] * 1536,  # Use config dimension
+                    "k": 1,
+                    "fields": "content_vector"
+                }]
+
             vec_kwargs = self._sanitize_search_kwargs({
                 "search_text": "",
                 "vector_queries": [vq] if vq else None,
