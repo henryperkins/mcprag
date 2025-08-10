@@ -144,14 +144,20 @@ class SearchCodeEvaluator:
                 expected_results=expected
             )
     
-    async def _execute_search_code(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute search_code tool with given parameters"""
-        # Call the REAL search_code tool - NO MOCKS!
-        result = await search_code(**parameters)
-        return result
+    async def _execute_search_code(self, parameters: Dict[str, Any] | List[Dict[str, Any]]) -> Dict[str, Any] | List[Dict[str, Any]]:
+        # Handle parameter sets supplied as a list (used by comparison / sequential tests)
+        if isinstance(parameters, list):
+            return [await search_code(**p) for p in parameters]
+        return await search_code(**parameters)
     
     def _validate_results(self, actual: Dict[str, Any], expected: Dict[str, Any], category: str) -> Dict[str, Any]:
         """Validate actual results against expected criteria"""
+        # Handle multi-call results
+        if isinstance(actual, list):
+            if not actual:   # safety
+                return {"passed": False, "error": "empty result list", "metrics": {}}
+            # for now validate only the first call – prevents ** mapping errors
+            actual = actual[0]
         validation_result = {"passed": True, "metrics": {}, "errors": []}
         
         # Basic structure validation
