@@ -8,9 +8,14 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 # from ..utils.performance_monitor import PerformanceMonitor  # currently unused
 
-from azure.search.documents import SearchClient
-from azure.search.documents.models import QueryType
-from azure.core.credentials import AzureKeyCredential
+try:
+    from azure.search.documents import SearchClient
+    from azure.search.documents.models import QueryType
+    from azure.core.credentials import AzureKeyCredential
+except Exception:  # pragma: no cover
+    SearchClient = None  # type: ignore
+    QueryType = None  # type: ignore
+    AzureKeyCredential = None  # type: ignore
 from enhanced_rag.utils.error_handler import with_retry
 
 from ..core.interfaces import Retriever
@@ -70,6 +75,10 @@ class MultiStageRetriever(Retriever):
 
     def _initialize_clients(self) -> Dict[str, SearchClient]:
         """Initialize search clients for different indexes"""
+        # Short-circuit if Azure Search SDK is not available at runtime
+        if SearchClient is None or AzureKeyCredential is None:
+            logger.warning("Azure Search SDK not available; skipping client initialization")
+            return {}
         clients: Dict[str, SearchClient] = {}
 
         try:

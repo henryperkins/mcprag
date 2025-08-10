@@ -113,7 +113,7 @@ Style guide compliance:
 
         # TOKEN-BUDGET: keep template + filled data under 7k tokens
         monitor = PerformanceMonitor()
-        monitor.increment_counter("responses_generated")
+        monitor.record_metric("responses_generated", 1.0)
 
         raw_text = self._fill_template(template, query, extracted_info)
         if len(raw_text) > 28000:  # ~7k tokens rough guardrail
@@ -205,7 +205,8 @@ Style guide compliance:
 
         for result in results[:5]:
             # Look for error handling patterns
-            if 'error' in result.code_snippet.lower() or 'exception' in result.code_snippet.lower():
+            snippet = (result.code_snippet or '').lower()
+            if 'error' in snippet or 'exception' in snippet:
                 solution = {
                     'code': result.code_snippet,
                     'file': result.file_path,

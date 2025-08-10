@@ -495,7 +495,7 @@ class CodeGenerator:
                 '        raise ValueError("Factorial not defined for negative numbers")',
                 '    if n == 0 or n == 1:',
                 '        return 1',
-                '    return n * calculate_factorial(n - 1)'
+                f'    return n * {func_name}(n - 1)'
             ]
         elif 'greatest common divisor' in d or 'gcd' in d:
             body = [
@@ -665,7 +665,7 @@ class CodeGenerator:
             ])
         else:
             if params:
-                lines.append(f'  return {{ {', '.join(params)} }};')
+                lines.append('  return { ' + ', '.join(params) + ' };')
             else:
                 lines.append('  return {};')
         
@@ -920,9 +920,11 @@ class CodeGenerator:
                 if not func.startswith('_'):  # Skip private functions
                     lines.append(f"def test_{func}():")
                     lines.append(f"    \"\"\"Test {func} function\"\"\"")
-                    lines.append("    # TODO: Implement test")
-                    lines.append("    with pytest.raises(NotImplementedError):")
+                    lines.append("    # Smoke test: function should run without exception")
+                    lines.append("    try:")
                     lines.append(f"        {func}()")
+                    lines.append("    except Exception as e:")
+                    lines.append(f"        pytest.fail(f'{func} raised an exception: {e}')")
                     lines.append("")
 
         if class_names:
@@ -955,8 +957,8 @@ class CodeGenerator:
             func = match[0] or match[1]
             if func:
                 lines.append(f"  describe('{func}', () => {{")
-                lines.append(f"    it('should be implemented', () => {{")
-                lines.append(f"      expect(() => {func}()).toThrow('Not implemented');")
+                lines.append(f"    it('should run without throwing', () => {{")
+                lines.append(f"      expect(() => {func}()).not.toThrow();")
                 lines.append("    });")
                 lines.append("  });")
                 lines.append("")

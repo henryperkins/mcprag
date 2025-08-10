@@ -311,13 +311,13 @@ class CodeGenerationTool:
             code = result.code_snippet
             
             # Extract Python imports
-            if result.language == 'python':
+            if (result.language or '').lower() == 'python':
                 import_pattern = r'^(?:from\s+[\w\.]+\s+)?import\s+.*$'
                 found_imports = re.findall(import_pattern, code, re.MULTILINE)
                 imports.update(found_imports)
             
             # Extract JS/TS imports
-            elif result.language in ['javascript', 'typescript']:
+            elif (result.language or '').lower() in ['javascript', 'typescript']:
                 import_pattern = r'^import\s+.*?from\s+[\'"].*?[\'"]'
                 found_imports = re.findall(import_pattern, code, re.MULTILINE)
                 imports.update(found_imports)
