@@ -924,7 +924,7 @@ class CodeGenerator:
                     lines.append("    try:")
                     lines.append(f"        {func}()")
                     lines.append("    except Exception as e:")
-                    lines.append(f"        pytest.fail(f'{func} raised an exception: {e}')")
+                    lines.append(f'        pytest.fail(f\"{func} raised an exception: {{e}}\")')
                     lines.append("")
 
         if class_names:
