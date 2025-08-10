@@ -97,6 +97,27 @@ class EnhancedSearchTool:
 
             results = result['results'][:10]
 
+        # --- normalise dict results to objects --------------------------------
+        from types import SimpleNamespace
+
+        if results and isinstance(results[0], dict):
+            normalised = []
+            for d in results:
+                ns = SimpleNamespace(**d)
+                # Provide aliases expected later in this method
+                ns.code_snippet = getattr(ns, "code_snippet", None) or d.get("content")
+                ns.file_path = getattr(ns, "file_path", None) or d.get("file", "")
+                ns.relevance_explanation = (
+                    getattr(ns, "relevance_explanation", None)
+                    or d.get("explanation", "")
+                )
+                ns.score = getattr(ns, "score", None) or d.get("relevance", 0.0)
+                ns.start_line = getattr(ns, "start_line", None) or d.get("start_line")
+                ns.end_line = getattr(ns, "end_line", None) or d.get("end_line")
+                ns.highlights = getattr(ns, "highlights", None) or d.get("highlights", {})
+                normalised.append(ns)
+            results = normalised
+
         # Generate compact and ultra-compact formats
         results_compact = []
         results_ultra_compact = []

@@ -223,7 +223,8 @@ class RemoteMCPServer(MCPServer):
         @app.get("/mcp/tools")
         async def list_tools(user=Depends(self.auth.get_current_user)):
             """List available tools for the authenticated user."""
-            user_tier = user.get("tier", "public")
+            user_tier_enum = SecurityTier(user.get("tier", "public"))
+            user_tier = user_tier_enum.value
 
             # Use transport wrapper if available for unified tool listing
             if hasattr(self, 'transport_wrapper'):
@@ -247,7 +248,7 @@ class RemoteMCPServer(MCPServer):
                         tool_tier = get_tool_tier(tool_name)
 
                         # Check if user can access this tool
-                        if user_meets_tier_requirement(user_tier, tool_tier):
+                        if user_meets_tier_requirement(user_tier_enum, tool_tier):
                             all_tools.append({
                                 "name": tool_name,
                                 "title": tool.title,
@@ -263,7 +264,7 @@ class RemoteMCPServer(MCPServer):
                         "error": "Tool listing not available",
                         "message": "FastMCP list_tools() method not found",
                         "tools": [],
-                        "user_tier": user_tier.value,
+                        "user_tier": user_tier,
                         "total": 0
                     }
             except Exception as e:
@@ -272,13 +273,13 @@ class RemoteMCPServer(MCPServer):
                     "error": "Failed to retrieve tools",
                     "message": str(e),
                     "tools": [],
-                    "user_tier": user_tier.value,
+                    "user_tier": user_tier,
                     "total": 0
                 }
 
             return {
                 "tools": all_tools,
-                "user_tier": user_tier.value,
+                "user_tier": user_tier,
                 "total": len(all_tools)
             }
 
@@ -342,9 +343,10 @@ class RemoteMCPServer(MCPServer):
                     
                     # Audit the tool usage
                     await self._audit_log(
-                        user_id=user.get("user_id"),
-                        action=f"tool.{tool_name}",
-                        details={"args": body, "result": "success"}
+                        user,
+                        tool_name,
+                        body,
+                        {"success": True}
                     )
                     
                     return {"result": result}
