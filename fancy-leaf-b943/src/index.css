@@ -27,9 +27,9 @@
     --ansi-15: #f0f1f4; /* Bright White */
     
     /* Semantic Color Tokens */
-    --color-primary: #26bbd9;
-    --color-primary-hover: #3fc6de;
-    --color-primary-active: #1ea8c7;
+    --color-primary: #8b5cf6;
+    --color-primary-hover: #a78bfa;
+    --color-primary-active: #7c3aed;
     --color-success: #29d398;
     --color-success-hover: #3fdaa4;
     --color-warning: #fab795;
@@ -42,21 +42,21 @@
 
     /* RGB variants for opacity utilities */
     /* Add these alongside hex tokens to support rgba(var(--*-rgb), x) */
-    --primary-rgb: 38, 187, 217;   /* #26bbd9 */
+    --primary-rgb: 139, 92, 246;   /* #8b5cf6 */
     --success-rgb: 41, 211, 152;   /* #29d398 */
     --warning-rgb: 250, 183, 149;  /* #fab795 */
     --error-rgb:   233,  86, 120;  /* #e95678 */
     --info-rgb:     89, 227, 227;  /* #59e3e3 */
     
     /* Background Tokens - Dark Theme */
-    --bg-primary: #0a0b0f;
-    --bg-secondary: #0f1117;
-    --bg-tertiary: #161820;
-    --bg-elevated: #1c1e26;
+    --bg-primary: #0b0f14;
+    --bg-secondary: #0f1520;
+    --bg-tertiary: #0a0c10;
+    --bg-elevated: #12151c;
     --bg-overlay: #232530;
     --bg-surface: #282a36;
-    --bg-hover: rgba(38, 187, 217, 0.08);
-    --bg-active: rgba(38, 187, 217, 0.12);
+    --bg-hover: rgba(var(--primary-rgb), 0.08);
+    --bg-active: rgba(var(--primary-rgb), 0.12);
     
     /* Glass Morphism */
     --glass-bg: rgba(15, 17, 23, 0.7);
@@ -123,7 +123,7 @@
     --focus-ring-color: var(--color-primary);
     --focus-ring-width: 2px;
     --focus-ring-offset: 2px;
-    --selection-bg: rgba(38, 187, 217, 0.25);
+    --selection-bg: rgba(var(--primary-rgb), 0.25);
 
     /* Borders */
     --border-subtle: rgba(255, 255, 255, 0.08);
@@ -210,7 +210,7 @@
     flex-direction: column;
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--font-md);
     line-height: var(--leading-normal);
     overflow: hidden;

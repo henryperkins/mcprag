@@ -32,7 +32,7 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
           <textarea
             ref={ref}
             rows={1}
-            placeholder="Reply to Claude…"
+            placeholder="Message Claude…"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             className="min-h-[44px] max-h-40 flex-1 resize-none bg-transparent px-1 py-2 outline-none placeholder:text-[color:var(--text-muted)]"

@@ -1,6 +1,17 @@
 import { Plus, Grid2x2, Settings } from 'lucide-react'
 
-export default function Sidebar() {
+type Props = {
+  onToggleSessions?: () => void
+  showSessions?: boolean
+}
+
+export default function Sidebar({ onToggleSessions, showSessions }: Props) {
+  const libBtnClass =
+    'grid h-9 w-9 place-items-center rounded-lg focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)] ' +
+    (showSessions
+      ? 'bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] text-white/90'
+      : 'text-white/60 hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)]')
+
   return (
     <nav
       aria-label="Primary"
@@ -16,9 +27,11 @@ export default function Sidebar() {
             <Plus className="h-5 w-5" />
           </button>
           <button
-            className="grid h-9 w-9 place-items-center rounded-lg text-white/60 hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
-            aria-label="Library"
-            title="Library"
+            className={libBtnClass}
+            onClick={() => onToggleSessions?.()}
+            aria-pressed={!!showSessions}
+            aria-label="Toggle library"
+            title={showSessions ? 'Hide Library' : 'Show Library'}
           >
             <Grid2x2 className="h-5 w-5" />
           </button>

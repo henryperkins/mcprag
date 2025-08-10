@@ -8,7 +8,7 @@ export default function TopBar() {
           <div className="flex items-center gap-2 text-sm text-[color:var(--text-muted)]">
             <span className="truncate">4Hosts</span>
             <span>•</span>
-            <span className="truncate">Python Project Code Refactoring Strategy</span>
+            <span className="truncate">LLM Function Calling and Web Search Workflow</span>
           </div>
         </div>
         <div className="flex items-center gap-2">

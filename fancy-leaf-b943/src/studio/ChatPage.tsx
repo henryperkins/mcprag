@@ -4,6 +4,8 @@ import TopBar from './TopBar'
 import MessageList, { type Message } from './MessageList'
 import Composer from './Composer'
 import { streamQuery } from './stream'
+import SessionsPane from './SessionsPane'
+import StatusBar from './StatusBar'
 
 export default function ChatPage() {
   // Apply dark theme on mount
@@ -11,6 +13,9 @@ export default function ChatPage() {
     document.documentElement.setAttribute('data-theme', 'dark')
     document.documentElement.classList.add('dark')
   }, [])
+
+  const [showSessions, setShowSessions] = React.useState(false)
+
   const [messages, setMessages] = React.useState<Message[]>([
     {
       role: 'assistant',
@@ -61,17 +66,29 @@ async def rate_limit_middleware(request: Request, call_next):
     <div
       className="app-container scroll-smooth"
       style={{
-        background: 'radial-gradient(1200px 600px at 50% -200px, rgba(124,58,237,0.12), transparent)',
+        background: 'radial-gradient(1200px 600px at 50% -200px, rgba(var(--primary-rgb), 0.12), transparent)',
       }}
     >
       <div className="ribbon" aria-hidden="true" />
-      <Sidebar />
-      <div className="pl-14">
-        <TopBar />
-        <main>
-          <MessageList messages={messages} />
-        </main>
-        <Composer onSend={handleSend} />
+      <Sidebar onToggleSessions={() => setShowSessions((v) => !v)} showSessions={showSessions} />
+      <div className="pl-14 flex">
+        {showSessions && (
+          <aside
+            className="hidden md:block w-80 shrink-0 border-r border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-tertiary) 90%, transparent)]/90 backdrop-blur-sm"
+            aria-label="Sessions library"
+          >
+            <SessionsPane />
+          </aside>
+        )}
+
+        <div className="flex-1 min-w-0 grid grid-rows-[auto,1fr,auto,auto] h-screen">
+          <TopBar />
+          <main className="overflow-y-auto">
+            <MessageList messages={messages} />
+          </main>
+          <StatusBar messages={messages} />
+          <Composer onSend={handleSend} />
+        </div>
       </div>
     </div>
   )

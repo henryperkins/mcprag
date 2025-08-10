@@ -1,13 +1,13 @@
 :root {
   /* Fallbacks; your Tailwind tokens already exist. */
-  --bg-primary: #0f1115;
-  --bg-secondary: #0b0d12;
+  --bg-primary: #0b0f14;
+  --bg-secondary: #0f1520;
   --bg-tertiary: #0a0c10;
   --bg-elevated: #12151c;
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-faint: rgba(255, 255, 255, 0.06);
   --text-muted: rgba(255, 255, 255, 0.58);
-  --color-primary: #7aa2ff;
+  --color-primary: #8b5cf6;
   --color-success: #6ee7b7;
   --color-info: #93c5fd;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
