@@ -20,10 +20,13 @@ from datetime import datetime, timezone
 # Add project root to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-# Use a simple wrapper that will be replaced at runtime with the production MCP tool
+# --- real MCP tool import / bootstrap -----------------
+from mcprag.mcp.tools.search import search_code as _prod_search_code
+# ------------------------------------------------------
+
 async def search_code(**kwargs) -> Dict[str, Any]:
-    """Placeholder - will be replaced with production MCP tool at runtime"""
-    raise NotImplementedError("This should be replaced with the production MCP tool")
+    """Proxy to the production search_code tool."""
+    return await _prod_search_code(**kwargs)
 
 
 @dataclass
