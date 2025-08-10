@@ -23,7 +23,7 @@ share/python-wheels/
 MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
-
+azure-mcp/
 # Virtual environments
 .venv/
 venv/
