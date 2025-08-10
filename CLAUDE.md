@@ -278,45 +278,50 @@ Tools requiring explicit `confirm=true` parameter:
   - Tests pass locally for impacted area(s).
   - No flakiness introduced.
 
-### Search Code Tool Evaluation Framework
-The project includes a comprehensive evaluation system for the `search_code` MCP tool located in `.claude/state/`:
+### Universal MCP Tool Testing Framework
+The project includes a comprehensive universal testing framework for all 31 MCP tools located in `.claude/state/`:
 
-- **`search_code_evaluation_plan.md`**: Complete evaluation framework with test categories, success metrics, and implementation timeline
-- **`search_code_test_scenarios.json`**: 35+ test scenarios covering repository filtering, search quality, performance, edge cases, and regression testing
-- **`search_evaluation_runner.py`**: Automated test runner with async execution, performance monitoring, and detailed reporting
-- **`evaluation_procedures_guide.md`**: Operational procedures for running evaluations, analyzing results, and troubleshooting
+- **`universal_mcp_tool_evaluator.py`**: Universal test framework supporting all MCP tool categories with automatic discovery, comprehensive test execution, and performance monitoring
+- **`mcp_tool_coverage_report.py`**: Tool coverage analyzer that discovers tools via regex patterns, reports coverage statistics, and generates test templates for untested tools
+- **`test_templates/`**: Directory containing generated test templates for expanding coverage to untested tools
 
-#### Test Categories and Coverage
-1. **Repository Filtering** (5 tests) - Scope isolation and filtering accuracy
-2. **Search Quality** (5 tests) - Relevance scoring and result accuracy validation
-3. **Parameter Combinations** (5 tests) - Feature interaction testing (BM25, exact terms, detail levels)
-4. **Performance Tests** (4 tests) - Response time benchmarks and throughput testing
-5. **Edge Cases** (7 tests) - Input validation, error handling, boundary conditions
-6. **Regression Tests** (3+ tests) - Stability and consistency checks against known baselines
+#### Testing Capabilities
+1. **Tool Discovery**: Automatic detection of all MCP tools via `@mcp.tool()` decorators
+2. **Coverage Analysis**: Real-time reporting of tested vs untested tools (currently 16.1% coverage - 5/31 tools)
+3. **Test Categories**:
+   - Search tools (search_code, search_code_raw, search_microsoft_docs)
+   - Generation tools (generate_code)
+   - Analysis tools (analyze_context, explain_ranking, preview_query_processing)
+   - Admin tools (index_rebuild, github_index_repo, manage_index, manage_documents, manage_indexer)
+   - Azure management tools (create_datasource, create_skillset, index_status, validate_index_schema, etc.)
+   - Cache tools (cache_stats, cache_clear)
+   - Feedback tools (submit_feedback, track_search_click, track_search_outcome)
+   - Service management tools (configure_semantic_search, get_service_info)
 
-#### Running Evaluations
+#### Running Tests
 ```bash
-# Full evaluation suite
-python .claude/state/search_evaluation_runner.py
+# Run universal test framework for all tools
+python .claude/state/universal_mcp_tool_evaluator.py
 
-# Quick regression check  
-python .claude/state/search_evaluation_runner.py --smoke-test
+# Generate coverage report and test templates
+python .claude/state/mcp_tool_coverage_report.py
 
-# CI/CD integration
-python .claude/state/search_evaluation_runner.py --ci-mode
+# Run specific tool test suites
+python .claude/state/universal_mcp_tool_evaluator.py --tool search_code --suite search
 ```
 
-#### Success Criteria
-- **Functional**: 100% response rate, <1% error rate for valid inputs
-- **Quality**: 95% repository filtering accuracy, proper relevance scoring
-- **Performance**: 95th percentile response time <500ms
-- **Reliability**: 85%+ test pass rate for stable releases
+#### Test Result Format
+- Each test produces a `ToolTestResult` with:
+  - Tool name, test name, status (passed/failed/error/skipped)
+  - Error messages, performance metrics
+  - Response validation results
+  - Business value metrics (optional)
 
 #### Known Issues to Monitor
-- Repository filtering currently broken (P1 issue)
+- Repository filtering currently broken (P1 issue) 
 - Enhanced mode relevance scores very low (0.016 vs BM25 scores >1.0)
-- Content extraction incomplete for some results
-- Search results biased toward dependency code vs project code
+- 26 tools remain untested (83.9% of tools lack test coverage)
+- Cross-tool integration tests not yet implemented
 
 ## Documentation standards
 - Update README and relevant docs when behavior changes.
@@ -529,36 +534,40 @@ Use the orchestrator for multi-file/multi-step tasks requiring planning and dele
   - SessionStart: inject CLAUDE.md highlights into context.
   - PreCompact: trigger summarization when near context limit.
 
-## Search Code Tool Testing
-When working with search functionality or debugging search issues:
+## MCP Tool Testing
+When working with MCP tools or debugging issues:
 
 ### Quick Manual Tests
 ```bash
-# Test basic functionality
-python -c "import asyncio; from mcprag.mcp.tools.search import search_code; asyncio.run(search_code(query='server', max_results=3))"
-
-# Test repository filtering (currently broken - P1 issue)
-python -c "import asyncio; from mcprag.mcp.tools.search import search_code; asyncio.run(search_code(query='server', repository='mcprag', max_results=3))"
-
-# Compare BM25 vs Enhanced modes
+# Test search_code functionality using the universal framework
 python -c "
 import asyncio
-from mcprag.mcp.tools.search import search_code
+from claude.state.universal_mcp_tool_evaluator import UniversalMCPToolEvaluator
 
-async def compare():
-    bm25 = await search_code(query='register_tools', bm25_only=True, max_results=3)
-    enhanced = await search_code(query='register_tools', bm25_only=False, max_results=3)
-    print(f'BM25 relevance: {bm25[\"data\"][\"items\"][0][\"relevance\"]:.3f}')
-    print(f'Enhanced relevance: {enhanced[\"data\"][\"items\"][0][\"relevance\"]:.3f}')
-    
-asyncio.run(compare())
+async def test_search():
+    evaluator = UniversalMCPToolEvaluator()
+    await evaluator.initialize()
+    # Run search tool tests
+    results = await evaluator.run_tool_tests('search_code')
+    evaluator.print_summary()
+    await evaluator.cleanup()
+
+asyncio.run(test_search())
 "
+
+# Generate coverage report for all tools
+python .claude/state/mcp_tool_coverage_report.py
+
+# Run comprehensive test suite
+python .claude/state/universal_mcp_tool_evaluator.py
 ```
 
-### Automated Evaluation
-- Run full evaluation: `python .claude/state/search_evaluation_runner.py`
-- Run regression tests: `python .claude/state/search_evaluation_runner.py --smoke-test`
-- Monitor for P1 repository filtering and P2 relevance scoring issues
+### Tool-Specific Testing
+- Search tools: Test with various queries, repositories, and detail levels
+- Admin tools: Require MCP_ADMIN_MODE=true, test with mock/sandbox environments
+- Azure management tools: Test connection and authentication before operations
+- Cache tools: Verify cache behavior and TTL settings
+- Feedback tools: Test with sample feedback data
 
 ## Routing cues for subagent selection
 - Orchestrator: “plan”, “orchestrate”, “multi-file”, “refactor across modules”, “end-to-end”, “first…then…”, “migration”, “config/dependency upgrade”, protected paths.

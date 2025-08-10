@@ -28,6 +28,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-code": "^1.0.70",
+		"@anthropic-ai/sdk": "^0.59.0",
 		"@browserbasehq/stagehand": "^2.4.2",
 		"@monaco-editor/react": "^4.7.0",
 		"cors": "^2.8.5",

@@ -316,6 +316,14 @@ class RAGPipeline:
             repo_pref = prefs.get('repository')
             exact_terms_pref = prefs.get('exact_terms', [])
             bm25_only_pref = bool(prefs.get('bm25_only', False))
+            # Early routing: if the query looks risky or likely to degrade vector path, force BM25-only
+            auto_bm25 = False
+            try:
+                if not bm25_only_pref and self._should_route_bm25_only(query):
+                    bm25_only_pref = True
+                    auto_bm25 = True
+            except Exception:
+                pass
 
             search_query = SearchQuery(
                 query=query,
@@ -582,6 +590,13 @@ class RAGPipeline:
             except Exception:
                 retrieval_warnings = []
 
+            # Surface auto-routing decision if applied
+            try:
+                if 'auto_bm25' in locals() and auto_bm25:
+                    retrieval_warnings.append('bm25_only_auto_routed')
+            except Exception:
+                pass
+
             metadata = {
                 'intent': intent.value,
                 'enhanced_queries': enhanced_queries,
@@ -699,6 +714,24 @@ class RAGPipeline:
         self._session_contexts.move_to_end(session_id)
         if len(self._session_contexts) > self._MAX_SESSIONS:
             self._session_contexts.popitem(last=False)
+
+    def _should_route_bm25_only(self, query: str) -> bool:
+        """
+        Heuristic guardrail: route to BM25-only when the query appears risky for vector/semantic paths.
+        - Detects suspicious filter-like syntax or control operators
+        - Avoids vectorization for excessively long queries
+        """
+        q = (query or "").lower()
+        suspicious_patterns = [
+            " or ", " and ", " eq ", " ne ", " gt ", " lt ", " ge ", " le ",
+            "(", ")", "--", "/*", "*/", ";"
+        ]
+        if any(p in q for p in suspicious_patterns):
+            return True
+        # Overly long free-text queries tend to be better served by BM25 for first pass
+        if len(q) > 500:
+            return True
+        return False
 
     def get_pipeline_status(self) -> Dict[str, Any]:
         """Get current pipeline status and health"""

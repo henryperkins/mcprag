@@ -9,6 +9,7 @@ import SessionsPane from './SessionsPane'
 import StatusBar from './StatusBar'
 import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom'
 import { useSession } from '../store/session.state'
+import type { SlashCommand } from '../components/SlashMenu'
 
 export default function ChatPage() {
   // Apply dark theme on mount
@@ -71,9 +72,60 @@ async def rate_limit_middleware(request: Request, call_next):
   const mainRef = React.useRef<HTMLDivElement | null>(null)
   useAutoScrollNearBottom(mainRef, [messages], 80)
 
+  // Load dynamic slash commands from Worker → Bridge
+  const [slashCommands, setSlashCommands] = React.useState<SlashCommand[]>([])
+  React.useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const r = await fetch('/api/commands?includeContent=1')
+        if (!r.ok) throw new Error('failed to load commands')
+        const data = await r.json() as { commands?: Array<{ command: string; description: string; content?: string }> }
+        if (!mounted) return
+        const cmds: SlashCommand[] = (data.commands || []).map(c => ({ command: c.command, description: c.description || '', content: c.content }))
+        setSlashCommands(cmds)
+      } catch {
+        // ignore
+      }
+    })()
+    return () => { mounted = false }
+  }, [])
+
+  async function expandSlashIfNeeded(input: string): Promise<string> {
+    const raw = input.trim()
+    if (!raw.startsWith('/')) return input
+    const firstSpace = raw.indexOf(' ')
+    const cmdName = (firstSpace === -1 ? raw : raw.slice(0, firstSpace)).trim()
+    const args = firstSpace === -1 ? '' : raw.slice(firstSpace + 1)
+    // Prefer server-side expansion to support !`bash` and @file
+    try {
+      const r = await fetch('/api/commands/expand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: cmdName,
+          args,
+          allowedTools: sess.controls.allowedTools,
+        }),
+      })
+      if (r.ok) {
+        const data = await r.json() as { expanded?: string }
+        if (data?.expanded) return data.expanded
+      }
+    } catch {}
+    // Fallback: local expand if server not available
+    const match = slashCommands.find(c => c.command === cmdName)
+    if (!match || !match.content) return input
+    const body = match.content
+    const expanded = body.includes('$ARGUMENTS') ? body.replaceAll('$ARGUMENTS', args) : [body, args].filter(Boolean).join('\n')
+    return expanded
+  }
+
   async function handleSend(text: string) {
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
+    const expanded = await expandSlashIfNeeded(text)
+    setMessages((prev) => [...prev, { role: 'user', content: expanded }])
     setStreaming(true)
+    try { sess.setRunning(true) } catch {}
 
     const flush = () => {
       rAFRef.current = null
@@ -98,7 +150,7 @@ async def rate_limit_middleware(request: Request, call_next):
       rAFRef.current = requestAnimationFrame(flush)
     }
 
-    const { abort, promise } = streamQuery(text, {
+    const { abort, promise } = streamQuery(expanded, {
       onStart: (sid) => { sessionIdRef.current = sid },
       onInit: (payload) => { try { sess.setInit(payload) } catch {} },
       onResult: (payload) => { try { sess.setResult(payload) } catch {} },
@@ -159,6 +211,16 @@ async def rate_limit_middleware(request: Request, call_next):
     }, { 
       sessionId: sessionIdRef.current ?? sess.currentSessionId ?? undefined,
       model: sess.controls.model,
+      maxTurns: sess.controls.maxTurns,
+      permissionMode: sess.controls.permissionMode,
+      verbose: sess.controls.verbose,
+      systemPrompt: sess.controls.systemPrompt,
+      appendSystemPrompt: sess.controls.appendSystemPrompt,
+      allowedTools: sess.controls.allowedTools,
+      disallowedTools: sess.controls.disallowedTools,
+      mcpConfig: sess.controls.mcpConfig,
+      permissionPromptTool: sess.controls.permissionPromptTool,
+      continueSession: Boolean(sessionIdRef.current ?? sess.currentSessionId),
     })
     abortRef.current = abort
     await promise
@@ -209,6 +271,7 @@ async def rate_limit_middleware(request: Request, call_next):
               sess.setRunning(false)
             }}
             onClear={() => { setMessages([]); sessionIdRef.current = null; sess.clearSession() }}
+            commands={slashCommands}
           />
         </div>
       </div>

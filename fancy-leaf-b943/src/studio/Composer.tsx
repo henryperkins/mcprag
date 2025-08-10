@@ -1,6 +1,6 @@
 import React from 'react'
 import { Plus, Paperclip, Send } from 'lucide-react'
-import { SlashMenu } from '../components/SlashMenu'
+import { SlashMenu, type SlashCommand } from '../components/SlashMenu'
 import { useSessionStore } from '../store/session'
 
 type Props = {
@@ -8,9 +8,10 @@ type Props = {
   onCancel?: () => void
   onClear?: () => void
   isStreaming?: boolean
+  commands?: SlashCommand[]
 }
 
-export default function Composer({ onSend, onCancel, onClear, isStreaming = false }: Props) {
+export default function Composer({ onSend, onCancel, onClear, isStreaming = false, commands = [] }: Props) {
   const [value, setValue] = React.useState('')
   const ref = React.useRef<HTMLTextAreaElement | null>(null)
   const MAX_COMPOSER_HEIGHT_PX = 192 // 12rem
@@ -165,6 +166,7 @@ export default function Composer({ onSend, onCancel, onClear, isStreaming = fals
               onClose={() => setIsSlashOpen(false)}
               selectedIndex={slashIndex}
               onSelectedIndexChange={setSlashIndex}
+              commands={commands}
             />
           </div>
         </form>

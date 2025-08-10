@@ -28,7 +28,8 @@
       "Bash(claude mcp add:*)",
       "Bash(claude mcp remove:*)",
       "Bash(claude mcp:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(rm:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

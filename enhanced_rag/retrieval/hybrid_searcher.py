@@ -4,6 +4,7 @@ Hybrid search implementation combining vector and keyword search
 
 import logging
 import asyncio
+import math
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 from ..ranking.filter_manager import FilterManager
@@ -17,14 +18,10 @@ from enhanced_rag.utils.performance_monitor import PerformanceMonitor
 
 # Add missing imports for type safety
 try:
-    from azure.search.documents.models import QueryType, VectorizedQuery, VectorizableTextQuery
+    from azure.search.documents.models import QueryType as AzureQueryType, VectorizedQuery, VectorizableTextQuery
 except ImportError:
-    # Fallback for systems without Azure SDK
-    class QueryType:
-        SEMANTIC = "semantic"
-        SIMPLE = "simple"
-    
-    # Dummy classes for type hints when SDK is not available
+    # Fallback: mark AzureQueryType unavailable for type-checkers; runtime uses string constants
+    AzureQueryType = None  # type: ignore
     VectorizedQuery = None  # type: ignore
     VectorizableTextQuery = None  # type: ignore
 
@@ -243,7 +240,9 @@ class HybridSearcher:
                 extra={"endpoint_host": getattr(self, "_endpoint", None), "index_name": getattr(self, "_index_name", None)}
             )
             return []
-
+        
+        rest_ops = self.rest_ops  # local alias to satisfy type checker
+        
         # Detect exact-match tokens: quoted phrases and numeric literals
         import re as _re
         quoted = _re.findall(r'"([^"]+)"|\'([^\']+)\'', query)
@@ -263,7 +262,7 @@ class HybridSearcher:
                 sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
                 kw_sem_kwargs = self._sanitize_search_kwargs({
                     "search_text": query,
-                    "query_type": QueryType.SEMANTIC,
+                    "query_type": "semantic",
                     "semantic_configuration_name": sem_cfg,
                     "query_caption": "extractive",
                     "query_answer": "extractive",
@@ -284,7 +283,7 @@ class HybridSearcher:
                     "top": kw_sem_kwargs.get("top", top_k * 2),
                     "includeTotalCount": kw_sem_kwargs.get("include_total_count", include_total_count),
                 }
-                resp = await self.rest_ops.search(self._index_name, query=kw_sem_kwargs.get("search_text", query), **body)
+                resp = await rest_ops.search(self._index_name, query=kw_sem_kwargs.get("search_text", query), **body)
                 return self._process_results(resp.get("value", []))
             except Exception as e:
                 logger.warning("Keyword/Semantic path failed – %s", e)
@@ -298,7 +297,7 @@ class HybridSearcher:
                         "top": top_k * 2,
                         "includeTotalCount": include_total_count,
                     }
-                    resp = await self.rest_ops.search(self._index_name, query=query, **body)
+                    resp = await rest_ops.search(self._index_name, query=query, **body)
                     return self._process_results(resp.get("value", []))
                 except Exception as e2:
                     logger.warning("Fallback SIMPLE path failed – %s", e2)
@@ -332,7 +331,7 @@ class HybridSearcher:
                     ]) + ")"
                 combined_exact = " and ".join([_term_filter(t) for t in exact_terms])
                 combined_filter = combined_exact if not filter_expr else f"({filter_expr}) and {combined_exact}"
-                resp = await self.rest_ops.search(self._index_name, query="*", filter=combined_filter, top=top_k * 2)
+                resp = await rest_ops.search(self._index_name, query="*", filter=combined_filter, top=top_k * 2)
                 return self._process_results(resp.get("value", []))
             except Exception as e:
                 logger.warning("Exact-match fallback pass failed – %s", e)
@@ -364,7 +363,7 @@ class HybridSearcher:
                     }
                     if filter_expr:
                         options["filter"] = filter_expr
-                    resp = await self.rest_ops.search(self._index_name, query="", **options)
+                    resp = await rest_ops.search(self._index_name, query="", **options)
                     return self._process_results(resp.get("value", []))
                 else:
                     logger.info("Skipping vector search - no valid embedding available")
@@ -391,25 +390,51 @@ class HybridSearcher:
         )
 
         # ------------------------------------------------------------------
-        # 3.  Fuse scores  (linear-weighted) + exact boost
+        # 3.  Fuse scores  (calibrated + weighted) + exact boost
         # ------------------------------------------------------------------
+        # Calibrate each list's scores to comparable scales using z-score + sigmoid
+        def _sigmoid(z: float) -> float:
+            try:
+                return 1.0 / (1.0 + math.exp(-z))
+            except Exception:
+                return 0.5
+
+        def _calibrate(rs: List[HybridSearchResult]) -> Dict[str, float]:
+            if not rs:
+                return {}
+            vals = [max(0.0, (r.score or 0.0)) for r in rs]
+            mean = sum(vals) / len(vals)
+            # population std with safe-guard
+            try:
+                var = sum((v - mean) ** 2 for v in vals) / max(1, len(vals))
+            except Exception:
+                var = 0.0
+            std = (var ** 0.5) or 1.0
+            return {r.id: _sigmoid(((max(0.0, (r.score or 0.0)) - mean) / std)) for r in rs}
+
+        kw_sem_scores = _calibrate(kw_sem_results)
+        vec_scores = _calibrate(vec_results)
+
         by_id: Dict[str, HybridSearchResult] = {}
 
-        def _update(result: HybridSearchResult, weight: float):
+        def _update(result: HybridSearchResult, weight: float, override_score: Optional[float] = None):
+            base = (override_score if override_score is not None else (result.score or 0.0))
             if result.id not in by_id:
                 by_id[result.id] = HybridSearchResult(
                     id=result.id,
-                    score=result.score * weight,
+                    score=base * weight,
                     content=result.content,
                     metadata=result.metadata,
                 )
             else:
-                by_id[result.id].score += result.score * weight
+                by_id[result.id].score += base * weight
 
         for r in kw_sem_results:
-            _update(r, semantic_weight if "@search.rerankerScore" in r.metadata else keyword_weight)
+            base = kw_sem_scores.get(r.id, r.score or 0.0)
+            _update(r, semantic_weight if "@search.rerankerScore" in r.metadata else keyword_weight, override_score=base)
         for r in vec_results:
-            _update(r, vector_weight)
+            base = vec_scores.get(r.id, r.score or 0.0)
+            _update(r, vector_weight, override_score=base)
         # Apply exact boost as an additive weight to already seen ids; if new, create with small base
         if exact_results:
             for r in exact_results:
@@ -439,7 +464,7 @@ class HybridSearcher:
     async def vector_search(
         self,
         query: str,
-        vector_queries: Optional[List[Union[VectorizedQuery, VectorizableTextQuery]]] = None,
+        vector_queries: Optional[List[Any]] = None,
         filter_expr: Optional[str] = None,
         top_k: int = 50
     ) -> List[HybridSearchResult]:
@@ -458,8 +483,8 @@ class HybridSearcher:
         try:
             # Execute vector search using REST API
             options: Dict[str, Any] = {"top": top_k}
-            if VectorizedQuery is not None and isinstance(vector_query, VectorizedQuery) and getattr(vector_query, "vector", None):
-                options["vectorQueries"] = [{"vector": vector_query.vector, "k": top_k, "fields": "content_vector"}]
+            if VectorizedQuery is not None and getattr(vector_query, "vector", None):
+                options["vectorQueries"] = [{"vector": getattr(vector_query, "vector"), "k": top_k, "fields": "content_vector"}]
             if filter_expr:
                 options["filter"] = filter_expr
             resp = await self.rest_ops.search(self._index_name, query="", **options)

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Share2, ChevronDown, Sun, Moon, Monitor } from 'lucide-react'
+import { Share2, ChevronDown, Sun, Moon, Monitor, Wrench } from 'lucide-react'
 import { useSession } from '../store/session.state'
 
 export default function TopBar() {
@@ -54,6 +54,23 @@ export default function TopBar() {
   }
   const themeLabel = theme.charAt(0).toUpperCase() + theme.slice(1);
 
+  // Simple tools panel
+  const [showTools, setShowTools] = React.useState(false)
+  const [allowedInput, setAllowedInput] = React.useState<string>(() => (sess.controls.allowedTools || []).join(', '))
+  const [disallowedInput, setDisallowedInput] = React.useState<string>(() => (sess.controls.disallowedTools || []).join(', '))
+  const [mcpConfigInput, setMcpConfigInput] = React.useState<string>(() => sess.controls.mcpConfig || '')
+  const [permPromptInput, setPermPromptInput] = React.useState<string>(() => sess.controls.permissionPromptTool || '')
+  const applyTools = () => {
+    const parse = (v: string) => v.split(/[,\n]/).map(s => s.trim()).filter(Boolean)
+    sess.setControls({
+      allowedTools: parse(allowedInput),
+      disallowedTools: parse(disallowedInput),
+      mcpConfig: mcpConfigInput || undefined,
+      permissionPromptTool: permPromptInput || undefined,
+    } as any)
+    setShowTools(false)
+  }
+
   return (
     <header className="sticky top-0 z-20 border-b border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-primary) 80%, transparent)] backdrop-blur">
       <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-5 py-3">
@@ -81,6 +98,63 @@ export default function TopBar() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setShowTools(v => !v)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--border-faint)] bg-[color:color-mix(in srgb, var(--bg-elevated) 60%, transparent)] px-3 py-1.5 text-sm text-[color:var(--text-primary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
+              aria-label="Tools settings"
+              title="Allowed/Disallowed tools"
+            >
+              <Wrench className="h-4 w-4" />
+              Tools
+            </button>
+            {showTools && (
+              <div className="absolute right-0 mt-2 w-[420px] rounded-xl border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] p-3 shadow-xl z-10">
+                <p className="text-sm text-[color:var(--text-secondary)] mb-1">Allowed tools (comma or newline separated)</p>
+                <textarea
+                  className="w-full h-16 resize-y rounded-md border border-[color:var(--border-faint)] bg-transparent p-2 text-sm"
+                  value={allowedInput}
+                  onChange={(e) => setAllowedInput(e.target.value)}
+                  placeholder="e.g. Read, Write, Edit, Bash, WebSearch, mcp__puppeteer"
+                />
+                <p className="mt-2 text-sm text-[color:var(--text-secondary)] mb-1">Disallowed tools</p>
+                <textarea
+                  className="w-full h-12 resize-y rounded-md border border-[color:var(--border-faint)] bg-transparent p-2 text-sm"
+                  value={disallowedInput}
+                  onChange={(e) => setDisallowedInput(e.target.value)}
+                  placeholder="e.g. Bash(rm *), Bash(git reset --hard)"
+                />
+                <p className="mt-2 text-sm text-[color:var(--text-secondary)] mb-1">MCP config (path or JSON)</p>
+                <input
+                  className="w-full rounded-md border border-[color:var(--border-faint)] bg-transparent p-2 text-sm"
+                  value={mcpConfigInput}
+                  onChange={(e) => setMcpConfigInput(e.target.value)}
+                  placeholder="e.g. .claude/mcp.json or JSON string"
+                />
+                <p className="mt-2 text-sm text-[color:var(--text-secondary)] mb-1">Permission prompt tool (MCP)</p>
+                <input
+                  className="w-full rounded-md border border-[color:var(--border-faint)] bg-transparent p-2 text-sm"
+                  value={permPromptInput}
+                  onChange={(e) => setPermPromptInput(e.target.value)}
+                  placeholder="e.g. mcp__test-server__approval_prompt"
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowTools(false)}
+                    className="rounded-md border border-[color:var(--border-faint)] px-3 py-1.5 text-sm text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={applyTools}
+                    className="rounded-md bg-[color:var(--color-primary)] px-3 py-1.5 text-sm text-white hover:bg-[color:var(--color-primary-hover)]"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={cycleTheme}
             className="inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--border-faint)] bg-[color:color-mix(in srgb, var(--bg-elevated) 60%, transparent)] px-3 py-1.5 text-sm text-[color:var(--text-primary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"

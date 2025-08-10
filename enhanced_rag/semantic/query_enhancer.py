@@ -257,7 +257,7 @@ class ContextualQueryEnhancer(QueryEnhancer):
         enhanced_queries.extend(alias_enhanced)
         
         # Apply vector-specific semantic expansions
-        vector_enhanced = self._apply_vector_expansions(query)
+        vector_enhanced = self._apply_vector_expansions(query, intent_enum)
         enhanced_queries.extend(vector_enhanced)
 
         # Generate semantic variants
@@ -649,22 +649,38 @@ class ContextualQueryEnhancer(QueryEnhancer):
         
         return enhanced
     
-    def _apply_vector_expansions(self, query: str) -> List[str]:
-        """Apply vector-specific semantic expansions"""
-        enhanced = []
-        query_lower = query.lower()
-        
-        # Check for vector-specific terms and expand them
+    def _apply_vector_expansions(self, query: str, intent: Optional[SearchIntent] = None) -> List[str]:
+        """Apply vector-specific semantic expansions with simple intent-aware weighting"""
+        query_lower = (query or "").lower()
+        candidates: List[tuple[str, float]] = []
+
+        def _score(expansion: str) -> float:
+            base = 1.0
+            # Prefer semantic/vector terminology
+            if any(k in expansion for k in ("similarity", "nearest", "cosine", "vector", "embedding")):
+                base += 0.5
+            # If debugging intent or error-like query, prioritize diagnostics
+            if intent == SearchIntent.DEBUG or any(t in query_lower for t in ("issue", "error", "problem", "debug", "exception")):
+                if any(k in expansion for k in ("dimension", "shape", "NaN", "nan", "null", "corruption", "threshold", "empty")):
+                    base += 0.6
+            # If user explicitly mentions method names, bump those
+            if any(k in query_lower for k in ("cosine", "euclidean", "hnsw", "knn")) and any(k in expansion for k in ("cosine", "euclidean", "hnsw", "nearest")):
+                base += 0.3
+            # Light penalty if expansion terms already present in the query
+            if expansion.lower() in query_lower:
+                base -= 0.4
+            return max(0.0, base)
+
+        # Generate base expansions
         for term, expansions in self.vector_expansions.items():
             if term in query_lower:
-                for expansion in expansions[:2]:  # Limit expansions
+                for expansion in expansions[:4]:  # consider up to 4; we'll rank/filter later
                     if expansion not in query_lower:
-                        enhanced.append(f"{query} {expansion}")
-                        
-        # Special handling for debugging vector search issues
+                        candidates.append((f"{query} {expansion}", _score(expansion)))
+
+        # Add debugging-oriented expansions when relevant
         if any(term in query_lower for term in ['vector', 'embedding', 'search']):
             if any(term in query_lower for term in ['issue', 'problem', 'error', 'debug']):
-                # Add specific vector debugging terms
                 debug_terms = [
                     'dimension mismatch',
                     'shape error',
@@ -674,8 +690,17 @@ class ContextualQueryEnhancer(QueryEnhancer):
                     'similarity threshold',
                     'empty results'
                 ]
-                for term in debug_terms:
-                    if term not in query_lower:
-                        enhanced.append(f"{query} {term}")
-        
-        return enhanced
+                for t in debug_terms:
+                    if t not in query_lower:
+                        candidates.append((f"{query} {t}", _score(t)))
+
+        # De-duplicate by normalized text while keeping the best score
+        ranked: Dict[str, tuple[str, float]] = {}
+        for text, wt in candidates:
+            key = ' '.join(text.lower().split())
+            prev = ranked.get(key)
+            if not prev or wt > prev[1]:
+                ranked[key] = (text, wt)
+
+        # Sort by weight descending and return only the text
+        return [t for (t, _) in sorted(ranked.values(), key=lambda x: x[1], reverse=True)[:6]]

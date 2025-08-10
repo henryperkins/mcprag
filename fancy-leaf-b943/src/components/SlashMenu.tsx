@@ -5,20 +5,8 @@ export interface SlashCommand {
   command: string
   description: string
   args?: string
+  content?: string
 }
-
-const commands: SlashCommand[] = [
-  { command: '/add-dir', description: 'Add a new working directory' },
-  { command: '/agents', description: 'Manage agent configurations' },
-  { command: '/bug', description: 'Submit feedback about Claude Code' },
-  { command: '/clear', description: 'Clear conversation history and free up context', args: '(reset)' },
-  { command: '/compact', description: 'Clear conversation history but keep a summary in context. Optional: /compact [instructions for summarization]' },
-  { command: '/config', description: 'Open config panel', args: '(theme)' },
-  { command: '/cost', description: 'Show the total cost and duration of the current session' },
-  { command: '/doctor', description: 'Diagnose and verify your Claude Code installation and settings' },
-  { command: '/exit', description: 'Exit the REPL', args: '(quit)' },
-  { command: '/export', description: 'Export the current conversation to a file or clipboard' },
-]
 
 interface SlashMenuProps {
   isOpen: boolean
@@ -27,6 +15,7 @@ interface SlashMenuProps {
   onClose: () => void
   selectedIndex: number
   onSelectedIndexChange: (index: number) => void
+  commands?: SlashCommand[]
 }
 
 export function SlashMenu({ 
@@ -35,17 +24,19 @@ export function SlashMenu({
   onSelect, 
   onClose,
   selectedIndex,
-  onSelectedIndexChange
+  onSelectedIndexChange,
+  commands: commandsProp = []
 }: SlashMenuProps) {
-  const [filteredCommands, setFilteredCommands] = useState(commands)
+  const [filteredCommands, setFilteredCommands] = useState(commandsProp)
   const listboxRef = useRef<HTMLDivElement>(null)
   const optionRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const listboxId = useId()
   const { markInteraction } = usePerformanceMonitor()
 
   useEffect(() => {
+    const source = commandsProp
     if (filter) {
-      const filtered = commands.filter(cmd => 
+      const filtered = source.filter(cmd => 
         cmd.command.toLowerCase().includes(filter.toLowerCase()) ||
         cmd.description.toLowerCase().includes(filter.toLowerCase())
       )
@@ -55,9 +46,9 @@ export function SlashMenu({
         onSelectedIndexChange(0)
       }
     } else {
-      setFilteredCommands(commands)
+      setFilteredCommands(source)
     }
-  }, [filter, selectedIndex, onSelectedIndexChange])
+  }, [filter, selectedIndex, onSelectedIndexChange, commandsProp])
 
   // Keyboard navigation
   useEffect(() => {

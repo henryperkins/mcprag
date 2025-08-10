@@ -6,6 +6,21 @@ export interface Env {
   ACCESS_JWT_SECRET?: SecretsStoreSecret
 }
 
+// Minimal Durable Object export to satisfy Wrangler bindings
+// Config expects a class named "SessionDO"; export a no-op handler.
+export class SessionDO {
+  constructor(state: DurableObjectState, env: Env) {
+    // Accept Durable Object constructor params without using parameter properties
+    // to comply with `erasableSyntaxOnly` and noUnused compiler options.
+    void state;
+    void env;
+  }
+
+  async fetch(_req: Request): Promise<Response> {
+    return new Response('SessionDO ready', { status: 200 })
+  }
+}
+
 // Build CORS headers dynamically to support local dev origins
 const makeCorsHeaders = (req: Request): Record<string, string> => {
   const origin = req.headers.get('origin') || ''
@@ -118,6 +133,43 @@ export default {
         return json(req, await r.json(), { status: r.status })
       } catch (err) {
         // Network or DNS error – treat as downstream unavailable
+        return json(req, { error: 'bridge_unreachable' }, { status: 502 })
+      }
+    }
+
+    // Commands -> forward to bridge (JSON)
+    if (url.pathname === '/api/commands' && req.method === 'GET') {
+      if (!env.BRIDGE_URL) {
+        return json(req, { error: 'bridge_not_configured' }, { status: 501 })
+      }
+      try {
+        const upstream = new URL(env.BRIDGE_URL)
+        const qs = url.searchParams
+        const bridgeUrl = new URL('/api/commands', upstream.origin)
+        if (qs.get('includeContent')) bridgeUrl.searchParams.set('includeContent', qs.get('includeContent')!)
+        if (qs.get('include')) bridgeUrl.searchParams.set('include', qs.get('include')!)
+        if (qs.get('cwd')) bridgeUrl.searchParams.set('cwd', qs.get('cwd')!)
+        const r = await fetch(bridgeUrl.toString(), { method: 'GET' })
+        return json(req, await r.json(), { status: r.status })
+      } catch (err) {
+        return json(req, { error: 'bridge_unreachable' }, { status: 502 })
+      }
+    }
+
+    // Command expansion -> forward to bridge
+    if (url.pathname === '/api/commands/expand' && req.method === 'POST') {
+      if (!env.BRIDGE_URL) {
+        return json(req, { error: 'bridge_not_configured' }, { status: 501 })
+      }
+      try {
+        const upstream = new URL(env.BRIDGE_URL)
+        const r = await fetch(new URL('/api/commands/expand', upstream.origin).toString(), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: await req.text(),
+        })
+        return json(req, await r.json(), { status: r.status })
+      } catch (err) {
         return json(req, { error: 'bridge_unreachable' }, { status: 502 })
       }
     }

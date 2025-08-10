@@ -1,0 +1,80 @@
+{
+  "timestamp": "2025-08-10T20:36:34.829469+00:00",
+  "summary": {
+    "total_tests": 13,
+    "passed_tests": 0,
+    "failed_tests": 12,
+    "skipped_tests": 1,
+    "pass_rate": 0.0,
+    "tool_coverage": 36.666666666666664,
+    "tools_tested": 11
+  },
+  "results_by_category": {
+    "search": {
+      "total": 4,
+      "passed": 0,
+      "failed": 3,
+      "skipped": 1,
+      "tools": [
+        "search_code",
+        "search_microsoft_docs"
+      ]
+    },
+    "generation": {
+      "total": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "tools": [
+        "generate_code"
+      ]
+    },
+    "analysis": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "skipped": 0,
+      "tools": [
+        "analyze_context",
+        "explain_ranking"
+      ]
+    },
+    "cache": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "skipped": 0,
+      "tools": [
+        "cache_stats",
+        "cache_clear"
+      ]
+    },
+    "feedback": {
+      "total": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "tools": [
+        "submit_feedback"
+      ]
+    },
+    "admin": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "skipped": 0,
+      "tools": [
+        "index_status",
+        "health_check",
+        "manage_index"
+      ]
+    }
+  },
+  "results_by_tool": {
+    "search_code": {
+      "total": 3,
+      "passed": 0,
+      "failed": 2,
+      "skipped": 1,
+      "results": [
+        

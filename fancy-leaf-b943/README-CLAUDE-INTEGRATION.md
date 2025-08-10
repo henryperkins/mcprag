@@ -93,6 +93,14 @@ Once running, open http://localhost:5173 in your browser and you can:
 - Permission mode configuration
 - Custom system prompts
 - Tool allowlist/blocklist
+- MCP config + permission prompt tool (Tools panel)
+
+### Dynamic Slash Commands
+- The UI loads slash commands from `.claude/commands` (project) and `~/.claude/commands` (user)
+- Selecting a command inserts it; on submit, the template is expanded and `$ARGUMENTS` is replaced with any text you typed after the command
+- Backend endpoints:
+  - Bridge: `GET /api/commands?includeContent=1` scans commands
+  - Worker: `GET /api/commands` proxies to the bridge
 
 ## Production Deployment
 
@@ -157,6 +165,9 @@ The server includes CORS headers for development. For production, configure appr
 
 ### Tool Permissions
 Claude might need filesystem access. Ensure the server has appropriate permissions for the working directory.
+### Slash Commands Missing
+- Ensure `.claude/commands/*.md` exist in your repo or in `~/.claude/commands`
+- The first non-empty line of each file is used as the description in the UI
 
 ## Development Tips
 

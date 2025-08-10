@@ -107,14 +107,48 @@ class UniversalMCPToolEvaluator:
                     name="basic_search",
                     description="Basic code search functionality",
                     tool_name="search_code",
-                    parameters={"query": "server", "max_results": 3},
+                    parameters={
+                        "query": "server",
+                        "max_results": 3,
+                        "intent": None,
+                        "language": None,
+                        "repository": None,
+                        "include_dependencies": False,
+                        "skip": 0,
+                        "orderby": None,
+                        "highlight_code": False,
+                        "bm25_only": False,
+                        "exact_terms": None,
+                        "disable_cache": False,
+                        "include_timings": False,
+                        "dependency_mode": "auto",
+                        "detail_level": "full",
+                        "snippet_lines": 0
+                    },
                     expected_fields=["items", "count", "total"]
                 ),
                 ToolTestCase(
                     name="repository_filter",
                     description="Filter by repository",
                     tool_name="search_code",
-                    parameters={"query": "server", "repository": "mcprag", "max_results": 3},
+                    parameters={
+                        "query": "server",
+                        "repository": "mcprag",
+                        "max_results": 3,
+                        "intent": None,
+                        "language": None,
+                        "include_dependencies": False,
+                        "skip": 0,
+                        "orderby": None,
+                        "highlight_code": False,
+                        "bm25_only": False,
+                        "exact_terms": None,
+                        "disable_cache": False,
+                        "include_timings": False,
+                        "dependency_mode": "auto",
+                        "detail_level": "full",
+                        "snippet_lines": 0
+                    },
                     expected_fields=["items", "count"],
                     skip_reason="Known P1 issue - repository filtering broken"
                 ),
@@ -122,7 +156,24 @@ class UniversalMCPToolEvaluator:
                     name="bm25_mode",
                     description="BM25-only search mode",
                     tool_name="search_code",
-                    parameters={"query": "register_tools", "bm25_only": True, "max_results": 3},
+                    parameters={
+                        "query": "register_tools",
+                        "bm25_only": True,
+                        "max_results": 3,
+                        "intent": None,
+                        "language": None,
+                        "repository": None,
+                        "include_dependencies": False,
+                        "skip": 0,
+                        "orderby": None,
+                        "highlight_code": False,
+                        "exact_terms": None,
+                        "disable_cache": False,
+                        "include_timings": False,
+                        "dependency_mode": "auto",
+                        "detail_level": "full",
+                        "snippet_lines": 0
+                    },
                     expected_fields=["items", "count", "backend"]
                 ),
             ]
@@ -316,30 +367,31 @@ class UniversalMCPToolEvaluator:
         start_time = time.time()
         
         try:
-            # Get the tool implementation
-            from mcprag.mcp.tools._helpers import search_code_impl, search_microsoft_docs_impl
-            from mcprag.mcp.tools.generation import generate_code_impl
-            from mcprag.mcp.tools.analysis import analyze_context_impl, explain_ranking_impl
-            from mcprag.mcp.tools.cache import cache_stats_impl, cache_clear_impl
-            from mcprag.mcp.tools.feedback import submit_feedback_impl
-            from mcprag.mcp.tools.admin import index_status_impl, health_check_impl, manage_index_impl
+            # Get the tool implementation - use the _impl versions where they exist
+            from mcprag.mcp.tools._helpers import search_code_impl
+            from mcprag.mcp.tools._helpers.search_impl import search_microsoft_docs_impl
             
             # Map tool names to implementations
+            # Most tools don't have separate _impl functions, we'll call them directly
             tool_implementations = {
                 "search_code": search_code_impl,
                 "search_microsoft_docs": search_microsoft_docs_impl,
-                "generate_code": generate_code_impl,
-                "analyze_context": analyze_context_impl,
-                "explain_ranking": explain_ranking_impl,
-                "cache_stats": cache_stats_impl,
-                "cache_clear": cache_clear_impl,
-                "submit_feedback": submit_feedback_impl,
-                "index_status": index_status_impl,
-                "health_check": health_check_impl,
-                "manage_index": manage_index_impl,
             }
             
             impl_func = tool_implementations.get(test_case.tool_name)
+            
+            # If not found in explicit implementations, try to get from server's registered tools
+            if not impl_func and hasattr(self.server, '_mcp'):
+                try:
+                    # Access the internal tool registry
+                    mcp = self.server._mcp
+                    if hasattr(mcp, '_tool_manager') and hasattr(mcp._tool_manager, '_tools'):
+                        tools = mcp._tool_manager._tools
+                        if test_case.tool_name in tools:
+                            impl_func = tools[test_case.tool_name]['handler']
+                except Exception:
+                    pass
+            
             if not impl_func:
                 elapsed_ms = (time.time() - start_time) * 1000
                 return ToolTestResult(
@@ -529,6 +581,28 @@ class UniversalMCPToolEvaluator:
         print("=" * 60)
         
         # Save detailed report
+        # Convert results to serializable format
+        serializable_results = []
+        for r in self.test_results:
+            result_dict = {
+                "tool_name": r.tool_name,
+                "test_name": r.test_name,
+                "passed": r.passed,
+                "response_time_ms": r.response_time_ms,
+                "error_message": r.error_message,
+                "skipped": r.skipped,
+                "skip_reason": r.skip_reason
+            }
+            # Only include response summary if present
+            if r.response:
+                result_dict["response_status"] = r.response.get("status")
+                if r.response.get("data"):
+                    # Just include a summary of data fields
+                    data = r.response["data"]
+                    if isinstance(data, dict):
+                        result_dict["response_fields"] = list(data.keys())
+            serializable_results.append(result_dict)
+        
         report = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "summary": {
@@ -543,7 +617,7 @@ class UniversalMCPToolEvaluator:
             "results_by_category": results_by_category,
             "results_by_tool": results_by_tool,
             "critical_issues": critical_issues,
-            "all_results": [asdict(r) for r in self.test_results]
+            "all_results": serializable_results
         }
         
         report_file = f"universal_tool_evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"

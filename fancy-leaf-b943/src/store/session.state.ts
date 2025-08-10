@@ -26,6 +26,10 @@ type SessionControls = {
   systemPrompt?: string
   appendSystemPrompt?: string
   model?: string
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  mcpConfig?: string
+  permissionPromptTool?: string
 }
 
 type SessionStore = {
@@ -57,6 +61,10 @@ export const useSession = create<SessionStore>()(
         verbose: false,
         outputFormat: 'stream-json',
         model: undefined,
+        allowedTools: undefined,
+        disallowedTools: undefined,
+        mcpConfig: undefined,
+        permissionPromptTool: undefined,
       },
       recentSessions: [],
       isRunning: false,

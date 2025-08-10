@@ -20,7 +20,21 @@ export type StreamOptions = {
 export function streamQuery(
   prompt: string,
   handlers: StreamHandlers,
-  options?: StreamOptions & { sessionId?: string; model?: string }
+  options?: StreamOptions & {
+    sessionId?: string
+    model?: string
+    maxTurns?: number
+    permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+    verbose?: boolean
+    systemPrompt?: string
+    appendSystemPrompt?: string
+    allowedTools?: string[]
+    disallowedTools?: string[]
+    cwd?: string
+    continueSession?: boolean
+    mcpConfig?: string
+    permissionPromptTool?: string
+  }
 ) {
   const controller = new AbortController()
   const signal = options?.signal ?? controller.signal
@@ -35,9 +49,19 @@ export function streamQuery(
           prompt,
           sessionId: options?.sessionId,
           options: {
-            continueSession: Boolean(options?.sessionId),
+            continueSession: options?.continueSession ?? Boolean(options?.sessionId),
             resumeSessionId: options?.sessionId,
             model: options?.model,
+            maxTurns: options?.maxTurns,
+            permissionMode: options?.permissionMode,
+            verbose: options?.verbose,
+            systemPrompt: options?.systemPrompt,
+            appendSystemPrompt: options?.appendSystemPrompt,
+            allowedTools: options?.allowedTools,
+            disallowedTools: options?.disallowedTools,
+            cwd: options?.cwd,
+            mcpConfig: options?.mcpConfig,
+            permissionPromptTool: options?.permissionPromptTool,
           },
         }),
         signal,
@@ -120,7 +144,9 @@ export function streamQuery(
                   }
                   case 'result': {
                     handlers.onResult?.(payload)
-                    if (payload.content) emitText(String(payload.content))
+                    // Prefer .result per SDK docs; fall back to .content if present
+                    if (payload.result) emitText(String(payload.result))
+                    else if (payload.content) emitText(String(payload.content))
                     const meta: string[] = []
                     if (payload.duration_ms) meta.push(`${payload.duration_ms}ms`)
                     if (payload.total_cost_usd) meta.push(`$${Number(payload.total_cost_usd).toFixed(4)}`)
