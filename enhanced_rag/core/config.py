@@ -3,11 +3,14 @@ Configuration management for Enhanced RAG system
 Centralizes all configuration with environment variable support
 """
 
+import logging
 import os
 from typing import Optional, List
 from pydantic import BaseModel, Field
 from pathlib import Path
 import json
+
+logger = logging.getLogger(__name__)
 
 # Field name constants
 CONTENT_VECTOR_FIELD = "content_vector"
@@ -44,8 +47,9 @@ class AzureConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """Embedding generation configuration"""
     provider: str = Field(default="azure_openai_http")  # Options: azure_openai_http, client, none
-    model: str = Field(default="text-embedding-3-large")
-    dimensions: int = Field(default=3072)
+    # Align model and dimensions with Azure vector field defaults (1536)
+    model: str = Field(default="text-embedding-3-small")
+    dimensions: int = Field(default=1536)
     batch_size: int = Field(default=16)
     max_concurrent_requests: int = Field(default=5)
     circuit_breaker_threshold: int = Field(default=5)
@@ -244,3 +248,73 @@ def validate_config(cfg: Config) -> None:
             raise ValueError("Embedding dimensions must be positive")
         if cfg.embedding.max_concurrent_requests <= 0:
             raise ValueError("max_concurrent_requests must be positive")
+
+    # Hard check: embedding dims must match Azure vector field dims
+    if cfg.embedding.dimensions != cfg.azure.embedding_dimensions:
+        raise ValueError(
+            f"Embedding dimension mismatch: embedding.dimensions={cfg.embedding.dimensions} "
+            f"!= azure.embedding_dimensions={cfg.azure.embedding_dimensions}. "
+            "Align these values (e.g., 1536 for text-embedding-3-small)."
+        )
+
+    # Soft warning: hybrid enabled but a component is off
+    if cfg.retrieval.enable_hybrid_search and (
+        not cfg.retrieval.enable_vector_search or not cfg.retrieval.enable_keyword_search
+    ):
+        logger.warning(
+            "Hybrid search is enabled but vector or keyword search is disabled. "
+            "Enable both for proper hybrid behavior."
+        )
+
+
+def analyze_search_technology_issues(cfg: Optional[Config] = None) -> dict:
+    """
+    Analyze configuration for concrete search-technology issues.
+
+    Returns:
+        dict with keys: ok (bool), issues (list[str]), warnings (list[str])
+    """
+    if cfg is None:
+        cfg = get_config()
+
+    issues = []
+    warnings = []
+
+    # Required Azure Search settings
+    if not cfg.azure.endpoint:
+        issues.append("Azure Search endpoint (ACS_ENDPOINT) is missing or empty")
+    if not cfg.azure.admin_key:
+        issues.append("Azure Search admin key (ACS_ADMIN_KEY) is missing or empty")
+
+    # Embedding provider requirements
+    provider = cfg.embedding.provider.lower()
+    if provider in ["azure_openai", "azure_openai_http", "client"]:
+        if provider == "client":
+            if not cfg.embedding.api_key:
+                issues.append("Client embedding provider requires API key")
+        else:
+            if not cfg.embedding.azure_endpoint:
+                issues.append("AZURE_OPENAI_ENDPOINT is missing for Azure OpenAI embedding provider")
+            if not cfg.embedding.api_key:
+                issues.append("AZURE_OPENAI_KEY/AZURE_OPENAI_API_KEY/OPENAI_API_KEY is missing for embedding provider")
+
+    # Dimension alignment
+    if cfg.embedding.dimensions != cfg.azure.embedding_dimensions:
+        issues.append(
+            f"Embedding dimension mismatch: embedding.dimensions={cfg.embedding.dimensions} "
+            f"vs azure.embedding_dimensions={cfg.azure.embedding_dimensions}"
+        )
+
+    # Hybrid configuration sanity
+    if cfg.retrieval.enable_hybrid_search and (
+        not cfg.retrieval.enable_vector_search or not cfg.retrieval.enable_keyword_search
+    ):
+        warnings.append(
+            "Hybrid search enabled but either vector or keyword search disabled; enable both"
+        )
+
+    return {
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "warnings": warnings,
+    }

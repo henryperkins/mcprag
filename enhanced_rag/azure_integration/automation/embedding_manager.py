@@ -5,7 +5,7 @@ providing batch processing, caching, and quality monitoring capabilities.
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple, Sequence
+from typing import Dict, Any, List, Optional, Tuple, Sequence, Callable, Awaitable
 from datetime import datetime, timedelta
 import hashlib
 import asyncio
@@ -69,9 +69,11 @@ class EmbeddingAutomation:
         Returns:
             Embedding vector or None
         """
+        # Generate cache key once (needed for both lookup and storage)
+        cache_key = self._cache_key(text + (context or "")) if use_cache else None
+
         # Check cache
-        if use_cache:
-            cache_key = self._cache_key(text + (context or ""))
+        if use_cache and cache_key:
             if cache_key in self._embedding_cache:
                 embedding, cached_time = self._embedding_cache[cache_key]
                 if self._is_cache_valid(cached_time):
@@ -86,7 +88,7 @@ class EmbeddingAutomation:
             embedding = self.provider.generate_embedding(text)
 
         # Cache result
-        if embedding and use_cache:
+        if embedding and use_cache and cache_key:
             self._embedding_cache[cache_key] = (embedding, datetime.utcnow())
             self._stats["embeddings_generated"] += 1
 
@@ -97,7 +99,7 @@ class EmbeddingAutomation:
         texts: Sequence[str],
         batch_size: int = 100,
         use_cache: bool = True,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
     ) -> List[Optional[List[float]]]:
         """Generate embeddings for multiple texts efficiently.
 
