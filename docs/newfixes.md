@@ -1,121 +1,117 @@
-I’m going to scan the workspace for Azure/AISearch and retrieval code to pinpoint concrete issues with how search is implemented and configured; I’ll run targeted searches for Azure Search usages, hybrid/vector search code, embedding dimensions, and index configuration to surface exact files and lines. Batching a focused read of the key retrieval and index schema files to pinpoint concrete misconfigurations (vectorQueries shape, semantic config names, embedding dimensions, and API version usage). I’ll audit the repo’s search stack and call out concrete misconfigurations or risky gaps, then propose small, targeted fixes.
+# Enhanced RAG Search Pipeline Issues and Fixes
 
-Checklist
-1) Identify concrete issues in retrieval code and index/schema.
-2) Verify vector query payload shape and semantic config usage.
-3) Confirm embedding dimension consistency.
-4) Flag dead or risky dependencies and config mismatches.
-5) Provide precise, minimal fixes.
+## Critical Issues Identified with Exact Locations
 
-Progress checkpoint
-I scanned the retrieval code, Azure index schema, and related config with targeted searches for vectorQueries, semantic config names, and embedding dimensions. Key files inspected include hybrid_searcher.py, config.py, azure_search_index_schema.json, reindex_operations.py, and docs that define canonical schema.
+### 1. Undefined Variable `vq` in Hybrid Searcher
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Lines:** 362, 369
 
-What I found (with exact locations)
-1) Vector query payloads missing “kind”: vector
-- In `enhanced_rag.retrieval.hybrid_searcher.HybridSearcher.search`, vector queries are constructed without the “kind” discriminator:
-  - Line 351: options["vectorQueries"] = [{"vector": emb, "k": top_k * 2, "fields": "content_vector"}]
-  - Line 355: same pattern
-  - Line 432: same pattern
-Azure’s 2024-07-01+ vector queries expect an explicit kind (for embeddings, "kind": "vector"). Omitting it can cause requests to be rejected on stricter services.
+**Issue:**
+```python
+# Line 362 - vq is used but never defined in this scope
+"vector_queries": [vq] if vq else None,
 
-2) Semantic configuration name is hardcoded and inconsistent with the central config
-- Code uses "semantic-config" directly while the config default is different.
-  - Hardcoded usage:
-    - `enhanced_rag.retrieval.hybrid_searcher.HybridSearcher.search` lines 254 and 263 include "semantic-config"
-    - `enhanced_rag.retrieval.multi_stage_pipeline` line 356 includes "semantic-config"
-    - azure_search_index_schema.json lines 176–179 define and set "defaultConfiguration": "semantic-config"
-  - Config default:
-    - `enhanced_rag.core.config` line 24 sets semantic_config_name = "enhanced-semantic-config"
-Impact: the config value is ignored in these paths, and future changes to the config won’t propagate.
-
-3) Embedding dimension inconsistency for content_vector
-- Canonical docs state 1536 for OpenAI defaults:
-  - CANONICAL_SCHEMA.md line 9: “content_vector”: “Collection<Single> (1536 dimensions)”
-  - copilot-instructions.md line 105: 1536 dimensions
-- Code asserts 3072 elsewhere:
-  - `enhanced_rag.azure_integration.reindex_operations` line 340: if vf.name == "content_vector" and vf.vector_search_dimensions != 3072:
-- The embedding validator also ties behavior to an unspecified expected_dimensions:
-  - `enhanced_rag.azure_integration.automation.embedding_manager` lines 271–293 validate doc["content_vector"] length against expected_dimensions, but that value’s source isn’t tied here to model choice.
-Impact: mixing 1536- and 3072-dimension expectations can lead to index schema drift and rejected uploads or low-quality retrieval.
-
-4) Unused Azure SDK model imports and dead code path
-- `enhanced_rag.retrieval.hybrid_searcher` imports azure.search.documents.models VectorizedQuery, VectorizableTextQuery, QueryType (file header) while the class comment explicitly states “using REST API only.”
-- The code creates vq = VectorizedQuery(...) (line 344) but then sets REST payloads directly with options["vectorQueries"] = [{...}] (lines 351, 355), never serializing vq.
-- VectorizableTextQuery is imported but not used anywhere in this file.
-Impact: unnecessary dependency and potential version friction, plus confusing dual-path logic.
-
-5) Mixed transport stacks without a single source of truth
-- Retrieval uses a custom REST client:
-  - `enhanced_rag.retrieval.hybrid_searcher` lines 1, 151 use REST client: AzureSearchClient and SearchOperations
-- Admin/maintenance paths use the Azure SDK:
-  - `enhanced_rag.azure_integration.reindex_operations` lines 16–17 import SearchClient and SearchIndexClient
-This is okay functionally, but without a central shared definition of index names, semantic configs, and vector profile settings, the two paths can diverge. Today we already see divergence (items 2–3).
-
-Targeted fixes
-1) Add "kind": "vector" to vectorQueries
-````python
-# ...existing code...
+# Line 369 - vq referenced again without definition  
 if vq and emb:
+```
+
+**Root Cause:** The variable `vq` is referenced but never assigned in the vector search section starting around line 334.
+
+### 2. Inconsistent REST API Key Casing
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Lines:** 58 (whitelist), 255, 318, 361
+
+**Issues:**
+- Line 58: Whitelist includes `"vector_queries"` (snake_case) - should be `"vectorQueries"`
+- Line 255: Uses `"query_type"` alongside correct `"queryType"` at line 267  
+- Line 361: Uses `"vector_queries"` instead of `"vectorQueries"`
+- Lines 346-358: Correctly uses `"vectorQueries"` but inconsistent with other parts
+
+### 3. Zero-Vector Fallback Creates Misleading Results
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Lines:** 353-358
+
+**Issue:**
+```python
+else:
     options["vectorQueries"] = [{
         "kind": "vector",
-        "vector": emb,
-        "k": top_k * 2,
+        "vector": [0.0] * 1536,  # Zero vector fallback
+        "k": 1,
         "fields": "content_vector"
     }]
-# ...existing code...
-# And similarly at lines ~355 and ~432 where vectorQueries are built.
-````
+```
+**Problem:** Sends meaningless zero vectors when embeddings unavailable, producing arbitrary search results.
 
-2) Stop hardcoding the semantic configuration name and read from config
-````python
-# ...existing code...
-# Near the top of search(), resolve the name once:
-sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
+### 4. Missing Import Statement  
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Lines:** 255, 319 (QueryType usage)
 
-# Replace each hardcoded usage:
-"semantic_configuration_name": sem_cfg,
-# ...
-body = {
-    "queryType": "semantic",
-    "semanticConfiguration": sem_cfg,
-    # ...
-}
-````
+**Issue:** `QueryType.SEMANTIC` and `QueryType.SIMPLE` are used but `QueryType` is not imported.
 
-3) Normalize embedding dimensions to the active embedding model
-- Option A (quick): Make the 3072 check model-aware by reading a single config value (e.g., config.azure.embedding_dimensions) and use it everywhere.
-````python
-# ...existing code...
-# Replace the hardcoded 3072 check:
-expected_dims = getattr(get_config().azure, "embedding_dimensions", 1536)
-if vf.name == "content_vector" and vf.vector_search_dimensions != expected_dims:
-    # handle mismatch
-# ...existing code...
-````
+### 5. Undefined `embed_func` Attribute
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Line:** 342
 
-- Option B (better): derive expected dimensions from the embedding provider in one place and expose it via config (ensure embedding_manager.py uses the same source for expected_dimensions).
+**Issue:** 
+```python
+if vector_weight > 0 and self.embed_func:
+```
+`self.embed_func` is never defined in the class but referenced in conditional.
 
-4) Remove unused SDK model imports or implement server-side vectorization correctly
-- If staying REST-only, delete unused imports and vq creation in hybrid_searcher.py. This reduces coupling and confusion.
-- If you want server-side vectorization (vectorizer configured on the index), add a text vector query branch alongside the embedding path, using the repo’s Azure vectorizer docs:
-  - See vectorizer.md. Add a vectorQueries entry with kind “text”, text: query, fields: "content_vector", k: top_k*2, and the vectorizer profile name if required by your service configuration.
+### 6. Undefined `_get_embedding` Method
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Line:** 343
 
-5) Use a single constant for vector field name and reuse across code
-- You already standardize on "content_vector". Extract a module-level constant (e.g., in config) and replace string literals in:
-  - hybrid_searcher.py lines 344, 351, 355, 432
-  - rest_index_builder.py line 111
-  - schema_automation.py line 43
-  - embedding_manager.py lines 166, 271–293
-This prevents subtle typos and eases future schema evolution.
+**Issue:** 
+```python
+emb = await self._get_embedding(query)
+```
+This method is called but never defined in the class.
 
-Why these changes matter
-- “kind”: "vector" future-proofs vector queries against stricter API validation.
-- Aligning semantic config names and embedding dimensions removes silent failure modes and schema drift.
-- Removing dead SDK model usage simplifies dependencies and avoids accidental version mismatches.
-- Centralizing field names and dimension expectations raises reliability across both REST and SDK code paths.
+### 7. Inconsistent Vector Query Construction
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Lines:** 346-370
 
-Completion summary
-- Issues identified with exact files/lines: vectorQueries kind missing, semantic config mismatch, embedding dimension inconsistency, unused SDK models, and scattered literals.
-- Proposed minimal code edits to correct request shape, respect config, and unify dimensions and constants.
+**Issue:** Vector queries are built in multiple places:
+- Lines 346-350: Builds in `options["vectorQueries"]`  
+- Line 362: Tries to use undefined `vq` variable
+- Line 370: Rebuilds `options["vectorQueries"]` again
 
-Requirements coverage: Analyze and identify issues with search technologies — Done, with concrete file locations and actionable fixes.
+### 8. Unused Variable Assignment in Embeddings
+**File:** `enhanced_rag/azure_integration/automation/embedding_manager.py`
+**Line:** 126
+
+**Issue:**
+```python
+results[i]  # Line 126 - Dangling expression with no effect
+```
+
+### 9. Incorrect Async/Sync Callback Handling
+**File:** `enhanced_rag/azure_integration/automation/embedding_manager.py`
+**Line:** 102, 156
+
+**Issue:** 
+- Line 102: Type hint shows `Callable[[Dict[str, Any]], Awaitable[None]]` (should be async)
+- Line 156: Code does `await progress_callback(...)` assuming async
+- But actual usage may pass sync functions
+
+### 10. Dimension Default Inconsistency
+**File:** `enhanced_rag/azure_integration/automation/embedding_manager.py`
+**Line:** 249
+
+**Issue:** 
+```python
+expected_dimensions: int = 3072  # Line 249
+```
+Uses 3072 as default, but OpenAI text embeddings typically use 1536 dimensions.
+
+### 11. Redundant Search Parameter Construction
+**File:** `enhanced_rag/retrieval/hybrid_searcher.py`
+**Lines:** 253-275
+
+**Issue:** The code builds both `kw_sem_kwargs` using `_sanitize_search_kwargs()` and a separate `body` dict, creating redundant parameter handling and potential conflicts.
+
+## Critical Fixes Applied
+
+### Fix 1: Add Missing Import

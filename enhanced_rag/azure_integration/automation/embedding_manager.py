@@ -153,11 +153,18 @@ class EmbeddingAutomation:
 
             # Progress callback
             if progress_callback:
-                await progress_callback({
-                    "processed": min(i + batch_size, len(uncached_texts)),
-                    "total": len(uncached_texts),
-                    "cached": len(texts) - len(uncached_texts)
-                })
+                if asyncio.iscoroutinefunction(progress_callback):
+                    await progress_callback({
+                        "processed": min(i + batch_size, len(uncached_texts)),
+                        "total": len(uncached_texts),
+                        "cached": len(texts) - len(uncached_texts)
+                    })
+                else:
+                    progress_callback({
+                        "processed": min(i + batch_size, len(uncached_texts)),
+                        "total": len(uncached_texts),
+                        "cached": len(texts) - len(uncached_texts)
+                    })
 
         return results
 
@@ -246,7 +253,7 @@ class EmbeddingAutomation:
         self,
         index_name: str,
         sample_size: int = 100,
-        expected_dimensions: int = 3072
+        expected_dimensions: int = 1536  # OpenAI text-embedding-3-large standard dimensions
     ) -> Dict[str, Any]:
         """Validate embeddings in an index.
 
@@ -267,9 +274,9 @@ class EmbeddingAutomation:
 
         try:
             # Get sample documents
-            search_results = await self.ops.search_documents(
+            search_results = await self.ops.search(
                 index_name=index_name,
-                search_text="*",
+                query="*",
                 select=["id", "content_vector"],
                 top=sample_size
             )

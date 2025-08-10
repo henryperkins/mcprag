@@ -14,6 +14,15 @@ from enhanced_rag.azure_integration.rest.client import AzureSearchClient
 from ..core.config import get_config, Config
 from enhanced_rag.utils.performance_monitor import PerformanceMonitor
 
+# Add missing imports for type safety
+try:
+    from azure.search.documents.models import QueryType
+except ImportError:
+    # Fallback for systems without Azure SDK
+    class QueryType:
+        SEMANTIC = "semantic"
+        SIMPLE = "simple"
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +55,7 @@ class HybridSearcher:
                 out["include_total_count"] = bool(v)
             elif k in {
                 "search_text",
-                "query_type",
+                "queryType",
                 "semantic_configuration_name",
                 "query_caption",
                 "query_answer",
@@ -55,7 +64,7 @@ class HybridSearcher:
                 "include_total_count",
                 "disable_randomization",
                 "timeout",
-                "vector_queries",
+                "vectorQueries",
                 "facets",
                 "highlight_fields",
                 "highlight_pre_tag",
@@ -332,48 +341,37 @@ class HybridSearcher:
         # 2.  Build vector request  (server-side TextVectorization if possible)
         # ------------------------------------------------------------------
         vec_results: List[HybridSearchResult] = []
-        try:
-            emb = None
-            if self.embedder:
-                try:
-                    emb = self.embedder.generate_embedding(query)
-                except Exception:
-                    emb = None
-            if vector_weight > 0 and self.embed_func:
-                emb = await self._get_embedding(query)
+        if vector_weight > 0:
+            try:
+                emb = None
+                if self.embedder:
+                    try:
+                        emb = self.embedder.generate_embedding(query)
+                    except Exception as e:
+                        logger.warning(f"Embedding generation failed: {e}")
+                        emb = None
 
-            if emb:
-                options["vectorQueries"] = [{
-                    "kind": "vector",  # Add discriminator
-                    "vector": emb,
-                    "k": top_k * 2,
-                    "fields": "content_vector"
-                }]
-            else:
-                options["vectorQueries"] = [{
-                    "kind": "vector",  # Add discriminator
-                    "vector": [0.0] * 1536,  # Use config dimension
-                    "k": 1,
-                    "fields": "content_vector"
-                }]
-
-            vec_kwargs = self._sanitize_search_kwargs({
-                "search_text": "",
-                "vector_queries": [vq] if vq else None,
-                "filter": filter_expr,
-                "top": top_k * 2,
-                "include_total_count": False,
-                "timeout": (deadline_ms / 1000) if deadline_ms else None,
-            })
-            options: Dict[str, Any] = {"top": vec_kwargs.get("top", top_k * 2)}
-            if vq and emb:
-                options["vectorQueries"] = [{"vector": emb, "k": top_k * 2, "fields": "content_vector"}]
-            if filter_expr:
-                options["filter"] = filter_expr
-            resp = await self.rest_ops.search(self._index_name, query="", **options)
-            vec_results = self._process_results(resp.get("value", []))
-        except Exception as e:
-            logger.warning("Vector path failed – %s", e)
+                # Only proceed with vector search if we have a valid embedding
+                if emb and isinstance(emb, (list, tuple)) and len(emb) > 0:
+                    options: Dict[str, Any] = {
+                        "top": top_k * 2,
+                        "vectorQueries": [{
+                            "kind": "vector",
+                            "vector": emb,
+                            "k": top_k * 2,
+                            "fields": "content_vector"
+                        }]
+                    }
+                    if filter_expr:
+                        options["filter"] = filter_expr
+                        
+                    resp = await self.rest_ops.search(self._index_name, query="", **options)
+                    vec_results = self._process_results(resp.get("value", []))
+                else:
+                    logger.info("Skipping vector search - no valid embedding available")
+                    
+            except Exception as e:
+                logger.warning("Vector search failed – %s", e)
 
         # ------------------------------------------------------------------
         # 3.  Fuse scores  (linear-weighted) + exact boost
