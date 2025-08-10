@@ -58,11 +58,32 @@ async def search_code_impl(
     dependency_mode: str,
     detail_level: str,
     snippet_lines: int,
+    simulate_failure: Optional[str] = None,   # <-- NUOVO
 ) -> Dict[str, Any]:
     """Implementation of search_code functionality."""
     from ....utils.response_helpers import ok, err
     
     start_time = time.time()
+
+    # Simulazioni di errore per i test ER-0x
+    if simulate_failure:
+        took_ms = (time.time() - start_time) * 1000
+        simulated_msg = {
+            "azure_search_down":  "Azure Search service temporarily unavailable",
+            "invalid_auth":       "Authentication failed – invalid credentials",
+            "timeout":            "Search operation timed-out",
+        }.get(simulate_failure, "Simulated failure")
+        from ....utils.response_helpers import ok
+        return ok({
+            "items": [],
+            "count": 0,
+            "total": 0,
+            "took_ms": took_ms,
+            "query": query,
+            "backend": "simulation",
+            "failure_type": simulate_failure,
+            "message": simulated_msg,
+        })
 
     # Validate all parameters first
     is_valid, validation_errors, validated_params = validate_all_search_params(
@@ -151,6 +172,17 @@ async def search_code_impl(
         took_ms = (time.time() - start_time) * 1000
 
         backend = "enhanced" if server.enhanced_search and not bm25_only else "basic"
+
+        # Filtro di sicurezza sul repository (in caso il backend non lo applichi)
+        if repository and detail_level != "ultra":
+            repo_lower = repository.lower()
+            def _match_repo(item_repo: str) -> bool:
+                return item_repo.lower().startswith(repo_lower)
+            items = [it for it in items if _match_repo(
+                        it.get("repository") if isinstance(it, dict)
+                        else getattr(it, "repository", "")
+                     )]
+            total = len(items)
 
         # Guard: if ultra format and items are already strings, pass through
         if detail_level == "ultra" and items and isinstance(items[0], str):

@@ -158,16 +158,24 @@ class SearchCodeEvaluator:
                 expected_results=expected
             )
     
-    async def _execute_search_code(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute search_code with given parameters"""
-        # Use the production MCP tool
-        result = await search_code(**parameters)
-        return result
+    async def _execute_search_code(
+        self,
+        parameters: Dict[str, Any] | List[Dict[str, Any]],
+    ) -> Dict[str, Any] | List[Dict[str, Any]]:
+        """Esegue search_code gestendo anche serie di chiamate."""
+        if isinstance(parameters, list):
+            return [await search_code(**p) for p in parameters]
+        return await search_code(**parameters)
     
     def _validate_result(self, actual: Dict[str, Any], expected: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """Validate actual results against expected criteria"""
         errors = []
         
+        # Gestione risultati multipli (p.es. test di confronto / sequenziale)
+        if isinstance(actual, list):
+            if not actual:               # lista vuota ‑ errore di sicurezza
+                return False, "empty result list"
+            actual = actual[0]           # convalida solo la prima risposta
         # Check if the call was successful
         if not actual.get('ok', False):
             errors.append(f"Call failed: {actual.get('error', 'Unknown error')}")
