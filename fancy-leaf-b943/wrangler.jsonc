@@ -106,10 +106,10 @@
 	],
 	"queues": {
 	  "producers": [
-	    { "binding": "JOBS", "queue": "claude-code-jobs", "queue_id": "2b84a6f1a5b7442fbc0f37433d3c455f" }
+	    { "binding": "JOBS", "queue": "claude-code-jobs" }
 	  ],
 	  "consumers": [
-	    { "queue": "claude-code-jobs", "queue_id": "2b84a6f1a5b7442fbc0f37433d3c455f" }
+	    { "queue": "claude-code-jobs" }
 	  ]
 	},
 	// Secrets: bind names to be provided via `wrangler secret put` or Secrets Store

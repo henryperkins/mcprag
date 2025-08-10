@@ -61,6 +61,8 @@ class MultiStageRetriever(Retriever):
         self.dependency_resolver = DependencyResolver(self.config.model_dump())
         self.pattern_registry = get_pattern_registry()
         self._cache = {}
+        # Stage-level metadata captured during retrieval to preserve highlights and original scores
+        self._candidate_metadata: Dict[str, Dict[str, Any]] = {}
 
     def _initialize_clients(self) -> Dict[str, SearchClient]:
         """Initialize search clients for different indexes"""
@@ -120,6 +122,8 @@ class MultiStageRetriever(Retriever):
         """
         Execute multi-stage retrieval pipeline
         """
+        # Reset per-call candidate metadata store
+        self._candidate_metadata = {}
         # Fast path: BM25-only (keyword) – preserve BM25 scores from Azure
         if getattr(query, "bm25_only", False):
             try:
@@ -206,6 +210,17 @@ class MultiStageRetriever(Retriever):
             filter_expr=self._build_filter(query),
             top_k=50
         )
+        # Preserve vector scores and any metadata provided by HybridSearcher
+        for r in results or []:
+            meta = self._candidate_metadata.setdefault(r.id, {})
+            meta['vector_score'] = r.score
+            # Fill in content and basic metadata if not already captured
+            if 'content' not in meta and getattr(r, 'content', None):
+                meta['content'] = r.content
+            md = getattr(r, 'metadata', {}) or {}
+            for key in ('file_path', 'repository', 'language', 'function_name', 'class_name', 'start_line', 'end_line', 'highlights'):
+                if key in md and md[key] is not None and key not in meta:
+                    meta[key] = md[key]
         return [(r.id, r.score) for r in results]
 
     async def _execute_keyword_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
@@ -213,9 +228,12 @@ class MultiStageRetriever(Retriever):
         if 'main' not in self.search_clients:
             return []
 
-        def _do_keyword():
+        # Use enhanced queries if available, otherwise fall back to original
+        queries_to_search = query.queries if query.queries else [query.query]
+        
+        def _do_keyword(search_text):
             return with_retry(op_name="acs.keyword")(self.search_clients["main"].search)(
-                search_text=query.query,
+                search_text=search_text,
                 query_type=QueryType.SIMPLE,
                 filter=self._build_filter(query),
                 include_total_count=True,
@@ -223,10 +241,69 @@ class MultiStageRetriever(Retriever):
                 search_fields=["content", "function_name", "class_name", "docstring"],
             )
 
-        # Run blocking SDK call in a thread to avoid blocking the event loop
-        results = await asyncio.to_thread(_do_keyword)
+        # Execute searches for all query variants and merge results
+        all_docs = []
+        seen_ids = set()
+        
+        for search_text in queries_to_search[:3]:  # Limit to first 3 variants for performance
+            try:
+                # Run blocking SDK call in a thread to avoid blocking the event loop
+                results = await asyncio.to_thread(_do_keyword, search_text)
+                # Materialize results to allow multiple passes and capture metadata
+                docs = list(results)
+                
+                # Merge unique results
+                for doc in docs:
+                    doc_id = doc.get('id')
+                    if doc_id and doc_id not in seen_ids:
+                        all_docs.append(doc)
+                        seen_ids.add(doc_id)
+            except Exception as e:
+                logger.warning(f"Failed to search with query variant '{search_text}': {e}")
+                
+        docs = all_docs
 
-        return [(r['id'], r['@search.score']) for r in results]
+        # Capture original BM25 score and any snippet/highlights for later enrichment
+        for r in docs:
+            try:
+                doc_id = r['id']
+            except Exception:
+                # Skip entries without an id
+                continue
+            meta = self._candidate_metadata.setdefault(doc_id, {})
+            # Preserve original keyword/BM25 score
+            try:
+                meta['bm25_score'] = r.get('@search.score')  # type: ignore[attr-defined]
+            except Exception:
+                # Best-effort: Azure SDK may expose as attribute-less mapping
+                try:
+                    meta['bm25_score'] = r['@search.score']
+                except Exception:
+                    pass
+            # Preserve content and metadata if present
+            for key in ('content', 'file_path', 'repository', 'language',
+                        'function_name', 'class_name', 'start_line', 'end_line'):
+                try:
+                    val = r.get(key)
+                except Exception:
+                    try:
+                        val = r[key]
+                    except Exception:
+                        val = None
+                if val is not None and key not in meta:
+                    meta[key] = val
+            # Preserve highlights if available
+            try:
+                hl = r.get('@search.highlights')  # type: ignore[attr-defined]
+            except Exception:
+                try:
+                    hl = r['@search.highlights']
+                except Exception:
+                    hl = None
+            if hl:
+                meta['highlights'] = hl
+
+        return [(r['id'], r['@search.score']) for r in docs]
 
     async def _execute_semantic_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute semantic search with query understanding"""
@@ -251,8 +328,60 @@ class MultiStageRetriever(Retriever):
             )
 
         results = await asyncio.to_thread(_do_semantic)
+        docs = list(results)
 
-        return [(r['id'], r['@search.score']) for r in results]
+        # Capture semantic reranker score, content, and highlights for enrichment
+        for r in docs:
+            try:
+                doc_id = r['id']
+            except Exception:
+                continue
+            meta = self._candidate_metadata.setdefault(doc_id, {})
+
+            # Prefer reranker score; fall back to @search.score
+            sem_score = None
+            try:
+                sem_score = r.get('@search.rerankerScore')  # type: ignore[attr-defined]
+            except Exception:
+                try:
+                    sem_score = r['@search.rerankerScore']
+                except Exception:
+                    try:
+                        sem_score = r.get('@search.score')  # type: ignore[attr-defined]
+                    except Exception:
+                        try:
+                            sem_score = r['@search.score']
+                        except Exception:
+                            sem_score = None
+            if sem_score is not None and 'semantic_score' not in meta:
+                meta['semantic_score'] = sem_score
+
+            # Preserve content and core metadata
+            for key in ('content', 'file_path', 'repository', 'language',
+                        'function_name', 'class_name', 'start_line', 'end_line'):
+                try:
+                    val = r.get(key)  # type: ignore[attr-defined]
+                except Exception:
+                    try:
+                        val = r[key]
+                    except Exception:
+                        val = None
+                if val is not None and key not in meta:
+                    meta[key] = val
+
+            # Preserve highlights if available
+            hl = None
+            try:
+                hl = r.get('@search.highlights')  # type: ignore[attr-defined]
+            except Exception:
+                try:
+                    hl = r['@search.highlights']
+                except Exception:
+                    hl = None
+            if hl and 'highlights' not in meta:
+                meta['highlights'] = hl
+
+        return [(r['id'], r['@search.score']) for r in docs]
 
     async def _execute_pattern_search(self, query: SearchQuery) -> List[Tuple[str, float]]:
         """Execute architectural pattern search"""
@@ -332,7 +461,47 @@ class MultiStageRetriever(Retriever):
             # Fetch full document details
             result = await self._fetch_document(doc_id)
             if result:
+                # Attach fused score
                 result.score = fused_score
+
+                # Enrich with stage-captured metadata (content, highlights, original scores)
+                meta = self._candidate_metadata.get(doc_id, {})
+
+                # Preserve original BM25 / semantic / vector scores for downstream use and display
+                if 'bm25_score' in meta:
+                    try:
+                        setattr(result, 'bm25_score', float(meta['bm25_score']))
+                    except Exception:
+                        setattr(result, 'bm25_score', meta['bm25_score'])
+                if 'semantic_score' in meta:
+                    try:
+                        setattr(result, 'semantic_score', float(meta['semantic_score']))
+                    except Exception:
+                        setattr(result, 'semantic_score', meta['semantic_score'])
+                if 'vector_score' in meta:
+                    try:
+                        setattr(result, 'vector_score', float(meta['vector_score']))
+                    except Exception:
+                        setattr(result, 'vector_score', meta['vector_score'])
+
+                # Original search score used for tie-breaking in ranker
+                orig = meta.get('bm25_score') or meta.get('semantic_score') or getattr(result, '_original_score', None)
+                if orig is not None:
+                    try:
+                        setattr(result, '_original_score', float(orig))
+                    except Exception:
+                        setattr(result, '_original_score', orig)
+
+                # Fill missing fields from metadata to fix "No content" and missing context
+                if (not getattr(result, 'code_snippet', None)) and meta.get('content'):
+                    result.code_snippet = meta['content']  # type: ignore[attr-defined]
+                if meta.get('highlights'):
+                    result.highlights = meta.get('highlights')  # type: ignore[attr-defined]
+                for key in ('file_path', 'repository', 'language', 'function_name', 'class_name', 'start_line', 'end_line'):
+                    if getattr(result, key, None) in (None, "", []):
+                        if key in meta and meta[key] is not None:
+                            setattr(result, key, meta[key])
+
                 final_results.append(result)
 
         # Assemble bounded context with dedup and citations

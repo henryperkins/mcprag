@@ -21,6 +21,7 @@
   "author": "Henry Perkins",
   "license": "MIT",
   "dependencies": {
+    "@tauri-apps/cli": "^2.7.1",
     "puppeteer": "^24.15.0",
     "puppeteer-core": "^24.15.0",
     "upgrade": "^1.1.0"

@@ -14,10 +14,29 @@ class FilterManager:
 
     @classmethod
     def repository(cls, repository: Optional[str]) -> Optional[str]:
-        """Build repository filter clause"""
+        """Build repository filter clause with robust matching.
+        Tries exact match on repository field, but also falls back to
+        text match on repository and file_path to accommodate repos
+        stored as 'owner/repo' or path-embedded values."""
         if not repository:
             return None
-        return f"repository eq '{cls.escape(repository)}'"
+        safe = cls.escape(repository)
+        
+        # Special handling for mcprag to exclude venv
+        if safe.lower() == 'mcprag':
+            # Match mcprag repository but exclude venv paths
+            return "(repository eq 'mcprag' and not search.ismatch('venv/', 'file_path'))"
+        
+        # If the repository already looks like 'owner/repo', prefer exact match only
+        if '/' in safe:
+            return f"repository eq '{safe}'"
+        
+        # Otherwise, allow exact or textual match in both repository and file_path
+        return "(" + " or ".join([
+            f"repository eq '{safe}'",
+            f"search.ismatch('{safe}', 'repository')",
+            f"search.ismatch('{safe}', 'file_path')",
+        ]) + ")"
 
     @classmethod
     def language(cls, language: Optional[str]) -> Optional[str]:

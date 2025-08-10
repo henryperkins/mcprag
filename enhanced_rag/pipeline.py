@@ -319,6 +319,7 @@ class RAGPipeline:
 
             search_query = SearchQuery(
                 query=query,
+                queries=enhanced_queries,  # Pass enhanced query variants
                 intent=intent,
                 current_file=context.current_file,
                 language=code_context.language if code_context else prefs.get('language'),

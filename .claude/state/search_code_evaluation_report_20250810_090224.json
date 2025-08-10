@@ -1,0 +1,251 @@
+{
+  "timestamp": "2025-08-10T09:02:24.135315+00:00",
+  "total_tests": 27,
+  "passed_tests": 0,
+  "failed_tests": 27,
+  "categories": {
+    "highlighting_features": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "avg_response_time_ms": 0.0007152557373046875
+    },
+    "detail_level_variations": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.0011126200358072917
+    },
+    "performance_intensive": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.0007152557373046875
+    },
+    "caching_behavior": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.0010331471761067708
+    },
+    "error_recovery": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.0006357828776041666
+    },
+    "semantic_search": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "avg_response_time_ms": 0.0007152557373046875
+    },
+    "dependency_analysis": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2,
+      "avg_response_time_ms": 0.0008344650268554688
+    },
+    "repository_filtering": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.002304712931315104
+    },
+    "content_validation": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.0008742014567057291
+    },
+    "ranking_validation": {
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "avg_response_time_ms": 0.0016689300537109375
+    }
+  },
+  "performance_summary": {
+    "avg_response_time_ms": 0.001094959400318287,
+    "median_response_time_ms": 0.0007152557373046875,
+    "p95_response_time_ms": 0.0028133392333984366,
+    "max_response_time_ms": 0.0035762786865234375
+  },
+  "issues": [
+    {
+      "test_id": "RF-01",
+      "category": "repository_filtering",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-02",
+      "category": "repository_filtering",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-03",
+      "category": "repository_filtering",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "CV-01",
+      "category": "content_validation",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CV-02",
+      "category": "content_validation",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CV-03",
+      "category": "content_validation",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-01",
+      "category": "ranking_validation",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-02",
+      "category": "ranking_validation",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "RV-03",
+      "category": "ranking_validation",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-01",
+      "category": "caching_behavior",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-02",
+      "category": "caching_behavior",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "CB-03",
+      "category": "caching_behavior",
+      "error": "__main__.search_code() argument after ** must be a mapping, not list",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DA-01",
+      "category": "dependency_analysis",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DA-02",
+      "category": "dependency_analysis",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DL-01",
+      "category": "detail_level_variations",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DL-02",
+      "category": "detail_level_variations",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "DL-03",
+      "category": "detail_level_variations",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "HF-01",
+      "category": "highlighting_features",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "HF-02",
+      "category": "highlighting_features",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "SS-01",
+      "category": "semantic_search",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "SS-02",
+      "category": "semantic_search",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PI-01",
+      "category": "performance_intensive",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PI-02",
+      "category": "performance_intensive",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "PI-03",
+      "category": "performance_intensive",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-01",
+      "category": "error_recovery",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-02",
+      "category": "error_recovery",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    },
+    {
+      "test_id": "ER-03",
+      "category": "error_recovery",
+      "error": "This should be replaced with the production MCP tool",
+      "severity": "P2-Medium"
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udea8 CRITICAL: Fix repository filtering - this is blocking basic functionality",
+    "\ud83d\udccb Address systemic issues in highlighting_features - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in detail_level_variations - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in performance_intensive - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in caching_behavior - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in error_recovery - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in semantic_search - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in dependency_analysis - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in repository_filtering - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in content_validation - >50% failure rate",
+    "\ud83d\udccb Address systemic issues in ranking_validation - >50% failure rate"
+  ]
+}

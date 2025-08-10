@@ -113,7 +113,13 @@ class EnhancedSearchTool:
                 'repo': getattr(r, 'repository', None),
                 'language': getattr(r, 'language', None),
                 'lines': [getattr(r, 'start_line', None), getattr(r, 'end_line', None)],
-                'score': round(float(getattr(r, 'score', 0) or 0), 4),
+                # Prefer original BM25 score for display when available; fall back to original/fused score
+                'score': round(float(
+                    getattr(r, 'bm25_score', None)
+                    or getattr(r, '_original_score', None)
+                    or getattr(r, 'score', 0)
+                    or 0.0
+                ), 4),
                 'match': self._extract_match_summary(r),
                 'context_type': context_type
             }
@@ -153,9 +159,20 @@ class EnhancedSearchTool:
                 {
                     'file': r.file_path,
                     'content': r.code_snippet,
-                    'relevance': r.score,
+                    # Prefer BM25/original score for user-facing relevance
+                    'relevance': (getattr(r, 'bm25_score', None)
+                                  or getattr(r, '_original_score', None)
+                                  or getattr(r, 'score', 0)),
                     'explanation': r.relevance_explanation,
-                    'context_type': self._infer_context_type(r)
+                    'context_type': self._infer_context_type(r),
+                    'highlights': getattr(r, 'highlights', {}) or {},
+                    # Provide full metadata to avoid missing fields downstream
+                    'repository': getattr(r, 'repository', None) or "",
+                    'language': getattr(r, 'language', None) or "",
+                    'function_name': getattr(r, 'function_name', None),
+                    'class_name': getattr(r, 'class_name', None),
+                    'start_line': getattr(r, 'start_line', None),
+                    'end_line': getattr(r, 'end_line', None)
                 }
                 for r in results
             ],

@@ -32,6 +32,7 @@ class SearchQuery(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     query: str
+    queries: List[str] = Field(default_factory=list)  # Enhanced query variants
     intent: Optional[SearchIntent] = None
     current_file: Optional[str] = None
     open_files: List[str] = Field(default_factory=list)
@@ -78,7 +79,9 @@ class EnhancedContext(CodeContext):
 
 class SearchResult(BaseModel):
     """Enhanced search result with metadata"""
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Allow dynamic attributes (e.g., bm25_score, semantic_score, vector_score)
+    # set during retrieval/ranking enrichment without raising errors.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra='allow')
 
     id: str
     score: float

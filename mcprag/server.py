@@ -138,33 +138,44 @@ except ImportError:
 
 # MCP SDK
 try:
+    # Preferred import path when using the MCP SDK package
     from mcp.server.fastmcp import FastMCP as _FastMCP
 
     MCP_SDK_AVAILABLE = True
-    # Use the real FastMCP
     FastMCP = _FastMCP
 except ImportError:
-    MCP_SDK_AVAILABLE = False
+    try:
+        # Fallback to standalone fastmcp package if available
+        from fastmcp import FastMCP as _FastMCP  # type: ignore
 
-    # Fallback for testing
-    class _MockFastMCP:
-        def __init__(self, name: str):
-            self.name = name
+        MCP_SDK_AVAILABLE = True
+        FastMCP = _FastMCP
+    except ImportError:
+        MCP_SDK_AVAILABLE = False
 
-        def tool(self):
-            return lambda f: f
+        # Fallback for testing environments without the SDK
+        class _MockFastMCP:
+            def __init__(self, name: str):
+                self.name = name
 
-        def resource(self):
-            return lambda f: f
+            def tool(self):
+                return lambda f: f
 
-        def prompt(self):
-            return lambda f: f
+            def resource(self):
+                return lambda f: f
 
-        def run(self, transport: Literal["stdio", "sse", "streamable-http"] = "stdio"):
-            print(f"Mock MCP server {self.name} running")
+            def prompt(self):
+                return lambda f: f
 
-    # Use the mock FastMCP
-    FastMCP = _MockFastMCP
+            def run(self, transport: Literal["stdio", "sse", "streamable-http"] = "stdio"):
+                # Avoid writing to stdout to not break stdio transport clients
+                try:
+                    import sys
+                    sys.stderr.write(f"Mock MCP server {self.name} running\n")
+                except Exception:
+                    pass
+
+        FastMCP = _MockFastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -177,10 +188,12 @@ class MCPServer:
         self.name = "azure-code-search-enhanced"
         self.version = "3.0.0"
 
-        # Validate configuration
+        # Validate configuration, but don't hard-fail startup.
+        # This allows the server to start and advertise limited functionality
+        # (e.g. no search backend) rather than failing to connect entirely.
         errors = Config.validate()
         if errors:
-            raise ValueError(f"Configuration errors: {errors}")
+            logger.warning("Configuration issues detected; continuing with degraded features: %s", errors)
 
         # ------------------------------------------------------------------
         # Setup logging
@@ -270,20 +283,26 @@ class MCPServer:
     def _init_components(self):
         """Initialize enhanced_rag components."""
         # Initialize search tools if available - each component independently
+        self.enhanced_search = None
         if ENHANCED_SEARCH_AVAILABLE:
-            self.enhanced_search = EnhancedSearchTool(self.rag_config)  # type: ignore[call-arg]
-        else:
-            self.enhanced_search = None
+            try:
+                self.enhanced_search = EnhancedSearchTool(self.rag_config)  # type: ignore[call-arg]
+            except Exception as e:
+                logger.warning("EnhancedSearchTool unavailable; continuing without enhanced search: %s", e)
 
+        self.code_gen = None
         if CODE_GEN_AVAILABLE:
-            self.code_gen = CodeGenerationTool(self.rag_config)  # type: ignore[call-arg]
-        else:
-            self.code_gen = None
+            try:
+                self.code_gen = CodeGenerationTool(self.rag_config)  # type: ignore[call-arg]
+            except Exception as e:
+                logger.warning("CodeGenerationTool unavailable; generation tools disabled: %s", e)
 
+        self.context_aware = None
         if CONTEXT_AWARE_AVAILABLE:
-            self.context_aware = ContextAwareTool(self.rag_config)  # type: ignore[call-arg]
-        else:
-            self.context_aware = None
+            try:
+                self.context_aware = ContextAwareTool(self.rag_config)  # type: ignore[call-arg]
+            except Exception as e:
+                logger.warning("ContextAwareTool unavailable; context-aware features disabled: %s", e)
 
         # Initialize basic Azure Search as fallback
         # Guard against partially available Azure SDK imports where AzureKeyCredential could be None
@@ -319,23 +338,25 @@ class MCPServer:
 
         # Initialize pipeline if available
         # RAGPipeline expects a dict-like config; pass server.rag_config with model_updater
+        self.pipeline = None
         if PIPELINE_AVAILABLE:
-            pipeline_config = self.rag_config.copy()
-            # Wire up adaptive ranking and ModelUpdater if learning support is available
-            if LEARNING_SUPPORT:
-                # Initialize model_updater first since pipeline needs it
-                self.model_updater = ModelUpdater()  # type: ignore[call-arg]
-                pipeline_config["model_updater"] = self.model_updater
-                pipeline_config["adaptive_ranking"] = True
+            try:
+                pipeline_config = self.rag_config.copy()
+                # Wire up adaptive ranking and ModelUpdater if learning support is available
+                if LEARNING_SUPPORT:
+                    # Initialize model_updater first since pipeline needs it
+                    self.model_updater = ModelUpdater()  # type: ignore[call-arg]
+                    pipeline_config["model_updater"] = self.model_updater
+                    pipeline_config["adaptive_ranking"] = True
 
-            # Enable ranking monitoring for the improved ranker
-            if "ranking" not in pipeline_config:
-                pipeline_config["ranking"] = {}
-            pipeline_config["ranking"]["enable_monitoring"] = True
+                # Enable ranking monitoring for the improved ranker
+                if "ranking" not in pipeline_config:
+                    pipeline_config["ranking"] = {}
+                pipeline_config["ranking"]["enable_monitoring"] = True
 
-            self.pipeline = RAGPipeline(pipeline_config)  # type: ignore[call-arg]
-        else:
-            self.pipeline = None
+                self.pipeline = RAGPipeline(pipeline_config)  # type: ignore[call-arg]
+            except Exception as e:
+                logger.warning("RAGPipeline initialization failed; continuing without pipeline: %s", e)
 
         # Initialize semantic tools
         if SEMANTIC_SUPPORT:

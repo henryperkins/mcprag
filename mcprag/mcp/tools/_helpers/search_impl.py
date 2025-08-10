@@ -143,7 +143,7 @@ async def search_code_impl(
             if server.search_client is None:
                 return err("Search client is not initialized")
             items, total = await _basic_search(
-                server.search_client, query, language, max_results, skip, orderby
+                server.search_client, query, language, repository, max_results, skip, orderby
             )
         else:
             return err("No search backend available")
@@ -308,19 +308,38 @@ async def _basic_search(
     search_client: Any,
     query: str,
     language: Optional[str],
+    repository: Optional[str],
     max_results: int,
     skip: int,
     orderby: Optional[str],
 ) -> Tuple[List[Any], int]:
     """Perform basic Azure Search."""
+    from enhanced_rag.ranking.filter_manager import FilterManager
+    
     search_params = {
         "search_text": query,
         "top": max_results,
         "skip": skip,
         "include_total_count": True,
     }
-    if language:
-        search_params["filter"] = f"language eq '{language}'"
+    
+    # Build filter using FilterManager for consistency
+    filters = []
+    
+    # Repository filter
+    repo_filter = FilterManager.repository(repository)
+    if repo_filter:
+        filters.append(repo_filter)
+    
+    # Language filter  
+    lang_filter = FilterManager.language(language)
+    if lang_filter:
+        filters.append(lang_filter)
+    
+    # Combine filters with AND
+    if filters:
+        search_params["filter"] = " and ".join(filters)
+    
     if orderby:
         search_params["orderby"] = orderby
 
