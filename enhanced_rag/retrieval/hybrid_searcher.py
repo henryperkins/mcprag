@@ -3,6 +3,7 @@ Hybrid search implementation combining vector and keyword search
 """
 
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 from ..ranking.filter_manager import FilterManager
@@ -256,54 +257,63 @@ class HybridSearcher:
             return "".join(ch for ch in t if 32 <= ord(ch) <= 126)
         exact_terms = [_clamp_term(t) for t in exact_terms]
 
-        # ------------------------------------------------------------------
-        # 1.  Build keyword/semantic request
-        # ------------------------------------------------------------------
-        kw_sem_results: List[HybridSearchResult] = []
-        try:
-            sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
-
-            kw_sem_kwargs = self._sanitize_search_kwargs({
-                "search_text": query,
-                "query_type": QueryType.SEMANTIC,
-                "semantic_configuration_name": sem_cfg,
-                "query_caption": "extractive",
-                "query_answer": "extractive",
-                "filter": filter_expr,
-                "top": top_k * 2,
-                "include_total_count": include_total_count,
-                "disable_randomization": True,  # deterministic
-                "timeout": (deadline_ms / 1000) if deadline_ms else None,
-            })
-            body = {
-                "search": query,
-                "queryType": "semantic",
-                "semanticConfiguration": sem_cfg,
-                "queryCaption": "extractive",
-                "queryAnswer": "extractive",
-                "filter": kw_sem_kwargs.get("filter"),
-                "top": kw_sem_kwargs.get("top", top_k * 2),
-                "includeTotalCount": kw_sem_kwargs.get("include_total_count", include_total_count),
-            }
-            resp = await self.rest_ops.search(self._index_name, query=kw_sem_kwargs.get("search_text", query), **body)
-            kw_sem_results = self._process_results(resp.get("value", []))
-        except Exception as e:
-            logger.warning("Keyword/Semantic path failed – %s", e)
+        # Internal helpers run in parallel and independently timeout if requested
+        async def _run_kw_sem() -> List[HybridSearchResult]:
+            try:
+                sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
+                kw_sem_kwargs = self._sanitize_search_kwargs({
+                    "search_text": query,
+                    "query_type": QueryType.SEMANTIC,
+                    "semantic_configuration_name": sem_cfg,
+                    "query_caption": "extractive",
+                    "query_answer": "extractive",
+                    "filter": filter_expr,
+                    "top": top_k * 2,
+                    "include_total_count": include_total_count,
+                    "disable_randomization": True,  # deterministic
+                    "timeout": (deadline_ms / 1000) if deadline_ms else None,
+                })
+                body = {
+                    "search": query,
+                    "queryType": "semantic",
+                    "semanticConfiguration": sem_cfg,
+                    "queryCaption": "extractive",
+                    "queryAnswer": "extractive",
+                    "highlightFields": "content,docstring",
+                    "filter": kw_sem_kwargs.get("filter"),
+                    "top": kw_sem_kwargs.get("top", top_k * 2),
+                    "includeTotalCount": kw_sem_kwargs.get("include_total_count", include_total_count),
+                }
+                resp = await self.rest_ops.search(self._index_name, query=kw_sem_kwargs.get("search_text", query), **body)
+                return self._process_results(resp.get("value", []))
+            except Exception as e:
+                logger.warning("Keyword/Semantic path failed – %s", e)
+                # Fallback: SIMPLE query with highlights if semantic not available
+                try:
+                    body = {
+                        "search": query,
+                        "queryType": "simple",
+                        "highlightFields": "content,docstring",
+                        "filter": filter_expr,
+                        "top": top_k * 2,
+                        "includeTotalCount": include_total_count,
+                    }
+                    resp = await self.rest_ops.search(self._index_name, query=query, **body)
+                    return self._process_results(resp.get("value", []))
+                except Exception as e2:
+                    logger.warning("Fallback SIMPLE path failed – %s", e2)
+                    return []
 
         # ------------------------------------------------------------------
         # 1b. Exact lexical fallback pass (if exact_terms present)
         # ------------------------------------------------------------------
-        exact_results: List[HybridSearchResult] = []
-        if exact_terms:
+        async def _run_exact() -> List[HybridSearchResult]:
+            if not exact_terms:
+                return []
             try:
-                # Build a strict filter using search.ismatch for each term over key text fields
-                # We OR the fields for a term and AND across terms to enforce presence of all exact terms.
+                # Build strict filter ensuring presence of all exact terms
                 def _term_filter(term: str) -> str:
-                    # Properly escape and validate the term to prevent injection
-                    # First, escape single quotes for OData string literals
                     safe = term.replace("'", "''")
-
-                    # Additional validation to detect and reject suspicious patterns
                     suspicious_patterns = [
                         ' or ', ' and ', ' eq ', ' ne ', ' gt ', ' lt ',
                         ' ge ', ' le ', '(', ')', '--', '/*', '*/', ';'
@@ -311,13 +321,9 @@ class HybridSearcher:
                     for pattern in suspicious_patterns:
                         if pattern in safe.lower():
                             logger.warning(f"Suspicious term detected and rejected: {term}")
-                            # Return a safe no-op filter that matches nothing
                             return "(1 eq 0)"
-
-                    # Limit term length to prevent buffer-based attacks
                     if len(safe) > 200:
                         safe = safe[:200]
-
                     return "(" + " or ".join([
                         f"search.ismatch('{safe}', 'content')",
                         f"search.ismatch('{safe}', 'function_name')",
@@ -326,26 +332,18 @@ class HybridSearcher:
                     ]) + ")"
                 combined_exact = " and ".join([_term_filter(t) for t in exact_terms])
                 combined_filter = combined_exact if not filter_expr else f"({filter_expr}) and {combined_exact}"
-
-                exact_kwargs = self._sanitize_search_kwargs({
-                    "search_text": "",  # rely on filter to force must-have terms
-                    "query_type": QueryType.SIMPLE,
-                    "filter": combined_filter,
-                    "top": top_k * 2,
-                    "include_total_count": False,
-                    "disable_randomization": True,
-                    "timeout": (deadline_ms / 1000) if deadline_ms else None,
-                })
-                resp = await self.rest_ops.search(self._index_name, query="*", filter=combined_filter, top=exact_kwargs.get("top", top_k * 2))
-                exact_results = self._process_results(resp.get("value", []))
+                resp = await self.rest_ops.search(self._index_name, query="*", filter=combined_filter, top=top_k * 2)
+                return self._process_results(resp.get("value", []))
             except Exception as e:
                 logger.warning("Exact-match fallback pass failed – %s", e)
+                return []
 
         # ------------------------------------------------------------------
         # 2.  Build vector request  (server-side TextVectorization if possible)
         # ------------------------------------------------------------------
-        vec_results: List[HybridSearchResult] = []
-        if vector_weight > 0:
+        async def _run_vector() -> List[HybridSearchResult]:
+            if vector_weight <= 0:
+                return []
             try:
                 emb = None
                 if self.embedder:
@@ -354,8 +352,6 @@ class HybridSearcher:
                     except Exception as e:
                         logger.warning(f"Embedding generation failed: {e}")
                         emb = None
-
-                # Only proceed with vector search if we have a valid embedding
                 if emb and isinstance(emb, (list, tuple)) and len(emb) > 0:
                     options: Dict[str, Any] = {
                         "top": top_k * 2,
@@ -368,14 +364,31 @@ class HybridSearcher:
                     }
                     if filter_expr:
                         options["filter"] = filter_expr
-                        
                     resp = await self.rest_ops.search(self._index_name, query="", **options)
-                    vec_results = self._process_results(resp.get("value", []))
+                    return self._process_results(resp.get("value", []))
                 else:
                     logger.info("Skipping vector search - no valid embedding available")
-                    
+                    return []
             except Exception as e:
                 logger.warning("Vector search failed – %s", e)
+                return []
+
+        # Run all paths concurrently with optional per-path timeout
+        tasks = []
+        async def _with_timeout(coro):
+            if deadline_ms:
+                try:
+                    return await asyncio.wait_for(coro, timeout=max(0.05, deadline_ms / 1000))
+                except Exception as e:
+                    logger.debug(f"Subsearch timed out or failed: {e}")
+                    return []
+            return await coro
+
+        kw_sem_results, vec_results, exact_results = await asyncio.gather(
+            _with_timeout(_run_kw_sem()),
+            _with_timeout(_run_vector()),
+            _with_timeout(_run_exact()),
+        )
 
         # ------------------------------------------------------------------
         # 3.  Fuse scores  (linear-weighted) + exact boost
@@ -548,18 +561,36 @@ class HybridSearcher:
 
         for result in results:
             try:
+                doc_id = result.get('id', '')
+                if not doc_id:
+                    continue
+                content = result.get('content', '') or ''
+                docstring = result.get('docstring') or ''
+                # Drop documents with no text content at all
+                if not (isinstance(content, str) and content.strip()) and not (isinstance(docstring, str) and docstring.strip()):
+                    logger.debug(f"Skipping empty-content search hit id={doc_id}")
+                    continue
+
+                highlights = result.get('@search.highlights') or {}
+                if not highlights:
+                    # Synthesize minimal snippet from content/docstring
+                    snippet_src = content or docstring or ''
+                    snippet = snippet_src[:120]
+                    if snippet:
+                        highlights = {"content": [snippet]}
+
                 processed.append(HybridSearchResult(
-                    id=result.get('id', ''),
+                    id=doc_id,
                     score=result.get('@search.score', 0.0),
-                    content=result.get('content', ''),
+                    content=content or docstring,
                     metadata={
                         'file_path': result.get('file_path'),
                         'repository': result.get('repository'),
                         'language': result.get('language'),
                         'function_name': result.get('function_name'),
                         'class_name': result.get('class_name'),
-                        'highlights': result.get('@search.highlights', {}),
-                        'docstring': result.get('docstring'),
+                        'highlights': highlights,
+                        'docstring': docstring,
                         'signature': result.get('signature'),
                         'imports': result.get('imports'),
                         'semantic_context': result.get('semantic_context')

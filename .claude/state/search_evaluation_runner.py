@@ -21,12 +21,42 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 # --- real MCP tool import / bootstrap -----------------
-from mcprag.mcp.tools.search import search_code as _prod_search_code
-# ------------------------------------------------------
+from mcprag.server import MCPServer
+from mcprag.mcp.tools._helpers import search_code_impl
+
+# Create a server instance for testing
+_test_server = None
+
+async def _get_test_server():
+    """Get or create a test server instance."""
+    global _test_server
+    if _test_server is None:
+        _test_server = MCPServer()
+        await _test_server.start_async_components()
+    return _test_server
 
 async def search_code(**kwargs) -> Dict[str, Any]:
     """Proxy to the production search_code tool."""
-    return await _prod_search_code(**kwargs)
+    server = await _get_test_server()
+    
+    # Set defaults to match the MCP tool signature
+    kwargs.setdefault('intent', None)
+    kwargs.setdefault('language', None)
+    kwargs.setdefault('repository', None)
+    kwargs.setdefault('max_results', 10)
+    kwargs.setdefault('include_dependencies', False)
+    kwargs.setdefault('skip', 0)
+    kwargs.setdefault('orderby', None)
+    kwargs.setdefault('highlight_code', False)
+    kwargs.setdefault('bm25_only', False)
+    kwargs.setdefault('exact_terms', None)
+    kwargs.setdefault('disable_cache', False)
+    kwargs.setdefault('include_timings', False)
+    kwargs.setdefault('dependency_mode', 'auto')
+    kwargs.setdefault('detail_level', 'full')
+    kwargs.setdefault('snippet_lines', 0)
+    
+    return await search_code_impl(server=server, **kwargs)
 
 
 @dataclass
@@ -380,8 +410,10 @@ class SearchCodeEvaluator:
 
 async def main():
     """Main entry point for evaluation runner"""
-    global _server_instance
-    evaluator = SearchCodeEvaluator("search_code_test_scenarios_enhanced.json")
+    global _test_server
+    # Use absolute path to the test scenarios file in the same directory
+    scenarios_file = os.path.join(os.path.dirname(__file__), "search_code_test_scenarios_enhanced.json")
+    evaluator = SearchCodeEvaluator(scenarios_file)
     
     try:
         # Run all tests
@@ -404,9 +436,9 @@ async def main():
         return 2
     finally:
         # Cleanup server instance
-        if _server_instance:
+        if _test_server:
             try:
-                await _server_instance.cleanup_async_components()
+                await _test_server.cleanup_async_components()
             except Exception as e:
                 print(f"Warning: Server cleanup failed: {e}")
 

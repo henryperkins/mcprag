@@ -1,0 +1,92 @@
+{
+  "timestamp": "2025-08-10T18:45:15.985293+00:00",
+  "total_tests": 27,
+  "passed_tests": 25,
+  "failed_tests": 2,
+  "categories": {
+    "ranking_validation": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 67.78279940287273
+    },
+    "detail_level_variations": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 31.37350082397461
+    },
+    "caching_behavior": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 41.60372416178385
+    },
+    "content_validation": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 42.70219802856445
+    },
+    "highlighting_features": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "avg_response_time_ms": 31.385302543640137
+    },
+    "semantic_search": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "avg_response_time_ms": 29.770374298095703
+    },
+    "dependency_analysis": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "avg_response_time_ms": 50.87387561798096
+    },
+    "performance_intensive": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 57.307163874308266
+    },
+    "error_recovery": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "avg_response_time_ms": 0.007867813110351562
+    },
+    "repository_filtering": {
+      "total": 3,
+      "passed": 1,
+      "failed": 2,
+      "avg_response_time_ms": 336.70878410339355
+    }
+  },
+  "performance_summary": {
+    "avg_response_time_ms": 72.46360072383175,
+    "median_response_time_ms": 36.1325740814209,
+    "p95_response_time_ms": 80.41498661041258,
+    "max_response_time_ms": 989.7568225860596
+  },
+  "issues": [
+    {
+      "test_id": "RF-01",
+      "category": "repository_filtering",
+      "error": "Missing expected file pattern: mcprag/server.py; Missing expected file pattern: mcprag/mcp/",
+      "severity": "P1-High"
+    },
+    {
+      "test_id": "RF-02",
+      "category": "repository_filtering",
+      "error": "Expected min 1 results, got 0; Missing expected file pattern: enhanced_rag/ranking/",
+      "severity": "P1-High"
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udea8 CRITICAL: Fix repository filtering - this is blocking basic functionality",
+    "\ud83d\udccb Address systemic issues in repository_filtering - >50% failure rate"
+  ]
+}

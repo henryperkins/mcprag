@@ -574,13 +574,22 @@ class RAGPipeline:
                 await self._record_interaction(search_query, final_results, code_context)
 
             # 9. Build metadata
+            # Collect retrieval warnings (e.g., semantic-config fallback)
+            retrieval_warnings = []
+            try:
+                if hasattr(self.retriever, '_warnings') and isinstance(getattr(self.retriever, '_warnings'), list):
+                    retrieval_warnings = list(getattr(self.retriever, '_warnings'))
+            except Exception:
+                retrieval_warnings = []
+
             metadata = {
                 'intent': intent.value,
                 'enhanced_queries': enhanced_queries,
                 'total_results_found': len(raw_results),
                 'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
                 'context_used': bool(code_context),
-                'session_id': context.session_id
+                'session_id': context.session_id,
+                'retrieval_warnings': retrieval_warnings,
             }
 
             return RAGPipelineResult(

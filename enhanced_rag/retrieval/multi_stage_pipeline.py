@@ -63,6 +63,8 @@ class MultiStageRetriever(Retriever):
         self._cache = {}
         # Stage-level metadata captured during retrieval to preserve highlights and original scores
         self._candidate_metadata: Dict[str, Dict[str, Any]] = {}
+        # Per-call warnings to surface config mismatches or fallbacks to clients
+        self._warnings: List[str] = []
 
     def _initialize_clients(self) -> Dict[str, SearchClient]:
         """Initialize search clients for different indexes"""
@@ -122,8 +124,9 @@ class MultiStageRetriever(Retriever):
         """
         Execute multi-stage retrieval pipeline
         """
-        # Reset per-call candidate metadata store
+        # Reset per-call candidate metadata store and warnings
         self._candidate_metadata = {}
+        self._warnings = []
         # Fast path: BM25-only (keyword) – preserve BM25 scores from Azure
         if getattr(query, "bm25_only", False):
             try:
@@ -340,6 +343,18 @@ class MultiStageRetriever(Retriever):
                     hl = None
             if hl:
                 meta['highlights'] = hl
+            else:
+                # Fallback: synthesize a simple snippet when highlights are missing
+                try:
+                    content = r.get('content') or ""
+                except Exception:
+                    try:
+                        content = r['content']
+                    except Exception:
+                        content = ""
+                snippet = (content or "")[:120]
+                if snippet:
+                    meta['highlights'] = {"content": [snippet]}
 
         return [(r['id'], r['@search.score']) for r in docs]
 
@@ -350,8 +365,12 @@ class MultiStageRetriever(Retriever):
 
         # Enrich semantic search with facets, captions/answers, highlights, total count, search_fields and retries
         def _do_semantic():
-            # Get semantic config from config
-            sem_cfg = getattr(self.config, "semantic_config_name", None) or "semantic-config"
+            # Get semantic config from config (prefer azure.semantic_config_name)
+            sem_cfg = (
+                getattr(getattr(self.config, "azure", object()), "semantic_config_name", None)
+                or getattr(self.config, "semantic_config_name", None)
+                or "semantic-config"
+            )
 
             return with_retry(op_name="acs.semantic")(self.search_clients["main"].search)(
                 search_text=query.query,
@@ -368,8 +387,27 @@ class MultiStageRetriever(Retriever):
                 search_fields=["content", "function_name", "class_name", "docstring"],
             )
 
-        results = await asyncio.to_thread(_do_semantic)
-        docs = list(results)
+        try:
+            results = await asyncio.to_thread(_do_semantic)
+            docs = list(results)
+        except Exception as e:
+            # Fallback: semantic configuration missing or disabled – degrade to SIMPLE query
+            self._warnings.append("semantic_search_fallback_simple")
+            logger.warning(f"Semantic search unavailable, falling back to keyword SIMPLE: {e}")
+
+            def _do_simple():
+                return with_retry(op_name="acs.semantic.fallback")(self.search_clients["main"].search)(
+                    search_text=query.query,
+                    query_type=QueryType.SIMPLE,
+                    filter=self._build_filter(query),
+                    include_total_count=True,
+                    top=50,
+                    search_fields=["content", "function_name", "class_name", "docstring"],
+                    highlight_fields="content,docstring",
+                )
+
+            results = await asyncio.to_thread(_do_simple)
+            docs = list(results)
 
         # Capture semantic reranker score, content, and highlights for enrichment
         for r in docs:
@@ -421,6 +459,18 @@ class MultiStageRetriever(Retriever):
                     hl = None
             if hl and 'highlights' not in meta:
                 meta['highlights'] = hl
+            elif 'highlights' not in meta:
+                # Fallback: synthesize snippet when highlights are missing
+                try:
+                    content = r.get('content')  # type: ignore[attr-defined]
+                except Exception:
+                    try:
+                        content = r['content']
+                    except Exception:
+                        content = None
+                snippet = (content or "")[:120]
+                if snippet:
+                    meta['highlights'] = {"content": [snippet]}
 
         return [(r['id'], r['@search.score']) for r in docs]
 
@@ -573,7 +623,12 @@ class MultiStageRetriever(Retriever):
                         if key in meta and meta[key] is not None:
                             setattr(result, key, meta[key])
 
-                final_results.append(result)
+                # Drop entries with no usable content to avoid blank snippets downstream
+                text_content = getattr(result, 'code_snippet', None) or getattr(result, 'content', None) or ""
+                if isinstance(text_content, str) and text_content.strip():
+                    final_results.append(result)
+                else:
+                    logger.debug(f"Skipping empty-content document id={doc_id}")
 
         # Assemble bounded context with dedup and citations
         try:
