@@ -16,12 +16,16 @@ from enhanced_rag.utils.performance_monitor import PerformanceMonitor
 
 # Add missing imports for type safety
 try:
-    from azure.search.documents.models import QueryType
+    from azure.search.documents.models import QueryType, VectorizedQuery, VectorizableTextQuery
 except ImportError:
     # Fallback for systems without Azure SDK
     class QueryType:
         SEMANTIC = "semantic"
         SIMPLE = "simple"
+    
+    # Dummy classes for type hints when SDK is not available
+    VectorizedQuery = None  # type: ignore
+    VectorizableTextQuery = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -441,7 +445,7 @@ class HybridSearcher:
         try:
             # Execute vector search using REST API
             options: Dict[str, Any] = {"top": top_k}
-            if isinstance(vector_query, VectorizedQuery) and getattr(vector_query, "vector", None):
+            if VectorizedQuery is not None and isinstance(vector_query, VectorizedQuery) and getattr(vector_query, "vector", None):
                 options["vectorQueries"] = [{"vector": vector_query.vector, "k": top_k, "fields": "content_vector"}]
             if filter_expr:
                 options["filter"] = filter_expr
@@ -571,19 +575,22 @@ class HybridSearcher:
         """Build vector query, preferring server-side vectorization."""
         try:
             # Prefer server-side vectorization with VectorizableTextQuery
-            return VectorizableTextQuery(
-                text=query, k_nearest_neighbors=k, fields="content_vector"
-            )
+            if VectorizableTextQuery is not None:
+                return VectorizableTextQuery(
+                    text=query, k_nearest_neighbors=k, fields="content_vector"
+                )
         except Exception:
-            # Fallback to client-side vectorization if the above is not supported
-            # or if an embedder is explicitly available.
-            if self.embedder:
-                try:
-                    embedding = self.embedder.generate_embedding(query)
-                    if embedding:
-                        return VectorizedQuery(
-                            vector=embedding, k_nearest_neighbors=k, fields="content_vector"
-                        )
-                except Exception as e:
-                    logger.error(f"Client-side embedding failed: {e}")
+            pass
+        
+        # Fallback to client-side vectorization if the above is not supported
+        # or if an embedder is explicitly available.
+        if self.embedder:
+            try:
+                embedding = self.embedder.generate_embedding(query)
+                if embedding and VectorizedQuery is not None:
+                    return VectorizedQuery(
+                        vector=embedding, k_nearest_neighbors=k, fields="content_vector"
+                    )
+            except Exception as e:
+                logger.error(f"Client-side embedding failed: {e}")
         return None

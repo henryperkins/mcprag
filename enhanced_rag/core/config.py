@@ -5,10 +5,18 @@ Centralizes all configuration with environment variable support
 
 import logging
 import os
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from pydantic import BaseModel, Field
 from pathlib import Path
 import json
+
+if TYPE_CHECKING:
+    from typing import Self
+else:
+    try:
+        from typing import Self
+    except ImportError:
+        from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +227,7 @@ def set_config(config: Config) -> None:
     _config = config
 
 
-def validate_config(cfg: Config) -> None:
+def validate_config(cfg: "Config") -> None:
     """
     Validate required configuration values and raise ValueError on problems.
     """
@@ -267,7 +275,7 @@ def validate_config(cfg: Config) -> None:
         )
 
 
-def analyze_search_technology_issues(cfg: Optional[Config] = None) -> dict:
+def analyze_search_technology_issues(cfg: Optional["Config"] = None) -> dict:
     """
     Analyze configuration for concrete search-technology issues.
 
