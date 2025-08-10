@@ -61,6 +61,8 @@ class MultiStageRetriever(Retriever):
         self.dependency_resolver = DependencyResolver(self.config.model_dump())
         self.pattern_registry = get_pattern_registry()
         self._cache = {}
+        # Cache for semantic fallback SIMPLE path keyed by (query, filter)
+        self._semantic_fallback_cache: Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]] = {}
         # Stage-level metadata captured during retrieval to preserve highlights and original scores
         self._candidate_metadata: Dict[str, Dict[str, Any]] = {}
         # Per-call warnings to surface config mismatches or fallbacks to clients
@@ -364,6 +366,7 @@ class MultiStageRetriever(Retriever):
             return []
 
         # Enrich semantic search with facets, captions/answers, highlights, total count, search_fields and retries
+        filter_expr = self._build_filter(query)
         def _do_semantic():
             # Get semantic config from config (prefer azure.semantic_config_name)
             sem_cfg = (
@@ -377,7 +380,7 @@ class MultiStageRetriever(Retriever):
                 query_type=QueryType.SEMANTIC,
                 semantic_configuration_name=sem_cfg,  # Use config value
                 # scoring_profile="code_quality_boost",  # Commented out - profile doesn't exist
-                filter=self._build_filter(query),
+                filter=filter_expr,
                 facets=["language,count:20", "repository,count:20", "tags,count:20"],
                 query_caption="extractive",
                 query_answer="extractive",
@@ -395,19 +398,33 @@ class MultiStageRetriever(Retriever):
             self._warnings.append("semantic_search_fallback_simple")
             logger.warning(f"Semantic search unavailable, falling back to keyword SIMPLE: {e}")
 
-            def _do_simple():
-                return with_retry(op_name="acs.semantic.fallback")(self.search_clients["main"].search)(
-                    search_text=query.query,
-                    query_type=QueryType.SIMPLE,
-                    filter=self._build_filter(query),
-                    include_total_count=True,
-                    top=50,
-                    search_fields=["content", "function_name", "class_name", "docstring"],
-                    highlight_fields="content,docstring",
-                )
+            # Try cached SIMPLE results first to avoid duplicate retries
+            cache_key = (query.query, filter_expr)
+            cached = self._semantic_fallback_cache.get(cache_key) if hasattr(self, "_semantic_fallback_cache") else None
+            if cached is not None:
+                docs = list(cached)
+            else:
+                def _do_simple():
+                    return with_retry(op_name="acs.semantic.fallback")(self.search_clients["main"].search)(
+                        search_text=query.query,
+                        query_type=QueryType.SIMPLE,
+                        filter=filter_expr,
+                        include_total_count=True,
+                        top=50,
+                        search_fields=["content", "function_name", "class_name", "docstring"],
+                        highlight_fields="content,docstring",
+                    )
 
-            results = await asyncio.to_thread(_do_simple)
-            docs = list(results)
+                results = await asyncio.to_thread(_do_simple)
+                docs = list(results)
+                # Cache bounded to 128 entries
+                try:
+                    self._semantic_fallback_cache[cache_key] = docs
+                    if len(self._semantic_fallback_cache) > 128:
+                        # evict oldest arbitrary entry
+                        self._semantic_fallback_cache.pop(next(iter(self._semantic_fallback_cache)))
+                except Exception:
+                    pass
 
         # Capture semantic reranker score, content, and highlights for enrichment
         for r in docs:
