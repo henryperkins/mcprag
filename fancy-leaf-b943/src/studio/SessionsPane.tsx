@@ -27,16 +27,16 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 function Item({ item }: { item: SessionItem }) {
   return (
     <button
-      className="group w-full text-left px-3 py-2.5 hover:bg-white/5 focus:bg-white/5 rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
+      className="group w-full text-left px-3 py-2.5 hover:bg-[color:var(--bg-hover)] focus:bg-[color:var(--bg-hover)] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
       aria-label={`Open session ${item.title}`}
     >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 grid h-6 w-6 flex-shrink-0 place-items-center rounded-md border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] text-white/80">
+        <div className="mt-0.5 grid h-6 w-6 flex-shrink-0 place-items-center rounded-md border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] text-[color:var(--text-secondary)]">
           <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="truncate text-[13px] text-white/95">{item.title}</p>
+            <p className="truncate text-[13px] text-[color:var(--text-primary)]">{item.title}</p>
             {item.pinned && (
               <Star className="h-3.5 w-3.5 text-[color:var(--color-primary)]" aria-label="Pinned" />
             )}
@@ -82,10 +82,10 @@ export default function SessionsPane() {
         </div>
         <div className="px-3 pb-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-white/50" aria-hidden="true" />
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[color:var(--text-muted)]" aria-hidden="true" />
             <input
               aria-label="Search sessions"
-              className="w-full rounded-lg border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] py-2 pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/40 focus:ring-2 focus:ring-[color:var(--color-primary)]"
+              className="w-full rounded-lg border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] py-2 pl-8 pr-3 text-[13px] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-muted)] focus:ring-2 focus:ring-[color:var(--color-primary)]"
               placeholder="Search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}

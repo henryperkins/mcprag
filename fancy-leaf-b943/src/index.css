@@ -148,6 +148,7 @@
     --z-popover: 50;
     --z-tooltip: 60;
     --z-notification: 70;
+    color-scheme: dark;
   }
   
   /* Light Theme (future implementation) */
@@ -171,6 +172,7 @@
     
     --glass-bg: rgba(255, 255, 255, 0.7);
     --glass-border: rgba(0, 0, 0, 0.08);
+    color-scheme: light;
   }
 }
 

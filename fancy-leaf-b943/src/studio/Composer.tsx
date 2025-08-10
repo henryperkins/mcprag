@@ -9,7 +9,7 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
     <footer className="sticky bottom-0 z-20 border-t border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-primary) 85%, transparent)] backdrop-blur">
       <div className="mx-auto max-w-4xl px-5 py-3">
         <form
-          className="flex items-end gap-2 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] p-2 focus-within:ring-2 focus-within:ring-white/15"
+          className="flex items-end gap-2 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:color-mix(in srgb, var(--bg-elevated) 70%, transparent)] p-2 focus-within:ring-2 focus-within:ring-[color:var(--color-primary)]"
           onSubmit={(e) => {
             e.preventDefault()
             const text = value.trim()
@@ -22,7 +22,7 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
         >
           <button
             type="button"
-            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-white/20"
+            className="grid h-9 w-9 place-items-center rounded-lg text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
             aria-label="Insert"
             title="Insert"
           >
@@ -41,7 +41,7 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="grid h-9 w-9 place-items-center rounded-lg text-white/80 hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-white/20"
+              className="grid h-9 w-9 place-items-center rounded-lg text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
               aria-label="Attach"
               title="Attach"
             >
@@ -49,7 +49,7 @@ export default function Composer({ onSend }: { onSend: (text: string) => void })
             </button>
             <button
               type="submit"
-              className="inline-flex items-center gap-2 rounded-lg bg-white/90 px-3 py-2 text-sm font-medium text-black hover:bg-white focus:outline-none focus:ring-2 focus:ring-white/60"
+              className="inline-flex items-center gap-2 rounded-lg bg-[color:var(--color-primary)] px-3 py-2 text-sm font-medium text-white hover:bg-[color:var(--color-primary-hover)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
               aria-label="Send"
               title="Send"
             >

@@ -9,8 +9,8 @@ export default function Sidebar({ onToggleSessions, showSessions }: Props) {
   const libBtnClass =
     'grid h-9 w-9 place-items-center rounded-lg focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)] ' +
     (showSessions
-      ? 'bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] text-white/90'
-      : 'text-white/60 hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)]')
+      ? 'bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] text-[color:var(--text-primary)]'
+      : 'text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)]')
 
   return (
     <nav
@@ -20,7 +20,7 @@ export default function Sidebar({ onToggleSessions, showSessions }: Props) {
       <div className="flex h-full flex-col items-center justify-between py-4">
         <div className="flex flex-col items-center gap-3">
           <button
-            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
+            className="grid h-9 w-9 place-items-center rounded-lg text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
             aria-label="New chat"
             title="New"
           >
@@ -37,7 +37,7 @@ export default function Sidebar({ onToggleSessions, showSessions }: Props) {
           </button>
         </div>
         <button
-          className="mb-1 grid h-9 w-9 place-items-center rounded-lg text-white/60 hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
+          className="mb-1 grid h-9 w-9 place-items-center rounded-lg text-[color:var(--text-secondary)] hover:bg-[color:color-mix(in srgb, var(--color-primary) 12%, transparent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]"
           aria-label="Settings"
           title="Settings"
         >

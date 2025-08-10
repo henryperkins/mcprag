@@ -10,8 +10,28 @@ import StatusBar from './StatusBar'
 export default function ChatPage() {
   // Apply dark theme on mount
   React.useEffect(() => {
-    document.documentElement.setAttribute('data-theme', 'dark')
-    document.documentElement.classList.add('dark')
+    const stored = (localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null) ?? 'system'
+    const resolve = (mode: 'light' | 'dark' | 'system') =>
+      mode === 'system'
+        ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : mode
+    const apply = (mode: 'light' | 'dark' | 'system') => {
+      document.documentElement.setAttribute('data-theme', resolve(mode))
+      document.documentElement.classList.remove('dark')
+    }
+    apply(stored as any)
+
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => {
+      const current = (localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null) ?? 'system'
+      if (current === 'system') apply('system')
+    }
+    if (mq.addEventListener) mq.addEventListener('change', onChange)
+    else mq.addListener(onChange)
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange)
+      else mq.removeListener(onChange)
+    }
   }, [])
 
   const [showSessions, setShowSessions] = React.useState(false)
