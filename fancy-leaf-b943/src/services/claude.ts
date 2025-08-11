@@ -39,11 +39,54 @@ class ClaudeService {
   private readonly baseUrl: string;
   private sessionId: string | null = null;
   private wsConnection: WebSocket | null = null;
+  private eventListeners: Map<string, Set<Function>> = new Map();
+  private availableTools: string[] = [];
+  private mcpServers: any[] = [];
 
   constructor() {
     // Use Worker gateway endpoint
     this.baseUrl = import.meta.env.VITE_CLAUDE_GATEWAY_URL || '';
     this.initSession();
+    
+    // Set up event listener for tools info requests
+    this.on('request-tools-info', () => {
+      // Emit current tools state if available
+      if (this.availableTools.length > 0 || this.mcpServers.length > 0) {
+        this.emit('tools-update', {
+          tools: this.availableTools,
+          mcpServers: this.mcpServers
+        });
+      }
+    });
+  }
+
+  // Event emitter methods
+  on(event: string, callback: Function): () => void {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, new Set());
+    }
+    this.eventListeners.get(event)!.add(callback);
+    
+    // Return unsubscribe function
+    return () => {
+      const listeners = this.eventListeners.get(event);
+      if (listeners) {
+        listeners.delete(callback);
+      }
+    };
+  }
+
+  emit(event: string, data?: any): void {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      listeners.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error(`Error in event listener for ${event}:`, error);
+        }
+      });
+    }
   }
 
   private async initSession() {
@@ -203,6 +246,8 @@ class ClaudeService {
     if (isSystemInit(message)) {
       // System initialization
       this.sessionId = message.session_id || this.sessionId;
+      this.availableTools = message.tools || [];
+      this.mcpServers = message.mcp_servers || [];
       
       messagesStore.addMessage({
         type: 'system',
@@ -224,6 +269,13 @@ class ClaudeService {
       if (message.mcp_servers && 'setMcpServers' in sessionStore) {
         (sessionStore as any).setMcpServers(message.mcp_servers);
       }
+      
+      // Emit tools update event for UI components
+      this.emit('tools-update', {
+        tools: this.availableTools,
+        mcpServers: this.mcpServers,
+        model: message.model
+      });
     } else if (isAssistantMessage(message)) {
       // Assistant message with content blocks
       const assistantMsg = message as SDKAssistantMessage;
