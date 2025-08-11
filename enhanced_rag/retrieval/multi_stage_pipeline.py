@@ -4,6 +4,7 @@ Multi-stage retrieval pipeline orchestrating different search strategies
 
 import asyncio
 import logging
+import os
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 # from ..utils.performance_monitor import PerformanceMonitor  # currently unused
@@ -595,6 +596,66 @@ class MultiStageRetriever(Retriever):
         # Sort by fused score
         sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
 
+        # Optional cross-encoder reranking (feature-flagged)
+        try:
+            enable_ce = str(os.getenv("ENHANCED_RAG_ENABLE_CROSS_ENCODER_RERANKER", "")).lower() in ("1", "true", "yes")
+        except Exception:
+            enable_ce = False
+
+        if enable_ce:
+            try:
+                # Prepare candidates from metadata (prefer highlights->content)
+                top_n = min(len(sorted_docs), int(getattr(query, "rerank_top_n", 100)))
+                candidates = []
+                for doc_id, _ in sorted_docs[:top_n]:
+                    meta = self._candidate_metadata.get(doc_id, {}) if hasattr(self, "_candidate_metadata") else {}
+                    text = None
+                    try:
+                        hl = meta.get("highlights")
+                        if isinstance(hl, dict):
+                            content_hl = hl.get("content")
+                            if isinstance(content_hl, list) and content_hl:
+                                text = " ... ".join([str(x) for x in content_hl])[:2000]
+                    except Exception:
+                        text = None
+                    if not text:
+                        text = str(meta.get("content") or "")
+                    candidates.append((doc_id, text))
+
+                # Lazy import and score
+                try:
+                    from enhanced_rag.ranking.cross_encoder_reranker import CrossEncoderReranker  # type: ignore
+                    model_name = os.getenv("ENHANCED_RAG_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+                    batch_size = int(os.getenv("ENHANCED_RAG_RERANKER_BATCH", "32"))
+                    reranker = CrossEncoderReranker(model_name=model_name, batch_size=batch_size)
+                    # async scoring to avoid blocking the loop
+                    ce_scores = await reranker.async_score(query.query, candidates)
+                except Exception as ce_err:
+                    logger.warning(f"Cross-encoder reranker unavailable or failed: {ce_err}")
+                    ce_scores = {}
+
+                # Persist CE scores for downstream ranker and optionally re-rank
+                if ce_scores:
+                    # write into candidate metadata for later attachment
+                    for doc_id, s in ce_scores.items():
+                        try:
+                            meta = self._candidate_metadata.setdefault(doc_id, {})
+                            meta["cross_encoder_score"] = float(s)
+                        except Exception:
+                            pass
+
+                    # Partial re-rank: primarily by CE score (if present), fallback to fused score
+                    def _sort_key(item):
+                        doc_id, fused = item
+                        ce = ce_scores.get(doc_id)
+                        # Two-level: items with CE score rank above those without
+                        return (1, ce) if ce is not None else (0, fused)
+
+                    sorted_docs = sorted(sorted_docs, key=_sort_key, reverse=True)
+
+            except Exception as e:
+                logger.debug(f"Cross-encoder rerank pass skipped: {e}")
+
         # Convert to SearchResult objects
         final_results = []
         top_k = getattr(query, 'top_k', 20)
@@ -609,7 +670,7 @@ class MultiStageRetriever(Retriever):
                 # Enrich with stage-captured metadata (content, highlights, original scores)
                 meta = self._candidate_metadata.get(doc_id, {})
 
-                # Preserve original BM25 / semantic / vector scores for downstream use and display
+                # Preserve original BM25 / semantic / vector / cross-encoder scores for downstream use and display
                 if 'bm25_score' in meta:
                     try:
                         setattr(result, 'bm25_score', float(meta['bm25_score']))
@@ -625,6 +686,11 @@ class MultiStageRetriever(Retriever):
                         setattr(result, 'vector_score', float(meta['vector_score']))
                     except Exception:
                         setattr(result, 'vector_score', meta['vector_score'])
+                if 'cross_encoder_score' in meta:
+                    try:
+                        setattr(result, 'cross_encoder_score', float(meta['cross_encoder_score']))
+                    except Exception:
+                        setattr(result, 'cross_encoder_score', meta['cross_encoder_score'])
 
                 # Original search score used for tie-breaking in ranker
                 # Prioritize: bm25_score > semantic_score > vector_score > fused_score

@@ -26,6 +26,27 @@ export interface Env {
   ACCESS_JWT_SECRET?: string;
 }
 
+/**
+ * User context for permissions
+ */
+interface UserContext {
+  role: 'admin' | 'developer' | 'viewer' | 'default';
+  organization?: string;
+  allowedRepositories?: string[];
+  userId?: string;
+  email?: string;
+}
+
+/**
+ * Command cache structure
+ */
+interface CommandCache {
+  commands: any[];
+  tools: string[];
+  timestamp: number;
+  ttl: number;
+}
+
 // Session Durable Object for coordination
 export class SessionDO {
   private connections: Set<WebSocket> = new Set();
@@ -108,6 +129,201 @@ export class SessionDO {
   }
 }
 
+/**
+ * Get tool permissions based on user role
+ */
+function getToolPermissions(context: UserContext): string[] {
+  const baseTools = ['Read', 'WebSearch', 'Grep', 'LS', 'Glob'];
+  
+  const rolePermissions: Record<UserContext['role'], string[]> = {
+    admin: [
+      ...baseTools,
+      'Write', 'Edit', 'MultiEdit',
+      'Bash', 'Git',
+      'NotebookEdit', 'TodoWrite',
+      'Task', 'ExitPlanMode'
+    ],
+    developer: [
+      ...baseTools,
+      'Write', 'Edit', 'MultiEdit',
+      'Git', 'TodoWrite',
+      'Task'
+    ],
+    viewer: baseTools,
+    default: [...baseTools, 'Edit']
+  };
+  
+  return rolePermissions[context.role] || rolePermissions.default;
+}
+
+/**
+ * Extract user context from request
+ */
+async function getUserContext(request: Request, env: Env): Promise<UserContext> {
+  // Check for JWT token
+  const auth = request.headers.get('Authorization');
+  if (auth?.startsWith('Bearer ') && env.ACCESS_JWT_SECRET) {
+    try {
+      // In production, verify JWT and extract claims
+      // For now, return default context
+      return { role: 'default' };
+    } catch {
+      // Invalid token
+    }
+  }
+  
+  // Check for session cookie
+  const cookie = request.headers.get('Cookie');
+  if (cookie) {
+    const sid = cookie.match(/sid=([^;]+)/)?.[1];
+    if (sid) {
+      // Look up session in KV
+      const sessionData = await env.sessions_kv.get(`session:${sid}`, { type: 'json' }) as any;
+      if (sessionData?.role) {
+        return {
+          role: sessionData.role,
+          userId: sessionData.userId,
+          email: sessionData.email
+        };
+      }
+    }
+  }
+  
+  // Default context
+  return { role: 'default' };
+}
+
+/**
+ * Get available commands with caching
+ */
+async function getAvailableCommands(env: Env): Promise<CommandCache> {
+  const cacheKey = 'commands_cache';
+  const cached = await env.sessions_kv.get<CommandCache>(cacheKey, { type: 'json' });
+  
+  // Check cache validity (1 hour TTL)
+  if (cached && Date.now() - cached.timestamp < 3600000) {
+    return cached;
+  }
+  
+  // Fetch from bridge
+  const target = (env.BRIDGE_URL || 'http://localhost:8787')
+    .replace(/\/api\/claude\/stream$/, '/api/commands');
+    
+  try {
+    const response = await fetch(target, {
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch commands: ${response.status}`);
+    }
+    
+    const data = await response.json() as any;
+    
+    const cache: CommandCache = {
+      commands: data.commands || [],
+      tools: data.tools || [],
+      timestamp: Date.now(),
+      ttl: 3600000
+    };
+    
+    // Store in KV with TTL
+    await env.sessions_kv.put(cacheKey, JSON.stringify(cache), {
+      expirationTtl: 3600
+    });
+    
+    return cache;
+  } catch (error) {
+    console.error('Failed to fetch commands:', error);
+    
+    // Return minimal defaults on error
+    return {
+      commands: [],
+      tools: ['Read', 'Write', 'Edit'],
+      timestamp: Date.now(),
+      ttl: 60000
+    };
+  }
+}
+
+/**
+ * Sanitize and enforce permissions on request
+ */
+async function enforcePermissions(
+  request: Request,
+  env: Env
+): Promise<any> {
+  const body = await request.json() as any;
+  
+  // Get user context
+  const context = await getUserContext(request, env);
+  
+  // Get allowed tools for this user
+  const allowedTools = getToolPermissions(context);
+  
+  // Filter tools based on permissions
+  if (body.opts?.allowedTools) {
+    body.opts.allowedTools = body.opts.allowedTools.filter(
+      (tool: string) => allowedTools.includes(tool)
+    );
+  } else if (body.opts) {
+    body.opts.allowedTools = allowedTools;
+  } else {
+    body.opts = { allowedTools };
+  }
+  
+  // Add disallowed patterns for safety
+  const disallowedPatterns = [
+    'Bash(rm -rf *)',
+    'Bash(sudo *)',
+    'Bash(chmod 777 *)',
+    'Edit(.env)',
+    'Write(.env)',
+    'Edit(**/.env)',
+    'Write(**/.env)',
+    'Edit(**/secrets/*)',
+    'Write(**/secrets/*)'
+  ];
+  
+  if (!body.opts.disallowedTools) {
+    body.opts.disallowedTools = disallowedPatterns;
+  } else {
+    body.opts.disallowedTools = [
+      ...body.opts.disallowedTools,
+      ...disallowedPatterns
+    ];
+  }
+  
+  // Sanitize input text
+  if (body.text && typeof body.text === 'string') {
+    body.text = sanitizeInput(body.text);
+  }
+  
+  return body;
+}
+
+/**
+ * Sanitize user input
+ */
+function sanitizeInput(input: string): string {
+  // Remove potential command injection attempts
+  const dangerous = [
+    /\$\(.*?\)/g,  // Command substitution
+    /`.*?`/g,      // Backticks
+    /;\s*rm\s+-rf/g, // Dangerous rm commands
+    /\|\|\s*rm/g,   // OR with rm
+    /&&\s*rm/g      // AND with rm
+  ];
+  
+  let sanitized = input;
+  for (const pattern of dangerous) {
+    sanitized = sanitized.replace(pattern, '[SANITIZED]');
+  }
+  
+  // Truncate to reasonable length
+  return sanitized.slice(0, 10000);
+}
+
 // Main Worker
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -131,6 +347,31 @@ export default {
       switch (url.pathname) {
         case '/api/claude/stream':
           return await this.handleClaudeStream(request, env, ctx, corsHeaders);
+        case '/api/query':
+          // Alias to the same SSE handler to match bridge compatibility
+          return await this.handleClaudeStream(request, env, ctx, corsHeaders);
+        case '/api/commands': {
+          // Get cached commands or fetch from bridge
+          const commandCache = await getAvailableCommands(env);
+          
+          // Get user context to filter based on permissions
+          const context = await getUserContext(request, env);
+          const allowedTools = getToolPermissions(context);
+          
+          // Filter tools based on user permissions
+          const filteredTools = commandCache.tools.filter(
+            tool => allowedTools.includes(tool)
+          );
+          
+          return new Response(JSON.stringify({
+            commands: commandCache.commands,
+            tools: filteredTools,
+            timestamp: commandCache.timestamp,
+            userRole: context.role
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
           
         case '/api/session/create':
           return await this.createSession(request, env, corsHeaders);
@@ -176,7 +417,8 @@ export default {
     ctx: ExecutionContext,
     corsHeaders: Record<string, string>
   ): Promise<Response> {
-    const body = await request.json();
+    // Enforce permissions and sanitize input
+    const body = await enforcePermissions(request.clone(), env);
     const sessionId = body.sessionId || crypto.randomUUID();
     
     // Get or create session DO

@@ -23,16 +23,32 @@ export type SDKMessage =
     }
   | {
       type: 'assistant'
+      // Optional id from SDK assistant message
+      id?: string
+      // Assistant text or content blocks
       content: string | ContentBlock[]
+      // Optional tool call ids associated with this message
+      toolCalls?: string[]
+      // Model and usage metadata (optional)
+      model?: string
+      usage?: {
+        input_tokens: number
+        output_tokens: number
+        cache_creation_input_tokens?: number
+        cache_read_input_tokens?: number
+      }
+      stop_reason?: string
     }
   | {
       type: 'result'
-      subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'interrupted'
+      subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'interrupted' | 'error_invalid_request'
       session_id?: string
       duration_ms?: number
       duration_api_ms?: number
       num_turns?: number
       total_cost_usd?: number
+      is_error?: boolean
+      result?: string
       error?: string
       stderr?: string
       exit_code?: number

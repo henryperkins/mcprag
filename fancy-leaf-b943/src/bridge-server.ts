@@ -6,8 +6,9 @@
 
 import express from 'express';
 import cors from 'cors';
-import { spawn } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-code';
+import { randomUUID } from 'node:crypto';
 
 const app = express();
 app.use(cors());
@@ -26,6 +27,57 @@ interface ExecRequest {
     systemPrompt?: string;
   };
 }
+
+/**
+ * Persistent CLI session management
+ */
+interface CLISession {
+  id: string;
+  process: ChildProcess;
+  lastActivity: number;
+  buffer: string;
+  messageCount: number;
+  created: number;
+  metadata?: {
+    model?: string;
+    tools?: string[];
+    cwd?: string;
+  };
+}
+
+// Store for active CLI sessions
+const cliSessions = new Map<string, CLISession>();
+
+// Session timeout (5 minutes)
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Cleanup interval (1 minute)
+const CLEANUP_INTERVAL_MS = 60 * 1000;
+
+// Maximum sessions per process
+const MAX_SESSIONS = parseInt(process.env.MAX_SESSIONS || '50');
+
+/**
+ * Cleanup idle sessions periodically
+ */
+setInterval(() => {
+  const now = Date.now();
+  const toDelete: string[] = [];
+  
+  for (const [id, session] of cliSessions) {
+    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+      console.log(`Cleaning up idle session: ${id}`);
+      session.process.kill('SIGTERM');
+      toDelete.push(id);
+    }
+  }
+  
+  toDelete.forEach(id => cliSessions.delete(id));
+  
+  if (cliSessions.size > 0) {
+    console.log(`Active sessions: ${cliSessions.size}/${MAX_SESSIONS}`);
+  }
+}, CLEANUP_INTERVAL_MS);
 
 /**
  * Determine if we should use CLI vs SDK
@@ -85,10 +137,178 @@ app.post('/exec', async (req, res) => {
 });
 
 /**
- * Handle CLI execution with JSON streaming
+ * Handle CLI execution with persistent sessions
  */
 async function handleCLI(
   text: string, 
+  opts: ExecRequest['opts'] & { allowedTools: string[]; cwd: string },
+  res: express.Response
+) {
+  // Use existing session or create new one
+  const sessionId = opts?.sessionId || randomUUID();
+  const isPersistent = opts?.continueSession === true;
+  
+  if (isPersistent) {
+    // Use persistent streaming session
+    await handleStreamingCLI(sessionId, text, opts, res);
+  } else {
+    // Use one-shot CLI execution (original behavior)
+    await handleOneshotCLI(text, opts, res);
+  }
+}
+
+/**
+ * Handle persistent streaming CLI session
+ */
+async function handleStreamingCLI(
+  sessionId: string,
+  text: string,
+  opts: ExecRequest['opts'] & { allowedTools: string[]; cwd: string },
+  res: express.Response
+) {
+  // Check if we've hit session limit
+  if (cliSessions.size >= MAX_SESSIONS && !cliSessions.has(sessionId)) {
+    res.write(`event: error\n`);
+    res.write(`data: ${JSON.stringify({ 
+      error: 'Maximum sessions reached. Please try again later.' 
+    })}\n\n`);
+    res.end();
+    return;
+  }
+  
+  let session = cliSessions.get(sessionId);
+  
+  if (!session) {
+    // Create new persistent session
+    console.log(`Creating new streaming session: ${sessionId}`);
+    
+    const proc = spawn('claude', [
+      '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
+      '--allowedTools', opts.allowedTools.join(','),
+      '--cwd', opts.cwd,
+      '--verbose',
+      ...(opts.permissionMode ? ['--permission-mode', opts.permissionMode] : [])
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: opts.cwd,
+      env: {
+        ...process.env,
+        CLAUDE_OUTPUT_FORMAT: 'stream-json',
+        CLAUDE_INPUT_FORMAT: 'stream-json',
+      }
+    });
+    
+    session = {
+      id: sessionId,
+      process: proc,
+      lastActivity: Date.now(),
+      buffer: '',
+      messageCount: 0,
+      created: Date.now(),
+      metadata: {
+        tools: opts.allowedTools,
+        cwd: opts.cwd
+      }
+    };
+    
+    cliSessions.set(sessionId, session);
+    
+    // Set up output streaming
+    proc.stdout.on('data', (chunk: Buffer) => {
+      const s = cliSessions.get(sessionId);
+      if (!s) return;
+      
+      s.buffer += chunk.toString();
+      const lines = s.buffer.split('\n');
+      s.buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const message = JSON.parse(line);
+            s.messageCount++;
+            
+            // Enrich message with session info
+            const enriched = {
+              ...message,
+              session_id: sessionId,
+              message_index: s.messageCount
+            };
+            
+            res.write(`event: message\n`);
+            res.write(`data: ${JSON.stringify(enriched)}\n\n`);
+          } catch (e) {
+            console.error('Failed to parse JSON:', line);
+            res.write(`event: text\n`);
+            res.write(`data: ${JSON.stringify({ content: line })}\n\n`);
+          }
+        }
+      }
+    });
+    
+    proc.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      console.error(`Session ${sessionId} stderr:`, text);
+      res.write(`event: log\n`);
+      res.write(`data: ${JSON.stringify({ stderr: text, session_id: sessionId })}\n\n`);
+    });
+    
+    proc.on('exit', (code) => {
+      console.log(`Session ${sessionId} process exited with code ${code}`);
+      cliSessions.delete(sessionId);
+      
+      // Flush remaining buffer
+      if (session && session.buffer.trim()) {
+        try {
+          const message = JSON.parse(session.buffer);
+          res.write(`event: message\n`);
+          res.write(`data: ${JSON.stringify({ ...message, session_id: sessionId })}\n\n`);
+        } catch {
+          res.write(`event: text\n`);
+          res.write(`data: ${JSON.stringify({ content: session.buffer })}\n\n`);
+        }
+      }
+      
+      res.write(`event: session_ended\n`);
+      res.write(`data: ${JSON.stringify({ session_id: sessionId, code })}\n\n`);
+      res.end();
+    });
+    
+    proc.on('error', (err) => {
+      console.error(`Session ${sessionId} error:`, err);
+      cliSessions.delete(sessionId);
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ error: err.message, session_id: sessionId })}\n\n`);
+      res.end();
+    });
+  }
+  
+  // Send user message as JSONL
+  const userMessage = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text }]
+    }
+  };
+  
+  console.log(`Sending message to session ${sessionId}:`, userMessage);
+  
+  session.process.stdin?.write(JSON.stringify(userMessage) + '\n');
+  session.lastActivity = Date.now();
+  
+  // Don't end response - keep connection open for streaming
+  res.on('close', () => {
+    console.log(`Client disconnected from session ${sessionId}`);
+  });
+}
+
+/**
+ * Handle one-shot CLI execution (original behavior)
+ */
+async function handleOneshotCLI(
+  text: string,
   opts: ExecRequest['opts'] & { allowedTools: string[]; cwd: string },
   res: express.Response
 ) {
@@ -101,12 +321,8 @@ async function handleCLI(
   ];
   
   // Add session management
-  if (opts?.sessionId) {
-    if (opts?.continueSession) {
-      args.push('--continue');
-    } else {
-      args.push('--resume', opts.sessionId);
-    }
+  if (opts?.sessionId && !opts?.continueSession) {
+    args.push('--resume', opts.sessionId);
   }
   
   // Add permission mode
@@ -119,7 +335,7 @@ async function handleCLI(
     args.push('--max-turns', String(opts.maxTurns));
   }
   
-  console.log('Executing CLI:', 'claude', args.join(' '));
+  console.log('Executing one-shot CLI:', 'claude', args.join(' '));
   
   const child = spawn('claude', args, {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -291,18 +507,106 @@ app.get('/health', (_req, res) => {
  * Session management endpoints
  */
 app.get('/sessions', async (_req, res) => {
-  // List available sessions (from ~/.claude or configured directory)
+  const sessions = Array.from(cliSessions.entries()).map(([id, session]) => ({
+    id,
+    created: session.created,
+    lastActivity: session.lastActivity,
+    messageCount: session.messageCount,
+    metadata: session.metadata,
+    active: true,
+    age: Date.now() - session.created,
+    idle: Date.now() - session.lastActivity
+  }));
+  
   res.json({ 
-    sessions: [],
-    message: 'Session listing not implemented yet' 
+    sessions,
+    total: sessions.length,
+    maxSessions: MAX_SESSIONS,
+    sessionTimeout: SESSION_TIMEOUT_MS
   });
 });
 
-app.delete('/sessions/:id', async (_req, res) => {
-  // Clean up a session
-  res.json({ 
-    success: false,
-    message: 'Session cleanup not implemented yet' 
+app.get('/sessions/:id', async (req, res) => {
+  const session = cliSessions.get(req.params.id);
+  
+  if (!session) {
+    res.status(404).json({ 
+      error: 'Session not found',
+      sessionId: req.params.id 
+    });
+    return;
+  }
+  
+  res.json({
+    id: session.id,
+    created: session.created,
+    lastActivity: session.lastActivity,
+    messageCount: session.messageCount,
+    metadata: session.metadata,
+    active: true,
+    age: Date.now() - session.created,
+    idle: Date.now() - session.lastActivity
+  });
+});
+
+app.delete('/sessions/:id', async (req, res) => {
+  const session = cliSessions.get(req.params.id);
+  
+  if (!session) {
+    res.status(404).json({ 
+      success: false,
+      message: 'Session not found' 
+    });
+    return;
+  }
+  
+  try {
+    session.process.kill('SIGTERM');
+    cliSessions.delete(req.params.id);
+    
+    res.json({ 
+      success: true,
+      message: 'Session terminated',
+      sessionId: req.params.id
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to terminate session',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * Command discovery endpoint
+ */
+app.get('/api/commands', async (_req, res) => {
+  // Return available slash commands and tools
+  const commands = [
+    { name: '/help', description: 'Show help information', category: 'builtin' },
+    { name: '/status', description: 'Show current status', category: 'builtin' },
+    { name: '/compact', description: 'Toggle compact mode', category: 'builtin' },
+    { name: '/clear', description: 'Clear conversation', category: 'builtin' },
+    { name: '/agents', description: 'List available agents', category: 'builtin' },
+    { name: '/model', description: 'Switch model', category: 'builtin' },
+    { name: '/continue', description: 'Continue last session', category: 'builtin' },
+    { name: '/resume', description: 'Resume specific session', category: 'builtin' },
+    { name: '/settings', description: 'Show settings', category: 'builtin' },
+    { name: '/history', description: 'Show command history', category: 'builtin' },
+    { name: '/export', description: 'Export conversation', category: 'builtin' }
+  ];
+  
+  const tools = [
+    'Read', 'Write', 'Edit', 'MultiEdit',
+    'Grep', 'LS', 'Glob', 'WebSearch',
+    'Bash', 'Git', 'NotebookEdit', 'TodoWrite'
+  ];
+  
+  res.json({
+    commands,
+    tools,
+    timestamp: Date.now()
   });
 });
 

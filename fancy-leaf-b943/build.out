@@ -1,0 +1,37 @@
+
+> fancy-leaf-b943@0.0.0 build
+> tsc -b && vite build
+
+src/components.backup/Terminal.tsx(171,57): error TS2339: Property 'content' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(172,53): error TS2339: Property 'content' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(177,27): error TS2339: Property 'content' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(178,42): error TS2339: Property 'content' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(182,18): error TS2678: Type '"tool-call"' is not comparable to type '"user" | "assistant" | "system" | "result"'.
+src/components.backup/Terminal.tsx(183,27): error TS2339: Property 'toolName' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(184,71): error TS2339: Property 'toolName' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(185,29): error TS2339: Property 'toolArguments' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(186,58): error TS2339: Property 'toolArguments' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(192,18): error TS2678: Type '"tool-output"' is not comparable to type '"user" | "assistant" | "system" | "result"'.
+src/components.backup/Terminal.tsx(193,27): error TS2339: Property 'toolResult' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(194,50): error TS2339: Property 'toolResult' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(195,29): error TS2339: Property 'toolResult' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(196,44): error TS2339: Property 'toolResult' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(202,27): error TS2339: Property 'content' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(203,47): error TS2339: Property 'content' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(205,27): error TS2339: Property 'duration_ms' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(205,50): error TS2339: Property 'total_cost_usd' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(207,29): error TS2339: Property 'duration_ms' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(207,64): error TS2339: Property 'duration_ms' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(208,29): error TS2339: Property 'total_cost_usd' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(208,68): error TS2339: Property 'total_cost_usd' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(209,29): error TS2339: Property 'num_turns' does not exist on type 'SDKMessage'.
+src/components.backup/Terminal.tsx(209,62): error TS2339: Property 'num_turns' does not exist on type 'SDKMessage'.
+src/services/claude.ts(6,8): error TS6133: 'SDKSystemInit' is declared but its value is never read.
+src/services/claude.ts(258,11): error TS2353: Object literal may only specify known properties, and 'id' does not exist in type '{ type: "assistant"; content: string | ContentBlock[]; }'.
+src/services/claude.ts(290,9): error TS2322: Type '"success" | "error_max_turns" | "error_during_execution" | "error_invalid_request"' is not assignable to type '"success" | "error_max_turns" | "error_during_execution" | "interrupted"'.
+  Type '"error_invalid_request"' is not assignable to type '"success" | "error_max_turns" | "error_during_execution" | "interrupted"'.
+src/services/claude.ts(321,45): error TS6133: 'options' is declared but its value is never read.
+src/worker-gateway.ts(181,71): error TS2554: Expected 1 arguments, but got 2.
+src/worker-gateway.ts(201,44): error TS2558: Expected 0 type arguments, but got 1.
+src/worker-gateway.ts(204,37): error TS2339: Property 'timestamp' does not exist on type 'string'.
+src/worker-gateway.ts(205,5): error TS2322: Type 'string' is not assignable to type 'CommandCache'.

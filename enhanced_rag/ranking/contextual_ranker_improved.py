@@ -181,12 +181,20 @@ class ImprovedContextualRanker(Ranker):
         }
         
         for result in results:
-            # Text relevance bounds
-            if hasattr(result, 'score'):
-                bounds['text_relevance'] = (
-                    min(bounds['text_relevance'][0], result.score),
-                    max(bounds['text_relevance'][1], result.score)
-                )
+            # Text relevance bounds (prefer bm25_score or _original_score if available to match factor input)
+            try:
+                base_val = getattr(result, 'bm25_score', None)
+                if base_val is None:
+                    base_val = getattr(result, '_original_score', None)
+                if base_val is None:
+                    base_val = getattr(result, 'score', 0.0)
+                base_f = float(base_val)
+            except Exception:
+                base_f = getattr(result, 'score', 0.0)
+            bounds['text_relevance'] = (
+                min(bounds['text_relevance'][0], base_f),
+                max(bounds['text_relevance'][1], base_f)
+            )
             
             # Recency bounds (convert to timestamp)
             if result.last_modified:
@@ -237,9 +245,16 @@ class ImprovedContextualRanker(Ranker):
         # Store original score for tie-breaking
         result._original_score = result.score
 
-        # Text relevance (normalized from search engine score)
+        # Text relevance (normalized from original search engine score; prefer BM25 if present)
+        try:
+            orig_score = getattr(result, 'bm25_score', None)
+            if orig_score is None:
+                orig_score = getattr(result, '_original_score', result.score)
+            base_val = float(orig_score) if isinstance(orig_score, (int, float)) else result.score
+        except Exception:
+            base_val = result.score
         text_score = self._normalize_factor(
-            result.score,
+            base_val,
             normalization_bounds['text_relevance'][0],
             normalization_bounds['text_relevance'][1]
         )
@@ -291,23 +306,51 @@ class ImprovedContextualRanker(Ranker):
         context: EnhancedContext
     ) -> ValidatedFactor:
         """Calculate semantic similarity with fallback strategies"""
-        # Primary: Use vector score if available
-        if hasattr(result, 'vector_score') and result.vector_score is not None:
+        # 1) Cross-encoder reranker score (if available)
+        if hasattr(result, 'cross_encoder_score') and result.cross_encoder_score is not None:
+            try:
+                val = float(result.cross_encoder_score)
+            except Exception:
+                val = result.cross_encoder_score
             return ValidatedFactor(
-                self._normalize_factor(result.vector_score),
+                self._normalize_factor(val),
                 1.0,
+                "cross_encoder"
+            )
+
+        # 2) Azure semantic reranker score (if available)
+        if hasattr(result, 'semantic_score') and result.semantic_score is not None:
+            try:
+                val = float(result.semantic_score)
+            except Exception:
+                val = result.semantic_score
+            return ValidatedFactor(
+                self._normalize_factor(val),
+                0.9,
+                "azure_reranker"
+            )
+
+        # 3) Vector similarity (dense embeddings)
+        if hasattr(result, 'vector_score') and result.vector_score is not None:
+            try:
+                val = float(result.vector_score)
+            except Exception:
+                val = result.vector_score
+            return ValidatedFactor(
+                self._normalize_factor(val),
+                0.8,
                 "vector_embeddings"
             )
-        
-        # Fallback: Keyword overlap
+
+        # 4) Fallback: Keyword overlap
         if hasattr(context, 'query'):
             keywords = self._extract_keywords(result.code_snippet)
             query_keywords = self._extract_keywords(context.query)
-            
+
             if keywords and query_keywords:
                 overlap = len(keywords & query_keywords) / len(keywords | query_keywords)
                 return ValidatedFactor(overlap, 0.6, "keyword_overlap")
-        
+
         # Final fallback
         return ValidatedFactor(0.0, 0.3, "no_data")
 

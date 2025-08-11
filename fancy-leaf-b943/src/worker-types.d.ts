@@ -33,7 +33,12 @@ declare global {
   }
 
   interface KVNamespace {
+    // Basic get returning text
     get(key: string): Promise<string | null>;
+    // Get with explicit type options
+    get(key: string, options: { type: 'text' }): Promise<string | null>;
+    get<T = unknown>(key: string, options: { type: 'json' }): Promise<T | null>;
+    get(key: string, options: { type: 'arrayBuffer' }): Promise<ArrayBuffer | null>;
     put(key: string, value: string, options?: { expiration?: number; expirationTtl?: number; metadata?: any }): Promise<void>;
     delete(key: string): Promise<void>;
     list(options?: { prefix?: string }): Promise<{ keys: { name: string }[] }>;

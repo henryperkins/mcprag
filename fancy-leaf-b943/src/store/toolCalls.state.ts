@@ -26,6 +26,7 @@ type ToolCallStore = {
   ribbonCount: number
   
   startTool: (call: Omit<ToolCallState, 'startedAt' | 'status'>) => void
+  addToolCall: (tool: { id: string; name: string; arguments?: any; status: string; timestamp: number }) => void
   updateProgress: (callId: string, patch: Partial<ToolCallState>) => void
   finishTool: (callId: string, success: boolean, body?: string) => void
   pushToast: (toast: Omit<Toast, 'id'>) => void
@@ -56,6 +57,22 @@ export const useToolCalls = create<ToolCallStore>((set, get) => ({
       body: call.args ? JSON.stringify(call.args, null, 2).slice(0, 100) : undefined,
       duration: 3000,
     })
+  },
+
+  addToolCall: (tool) => {
+    // Adapter method to match SDK message format
+    const toolCall: ToolCallState = {
+      callId: tool.id,
+      name: tool.name,
+      args: tool.arguments,
+      startedAt: tool.timestamp || Date.now(),
+      status: tool.status === 'pending' ? 'running' : 'running',
+    }
+    
+    set((state) => ({
+      active: { ...state.active, [tool.id]: toolCall },
+      ribbonCount: state.ribbonCount + 1,
+    }))
   },
 
   updateProgress: (callId, patch) => {

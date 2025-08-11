@@ -70,12 +70,6 @@
 			},
 			"routes": [
 				{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
-			],
-			// Bind Secrets Store secrets for production environment as well
-			"secrets_store_secrets": [
-			  { "binding": "ANTHROPIC_API_KEY", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ANTHROPIC_API_KEY" },
-			  { "binding": "TURNSTILE_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "TURNSTILE_SECRET" },
-			  { "binding": "ACCESS_JWT_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ACCESS_JWT_SECRET" }
 			]
 		}
 	},
@@ -113,17 +107,9 @@
 	"queues": {
 	  "producers": [
 	    { "binding": "JOBS", "queue": "claude-code-jobs" }
-	  ],
-	  "consumers": [
-	    { "queue": "claude-code-jobs" }
 	  ]
 	},
-	// Bind org-level Secrets Store secrets to this Worker
-	"secrets_store_secrets": [
-	  { "binding": "ANTHROPIC_API_KEY", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ANTHROPIC_API_KEY" },
-	  { "binding": "TURNSTILE_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "TURNSTILE_SECRET" },
-	  { "binding": "ACCESS_JWT_SECRET", "store_id": "18af881cb87f4ee289a7937973a8c8bc", "secret_name": "ACCESS_JWT_SECRET" }
-	],
+	// Secrets: set per-service with `wrangler secret put <NAME>` for each environment as needed.
 	/**
 	 * Secrets handling
 	 * - Do NOT declare secrets in wrangler.jsonc (unsupported and insecure)

@@ -1,27 +1,22 @@
 import { useMessages } from '../store/messages.state';
 import { useToolCalls } from '../store/toolCalls.state';
+import { useSession } from '../store/session.state';
+import {
+  type SDKMessage,
+  type SDKAssistantMessage,
+  type SDKUserMessage,
+  type SDKResultMessage,
+  type ToolCall,
+  isSystemInit,
+  isAssistantMessage,
+  isUserMessage,
+  isResultMessage,
+  isToolUse,
+  isTextContent
+} from '../types/sdk-messages';
 
-export interface ClaudeMessage {
-  type: 'system' | 'assistant' | 'user' | 'result' | 'tool-call' | 'tool-output';
-  subtype?: string;
-  content?: string;
-  error?: string;
-  session_id?: string;
-  model?: string;
-  cwd?: string;
-  tools?: string[];
-  mcp_servers?: string[];
-  permissionMode?: string;
-  num_turns?: number;
-  duration_ms?: number;
-  duration_api_ms?: number;
-  total_cost_usd?: number;
-  toolName?: string;
-  toolArguments?: unknown;
-  toolId?: string;
-  toolResult?: unknown;
-  [key: string]: unknown;
-}
+// Re-export the message types for backward compatibility
+export type ClaudeMessage = SDKMessage;
 
 export interface ClaudeOptions {
   sessionId?: string;
@@ -196,94 +191,165 @@ class ClaudeService {
     }
   }
 
-  private handleMessage(message: ClaudeMessage, options: ClaudeOptions) {
+  private handleMessage(message: SDKMessage, options: ClaudeOptions) {
     // Call the custom handler if provided
     options.onMessage?.(message);
 
     // Update stores based on message type
     const messagesStore = useMessages.getState();
     const toolCallsStore = useToolCalls.getState();
+    const sessionStore = useSession.getState();
 
-    switch (message.type) {
-      case 'system':
-        if (message.subtype === 'init') {
-          // Store session info in messages
-          messagesStore.addMessage({
-            type: 'system',
-            subtype: 'init',
-            model: message.model || '',
-            cwd: message.cwd || '',
-            tools: message.tools || [],
-            mcp_servers: message.mcp_servers as { name: string; status: string; }[] | undefined,
-            permissionMode: message.permissionMode || '',
-            session_id: message.session_id,
-          });
-        }
-        break;
-
-      case 'assistant':
-        // Add assistant message
-        if (message.content) {
-          messagesStore.addMessage({
-            type: 'assistant',
-            content: message.content,
-          });
-        }
-        break;
-
-      case 'tool-call':
-        // Track tool call in messages
-        if (message.toolName && message.toolId) {
-          messagesStore.addMessage({
-            type: 'tool_call',
-            call_id: message.toolId,
-            name: message.toolName,
-            arguments: message.toolArguments,
-          });
+    if (isSystemInit(message)) {
+      // System initialization
+      this.sessionId = message.session_id || this.sessionId;
+      
+      messagesStore.addMessage({
+        type: 'system',
+        subtype: 'init',
+        model: message.model,
+        cwd: message.cwd,
+        tools: message.tools,
+        mcp_servers: message.mcp_servers,
+        permissionMode: message.permissionMode,
+        session_id: message.session_id,
+      });
+      
+      // Update session store with available tools
+      if ('setAvailableTools' in sessionStore) {
+        (sessionStore as any).setAvailableTools(message.tools);
+      }
+      
+      // Store MCP servers if available
+      if (message.mcp_servers && 'setMcpServers' in sessionStore) {
+        (sessionStore as any).setMcpServers(message.mcp_servers);
+      }
+    } else if (isAssistantMessage(message)) {
+      // Assistant message with content blocks
+      const assistantMsg = message as SDKAssistantMessage;
+      let textContent = '';
+      const toolCalls: ToolCall[] = [];
+      
+      for (const block of assistantMsg.message.content || []) {
+        if (isTextContent(block)) {
+          textContent += block.text;
+        } else if (isToolUse(block)) {
+          const toolCall: ToolCall = {
+            id: block.id,
+            name: block.name,
+            arguments: block.input,
+            status: 'pending',
+            timestamp: Date.now()
+          };
           
-          // Also update tool calls store if it has the right methods
-          if ('addCall' in toolCallsStore) {
-            (toolCallsStore as Record<string, CallableFunction>).addCall({
-              id: message.toolId,
-              name: message.toolName,
-              arguments: message.toolArguments,
-            });
+          toolCalls.push(toolCall);
+          
+          // Add to tool calls store - use startTool instead of addToolCall
+          if ('startTool' in toolCallsStore) {
+            (toolCallsStore as any).startTool(block.name, block.id);
           }
         }
-        break;
-
-      case 'tool-output':
-        // Update tool call result
-        if (message.toolId) {
-          messagesStore.addMessage({
-            type: 'tool_result',
-            call_id: message.toolId,
-            content: message.toolResult,
-            is_error: false,
-          });
-          
-          // Also update tool calls store if it has the right methods
-          if ('updateCall' in toolCallsStore) {
-            (toolCallsStore as Record<string, CallableFunction>).updateCall(message.toolId, {
-              result: message.toolResult,
-            });
-          }
-        }
-        break;
-
-      case 'result':
-        // Final result message
+      }
+      
+      // Add message to store
+      if (textContent || toolCalls.length > 0) {
         messagesStore.addMessage({
-          type: 'result',
-          subtype: message.error ? 'error_during_execution' : 'success',
-          session_id: message.session_id,
-          duration_ms: message.duration_ms,
-          duration_api_ms: message.duration_api_ms,
-          num_turns: message.num_turns,
-          total_cost_usd: message.total_cost_usd,
-          error: message.error,
+          id: assistantMsg.message.id,
+          type: 'assistant',
+          content: textContent,
+          toolCalls: toolCalls.map(tc => tc.id),
+          model: assistantMsg.message.model,
+          usage: assistantMsg.message.usage,
+          stop_reason: assistantMsg.message.stop_reason,
         });
-        break;
+      }
+    } else if (isUserMessage(message)) {
+      // User message
+      const userMsg = message as SDKUserMessage;
+      let textContent = '';
+      
+      for (const block of userMsg.message.content || []) {
+        if (isTextContent(block)) {
+          textContent += block.text;
+        }
+      }
+      
+      if (textContent) {
+        messagesStore.addMessage({
+          type: 'user',
+          content: textContent,
+        });
+      }
+    } else if (isResultMessage(message)) {
+      // Result message - session complete
+      const resultMsg = message as SDKResultMessage;
+      
+      messagesStore.addMessage({
+        type: 'result',
+        subtype: resultMsg.subtype,
+        session_id: resultMsg.session_id,
+        duration_ms: resultMsg.duration_ms,
+        duration_api_ms: resultMsg.duration_api_ms,
+        num_turns: resultMsg.num_turns,
+        total_cost_usd: resultMsg.total_cost_usd,
+        is_error: resultMsg.is_error,
+        error: resultMsg.error_message,
+        result: resultMsg.result,
+      });
+      
+      // Update session metadata
+      if ('updateSessionMetadata' in sessionStore) {
+        (sessionStore as any).updateSessionMetadata({
+          id: resultMsg.session_id,
+          totalCost: resultMsg.total_cost_usd,
+          totalDuration: resultMsg.duration_ms,
+          lastActivity: Date.now()
+        });
+      }
+      
+      // Mark session as complete
+      if (resultMsg.subtype === 'success') {
+        this.sessionId = null; // Reset for next session
+      }
+    } else {
+      // Handle legacy message formats for backward compatibility
+      this.handleLegacyMessage(message);
+    }
+  }
+  
+  private handleLegacyMessage(message: any) {
+    const messagesStore = useMessages.getState();
+    const toolCallsStore = useToolCalls.getState();
+    
+    // Legacy tool-call and tool-output handling
+    if (message.type === 'tool-call' && message.toolName && message.toolId) {
+      messagesStore.addMessage({
+        type: 'tool_call',
+        call_id: message.toolId,
+        name: message.toolName,
+        arguments: message.toolArguments,
+      });
+      
+      if ('addCall' in toolCallsStore) {
+        (toolCallsStore as any).addCall({
+          id: message.toolId,
+          name: message.toolName,
+          arguments: message.toolArguments,
+        });
+      }
+    } else if (message.type === 'tool-output' && message.toolId) {
+      messagesStore.addMessage({
+        type: 'tool_result',
+        call_id: message.toolId,
+        content: message.toolResult,
+        is_error: false,
+      });
+      
+      if ('updateCall' in toolCallsStore) {
+        (toolCallsStore as any).updateCall(message.toolId, {
+          result: message.toolResult,
+        });
+      }
     }
   }
 

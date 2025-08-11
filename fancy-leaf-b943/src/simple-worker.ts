@@ -14,7 +14,6 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    
     // CORS headers
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
@@ -27,6 +26,17 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
     
+    // Command discovery proxy
+    if (url.pathname === '/api/commands' && request.method === 'GET') {
+      const target = (env.BRIDGE_URL || 'http://localhost:8787/api/claude/stream')
+        .replace(/\/api\/claude\/stream$/, '/api/commands');
+      const upstream = await fetch(target + url.search, { headers: { 'Accept': 'application/json' } });
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: { ...corsHeaders, 'Content-Type': upstream.headers.get('Content-Type') || 'application/json' },
+      });
+    }
+
     // Health check
     if (url.pathname === '/api/health') {
       return new Response(JSON.stringify({
@@ -39,7 +49,7 @@ export default {
     }
     
     // Main proxy endpoint
-    if (url.pathname === '/api/claude/stream' && request.method === 'POST') {
+    if ((url.pathname === '/api/claude/stream' || url.pathname === '/api/query') && request.method === 'POST') {
       try {
         const body = await request.json();
         
