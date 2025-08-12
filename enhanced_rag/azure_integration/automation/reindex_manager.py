@@ -18,6 +18,7 @@ from .data_manager import DataAutomation
 from .index_manager import IndexAutomation
 from .indexer_manager import IndexerAutomation
 from ..embedding_provider import IEmbeddingProvider
+from ..lib import validate_index_schema as lib_validate_schema
 
 logger = logging.getLogger(__name__)
 
@@ -330,45 +331,8 @@ class ReindexAutomation:
         except Exception as e:
             return {"valid": False, "error": str(e), "issues": [str(e)], "warnings": []}
 
-        issues: List[str] = []
-        warnings_list: List[str] = []
-
-        fields = index.get("fields", [])
-        field_names = {f.get("name") for f in fields}
-        required_fields = {"id", "file_path", "repository", "content"}
-        missing = required_fields - field_names
-        if missing:
-            issues.append(f"Missing required fields: {sorted(missing)}")
-
-        # Vector config checks
-        if index.get("vectorSearch"):
-            vector_fields = [f for f in fields if f.get("dimensions")]
-            if not vector_fields:
-                warnings_list.append("Vector search enabled but no vector fields found")
-            else:
-                try:
-                    from enhanced_rag.core.config import get_config  # type: ignore
-                    expected_dims = getattr(get_config().azure, "embedding_dimensions", 1536)
-                except Exception:
-                    expected_dims = 1536
-                for vf in vector_fields:
-                    if vf.get("name") == "content_vector" and vf.get("dimensions") != expected_dims:
-                        warnings_list.append(
-                            f"content_vector dimensions {vf.get('dimensions')} != expected {expected_dims}"
-                        )
-
-        # Field attribute checks
-        for f in fields:
-            if f.get("name") == "file_path" and not f.get("filterable", False):
-                warnings_list.append("Field 'file_path' should be filterable")
-            if f.get("name") == "repository" and not f.get("facetable", False):
-                warnings_list.append("Field 'repository' should be facetable")
-
-        return {
-            "valid": len(issues) == 0,
-            "issues": issues,
-            "warnings": warnings_list,
-        }
+        # Use shared validation helper
+        return lib_validate_schema(index)
 
     async def _clear_documents(self, index_name: str, filter_query: Optional[str]) -> int:
         """Clear documents by fetching keys and deleting in batches."""

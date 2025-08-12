@@ -5,6 +5,7 @@ cascading failures during upstream outages while keeping tenacity
 retry behavior.
 """
 
+import os
 import httpx
 from typing import Dict, Any, Optional
 import logging
@@ -12,6 +13,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from enhanced_rag.utils.error_handler import _CircuitBreaker, StructuredError, ErrorCode
 
 logger = logging.getLogger(__name__)
+
+# Default API version - can be overridden via environment variable
+DEFAULT_API_VERSION = "2025-08-01-preview"
 
 
 class AzureSearchClient:
@@ -21,7 +25,7 @@ class AzureSearchClient:
         self, 
         endpoint: str, 
         api_key: str, 
-        api_version: str = "2025-05-01-preview",
+        api_version: Optional[str] = None,
         timeout: float = 30.0
     ):
         """Initialize the Azure Search REST client.
@@ -29,12 +33,13 @@ class AzureSearchClient:
         Args:
             endpoint: Azure Search service endpoint
             api_key: Admin API key for authentication
-            api_version: API version to use (default: 2025-05-01-preview)
+            api_version: API version to use (defaults to ACS_API_VERSION env var or DEFAULT_API_VERSION)
             timeout: Request timeout in seconds
         """
         self.endpoint = endpoint.rstrip('/')
         self.api_key = api_key
-        self.api_version = api_version
+        # Use provided version, or env var, or default
+        self.api_version = api_version or os.getenv("ACS_API_VERSION", DEFAULT_API_VERSION)
         self.client = httpx.AsyncClient(
             timeout=timeout,
             headers={

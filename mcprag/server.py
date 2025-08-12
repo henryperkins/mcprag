@@ -5,9 +5,10 @@ Initializes and coordinates enhanced_rag modules for MCP access.
 """
 
 import logging
+import os
 from typing import Dict, Any, Literal, cast
 
-from enhanced_rag.core.unified_config import UnifiedConfig, get_config
+from enhanced_rag.core.config import get_config, validate_config
 from .compatibility.socketpair_patch import apply_patches
 
 # Import what we need from enhanced_rag - separate try/except for each component
@@ -192,9 +193,10 @@ class MCPServer:
         # This allows the server to start and advertise limited functionality
         # (e.g. no search backend) rather than failing to connect entirely.
         config = get_config()
-        errors = config.validate_config()
-        if errors:
-            logger.warning("Configuration issues detected; continuing with degraded features: %s", errors)
+        try:
+            validate_config(config)
+        except ValueError as e:
+            logger.warning("Configuration issues detected; continuing with degraded features: %s", str(e))
 
         # ------------------------------------------------------------------
         # Setup logging
@@ -206,7 +208,8 @@ class MCPServer:
         # abort the server start-up.  To make the server more robust we fall
         # back to INFO when the supplied value is unknown.
 
-        _log_level: str = str(config.mcp_log_level.value or "").upper()
+        # Get log level from either MCP_LOG_LEVEL env var or config.log_level
+        _log_level: str = os.getenv("MCP_LOG_LEVEL", config.log_level).upper()
         _resolved_level = getattr(logging, _log_level, logging.INFO)
 
         # Defensive logging setup: avoid reconfiguring if already configured elsewhere
@@ -217,7 +220,7 @@ class MCPServer:
             if not already_configured:
                 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             logging.getLogger(__name__).warning(
-                "Unknown LOG_LEVEL '%s' – falling back to INFO", config.mcp_log_level
+                "Unknown LOG_LEVEL '%s' – falling back to INFO", _log_level
             )
             root.setLevel(logging.INFO)
         else:
@@ -311,18 +314,17 @@ class MCPServer:
             AZURE_SDK_AVAILABLE
             and AzureKeyCredential is not None
             and SearchClient is not None
-            and isinstance(getattr(Config, "ENDPOINT", None), str)
-            and bool(config.acs_endpoint and config.acs_endpoint.strip())
+            and bool(config.azure.endpoint and config.azure.endpoint.strip())
         ):
-            # Choose key: admin if available, else query (read-only)
-            api_key = (getattr(Config, "ADMIN_KEY", "") or getattr(Config, "QUERY_KEY", "")).strip()
+            # Choose key: admin if available
+            api_key = config.azure.admin_key.strip()
             if api_key:
                 try:
                     # Construct credential only after verifying the symbol is available
                     azure_key_credential = AzureKeyCredential(api_key)  # type: ignore[call-arg]
                     self.search_client = SearchClient(
-                        endpoint=str(config.acs_endpoint),
-                        index_name=str(config.acs_index_name),
+                        endpoint=str(config.azure.endpoint),
+                        index_name=str(config.azure.index_name),
                         credential=azure_key_credential,
                     )  # type: ignore[call-arg]
                 except TypeError as e:

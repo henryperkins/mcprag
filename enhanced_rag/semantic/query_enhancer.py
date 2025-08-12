@@ -12,6 +12,11 @@ from ..core.interfaces import QueryEnhancer
 from ..core.models import CodeContext, SearchIntent
 from ..core.config import get_config
 from .intent_classifier import IntentClassifier
+from .lexicon import (
+    QUERY_ALIASES,
+    VECTOR_EXPANSIONS,
+    LANGUAGE_ENHANCEMENTS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,106 +50,10 @@ class ContextualQueryEnhancer(QueryEnhancer):
     def _initialize_enhancements(self):
         """Initialize enhancement mappings"""
         
-        # Domain-specific query aliases for vector/embedding debugging
-        self.query_aliases = {
-            'vector': ['embedding', 'dense_vector', 'content_vector', 'code_vector', 'text_vector', 'feature_vector'],
-            'embedding': ['vector', 'dense_vector', 'representation', 'encoding'],
-            'issues': ['error', 'exception', 'ValueError', 'IndexError', 'None', 'NaN', 'problem', 'bug'],
-            'problems': ['issues', 'errors', 'exceptions', 'failures', 'bugs'],
-            'search': ['query', 'retrieve', 'find', 'similarity_search', 'vector_search', 'semantic_search'],
-            'index': ['indices', 'search_index', 'vector_index', 'inverted_index'],
-            'dimension': ['dims', 'shape', 'size', 'length', 'dimensionality'],
-            'similarity': ['distance', 'cosine', 'euclidean', 'dot_product', 'similarity_score'],
-        }
-        
-        # Vector-specific semantic expansions
-        self.vector_expansions = {
-            'vector_search': ['similarity_search', 'knn_search', 'nearest_neighbor', 'semantic_search'],
-            'embedding': ['vector_representation', 'dense_embedding', 'feature_encoding'],
-            'vectorizer': ['embedder', 'encoder', 'transformer', 'feature_extractor'],
-            'dimension': ['vector_dimension', 'embedding_size', 'feature_dimension'],
-            'cosine': ['cosine_similarity', 'angular_distance', 'normalized_dot_product'],
-            'euclidean': ['euclidean_distance', 'l2_distance', 'squared_distance'],
-            'hnsw': ['hierarchical_navigable_small_world', 'graph_index', 'approximate_nearest_neighbor'],
-            'knn': ['k_nearest_neighbors', 'nearest_neighbor', 'similarity_search'],
-            'index_corruption': ['index_error', 'corrupted_index', 'rebuild_index', 'reindex'],
-            'nan_values': ['not_a_number', 'invalid_values', 'null_embeddings', 'missing_vectors'],
-        }
-
-        # Language-specific enhancements
-        self.language_enhancements = {
-            'python': {
-                'synonyms': {
-                    'function': ['def', 'method', 'callable'],
-                    'class': ['class', 'type', 'object'],
-                    'import': ['import', 'from', 'module'],
-                    'list': ['list', 'array', 'sequence'],
-                    'dict': ['dict', 'dictionary', 'mapping', 'hashmap'],
-                },
-                'common_patterns': ['decorator', 'context manager', 'generator', 'comprehension'],
-                'frameworks': {
-                    'django': ['model', 'view', 'template', 'orm', 'queryset', 'migration'],
-                    'flask': ['route', 'blueprint', 'request', 'response', 'session'],
-                    'fastapi': ['router', 'dependency', 'pydantic', 'async', 'endpoint'],
-                    'pytest': ['fixture', 'parametrize', 'mock', 'assert'],
-                }
-            },
-            'javascript': {
-                'synonyms': {
-                    'function': ['function', 'method', 'arrow function', 'callback'],
-                    'class': ['class', 'constructor', 'prototype'],
-                    'import': ['import', 'require', 'module'],
-                    'array': ['array', 'list', 'collection'],
-                    'object': ['object', 'hash', 'map', 'dictionary'],
-                },
-                'common_patterns': ['promise', 'async/await', 'closure', 'callback', 'event'],
-                'frameworks': {
-                    'react': ['component', 'hook', 'state', 'props', 'jsx', 'context'],
-                    'angular': ['component', 'service', 'directive', 'pipe', 'module'],
-                    'vue': ['component', 'computed', 'watch', 'directive', 'mixin'],
-                    'express': ['middleware', 'router', 'request', 'response'],
-                }
-            },
-            'typescript': {
-                'synonyms': {
-                    'interface': ['interface', 'type', 'contract'],
-                    'type': ['type', 'interface', 'generic'],
-                    'enum': ['enum', 'enumeration', 'constant'],
-                },
-                'common_patterns': ['generic', 'decorator', 'type guard', 'namespace'],
-                'frameworks': {
-                    # Inherits from JavaScript
-                }
-            },
-            'java': {
-                'synonyms': {
-                    'method': ['method', 'function'],
-                    'class': ['class', 'interface', 'abstract class'],
-                    'package': ['package', 'namespace', 'module'],
-                    'list': ['List', 'ArrayList', 'LinkedList', 'Collection'],
-                    'map': ['Map', 'HashMap', 'TreeMap', 'Dictionary'],
-                },
-                'common_patterns': ['singleton', 'factory', 'builder', 'observer', 'strategy'],
-                'frameworks': {
-                    'spring': ['bean', 'component', 'service', 'repository', 'controller'],
-                    'hibernate': ['entity', 'query', 'session', 'criteria'],
-                }
-            },
-            'go': {
-                'synonyms': {
-                    'function': ['func', 'method'],
-                    'struct': ['struct', 'type'],
-                    'interface': ['interface', 'contract'],
-                    'slice': ['slice', 'array', 'list'],
-                    'map': ['map', 'dictionary', 'hash'],
-                },
-                'common_patterns': ['goroutine', 'channel', 'defer', 'context'],
-                'frameworks': {
-                    'gin': ['handler', 'middleware', 'route', 'context'],
-                    'echo': ['handler', 'middleware', 'route', 'context'],
-                }
-            }
-        }
+        # Import from centralized lexicon
+        self.query_aliases = QUERY_ALIASES
+        self.vector_expansions = VECTOR_EXPANSIONS
+        self.language_enhancements = LANGUAGE_ENHANCEMENTS
 
         # Intent-specific enhancement strategies
         self.intent_enhancements = {

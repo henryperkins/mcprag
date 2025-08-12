@@ -10,18 +10,9 @@ import re
 from enum import Enum
 
 from ..core.config import get_config
+from ..pattern_registry import PatternRegistry, PatternType
 
 logger = logging.getLogger(__name__)
-
-
-class PatternType(Enum):
-    """Types of code patterns"""
-    DESIGN_PATTERN = "design_pattern"
-    ARCHITECTURAL = "architectural"
-    FRAMEWORK_SPECIFIC = "framework_specific"
-    ERROR_HANDLING = "error_handling"
-    TESTING = "testing"
-    SECURITY = "security"
 
 
 @dataclass
@@ -41,157 +32,8 @@ class PatternMatcher:
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or get_config()
-        self._initialize_patterns()
-        
-    def _initialize_patterns(self):
-        """Initialize pattern definitions"""
-        self.patterns = {
-            PatternType.DESIGN_PATTERN: {
-                'singleton': {
-                    'keywords': ['instance', 'getInstance', '_instance', 'singleton'],
-                    'patterns': [r'class.*Singleton', r'getInstance\s*\(', r'_instance\s*=\s*None']
-                },
-                'factory': {
-                    'keywords': ['factory', 'create', 'build', 'make'],
-                    'patterns': [r'class.*Factory', r'create\w+\s*\(', r'build\w+\s*\(']
-                },
-                'observer': {
-                    'keywords': ['observer', 'subscribe', 'notify', 'listener', 'event'],
-                    'patterns': [r'class.*Observer', r'subscribe\s*\(', r'notify.*\(', r'addEventListener']
-                },
-                'strategy': {
-                    'keywords': ['strategy', 'algorithm', 'policy'],
-                    'patterns': [r'class.*Strategy', r'setStrategy\s*\(', r'execute.*Strategy']
-                },
-                'decorator': {
-                    'keywords': ['decorator', 'wrapper', 'enhance'],
-                    'patterns': [r'@\w+', r'class.*Decorator', r'wrap\w+\s*\(']
-                }
-            },
-            PatternType.ARCHITECTURAL: {
-                'mvc': {
-                    'keywords': ['model', 'view', 'controller', 'mvc'],
-                    'patterns': [r'class.*Controller', r'class.*Model', r'class.*View']
-                },
-                'microservice': {
-                    'keywords': ['service', 'api', 'endpoint', 'route'],
-                    'patterns': [r'@app\.route', r'@router\.(get|post|put|delete)', r'class.*Service']
-                },
-                'repository': {
-                    'keywords': ['repository', 'dao', 'persistence'],
-                    'patterns': [r'class.*Repository', r'class.*DAO', r'save\s*\(', r'find.*By']
-                },
-                'event_driven': {
-                    'keywords': ['event', 'message', 'publisher', 'subscriber', 'queue'],
-                    'patterns': [r'publish\s*\(', r'emit\s*\(', r'on\s*\(.*event', r'EventEmitter']
-                }
-            },
-            PatternType.FRAMEWORK_SPECIFIC: {
-                'django': {
-                    'keywords': ['django', 'models', 'views', 'serializers'],
-                    'patterns': [r'from django', r'class.*\(models\.Model\)', r'class.*View']
-                },
-                'react': {
-                    'keywords': ['react', 'component', 'useState', 'useEffect'],
-                    'patterns': [r'import.*from.*react', r'useState\s*\(', r'function.*Component']
-                },
-                'spring': {
-                    'keywords': ['spring', 'bean', 'autowired', 'service'],
-                    'patterns': [r'@Service', r'@Controller', r'@Autowired', r'@Bean']
-                }
-            },
-            PatternType.ERROR_HANDLING: {
-                'try_catch': {
-                    'keywords': ['try', 'catch', 'except', 'finally', 'error'],
-                    'patterns': [r'try\s*:', r'except.*:', r'catch\s*\(', r'finally\s*:']
-                },
-                'validation': {
-                    'keywords': ['validate', 'check', 'verify', 'assert'],
-                    'patterns': [r'validate\w+\s*\(', r'assert\s+', r'if.*is.*None']
-                },
-                'vector_dimension_mismatch': {
-                    'keywords': ['dimension', 'shape', 'size', 'mismatch', 'vector', 'embedding'],
-                    'patterns': [
-                        r'len\s*\(.*vector.*\)\s*!=',
-                        r'\.shape\[0\]\s*!=',
-                        r'dimension.*mismatch',
-                        r'shape.*!=',
-                        r'size.*!=.*embedding',
-                        r'ValueError.*dimension',
-                        r'IndexError.*vector'
-                    ]
-                },
-                'embedding_none_or_nan': {
-                    'keywords': ['embedding', 'vector', 'None', 'NaN', 'null', 'isnan'],
-                    'patterns': [
-                        r'if\s+.*embedding.*is\s+None',
-                        r'if\s+.*vector.*is\s+None',
-                        r'np\.isnan\s*\(.*embedding',
-                        r'math\.isnan\s*\(.*vector',
-                        r'pd\.isna\s*\(.*embedding',
-                        r'embedding\s*==\s*None',
-                        r'not\s+.*embedding',
-                        r'embedding\s+is\s+not\s+None'
-                    ]
-                },
-                'index_corruption': {
-                    'keywords': ['index', 'corrupt', 'rebuild', 'recreate', 'invalid', 'search'],
-                    'patterns': [
-                        r'index.*corrupt',
-                        r'rebuild.*index',
-                        r'recreate.*index',
-                        r'index.*invalid',
-                        r'reindex',
-                        r'clear.*index.*rebuild'
-                    ]
-                },
-                'similarity_metrics': {
-                    'keywords': ['cosine', 'euclidean', 'similarity', 'distance', 'knn', 'hnsw'],
-                    'patterns': [
-                        r'cosine_similarity',
-                        r'euclidean_distance',
-                        r'l2_distance',
-                        r'dot_product',
-                        r'similarity_score',
-                        r'k_nearest_neighbors',
-                        r'knn_search',
-                        r'hnsw.*index'
-                    ]
-                },
-                'vector_search_errors': {
-                    'keywords': ['vector_search', 'similarity_search', 'empty', 'no results', 'threshold'],
-                    'patterns': [
-                        r'vector_search.*failed',
-                        r'similarity_search.*error',
-                        r'empty.*results',
-                        r'no.*results.*found',
-                        r'threshold.*too.*high',
-                        r'min_score.*not.*met',
-                        r'search.*timeout'
-                    ]
-                }
-            },
-            PatternType.TESTING: {
-                'unit_test': {
-                    'keywords': ['test', 'assert', 'expect', 'mock'],
-                    'patterns': [r'def test_', r'class.*Test', r'assert.*==', r'expect\(.*\)']
-                },
-                'integration_test': {
-                    'keywords': ['integration', 'e2e', 'fixture', 'setup'],
-                    'patterns': [r'@pytest\.fixture', r'setUp\s*\(', r'tearDown\s*\(']
-                }
-            },
-            PatternType.SECURITY: {
-                'authentication': {
-                    'keywords': ['auth', 'login', 'token', 'jwt', 'session'],
-                    'patterns': [r'authenticate\s*\(', r'jwt\.', r'session\[', r'@login_required']
-                },
-                'authorization': {
-                    'keywords': ['permission', 'role', 'access', 'authorize'],
-                    'patterns': [r'hasPermission\s*\(', r'@requires_permission', r'checkAccess\s*\(']
-                }
-            }
-        }
+        self.pattern_registry = PatternRegistry()
+        self.patterns = self.pattern_registry.patterns
     
     async def find_patterns(
         self,

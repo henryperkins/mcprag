@@ -22,11 +22,73 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 import os
 import pathspec
+from fnmatch import fnmatch
 
 logger = logging.getLogger(__name__)
 
 # Content truncation limits aligned with Azure Search string constraints (~32KB bytes for some analyzers/fields)
 CONTENT_CHAR_LIMIT = 32000
+
+# Repository name validation
+_ALLOWED_REPO_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+
+# Default directories to exclude (moved here for use in validation functions)
+DEFAULT_EXCLUDE_DIRS = {
+    ".git", ".hg", ".svn", ".venv", "venv", "env", "node_modules",
+    "dist", "build", "__pycache__", ".mypy_cache", ".pytest_cache",
+    ".coverage", ".vscode", ".idea"
+}
+
+def validate_repo_name(name: str) -> Optional[str]:
+    """
+    Validate repository name: non-empty, no slashes/backslashes, sane length,
+    and only [_-.A-Za-z0-9] characters.
+    
+    Args:
+        name: Repository name to validate
+        
+    Returns:
+        Error string if invalid, or None if valid.
+    """
+    if not name or not isinstance(name, str):
+        return "Repository name is required"
+    if len(name) > 100:
+        return "Repository name too long (max 100 chars)"
+    if any(c in name for c in "/\\"):
+        return "Repository name must not contain slashes"
+    if any(c not in _ALLOWED_REPO_CHARS for c in name):
+        return "Repository name contains invalid characters; allowed: letters, numbers, '-', '_', '.'"
+    return None
+
+def validate_repo_path(repo_path: str, excluded_dirs: Optional[Set[str]] = None) -> Optional[str]:
+    """
+    Validate repository path against excluded directories.
+    
+    Warns/guards if the provided repo_path resolves within a known noisy/excluded directory,
+    unless MCP_ALLOW_EXTERNAL_ROOTS=true is set in env.
+    
+    Args:
+        repo_path: Repository path to validate
+        excluded_dirs: Set of directory names to exclude (uses FileProcessor.DEFAULT_EXCLUDE_DIRS if None)
+        
+    Returns:
+        Warning string if guarded, or None to proceed.
+    """
+    if excluded_dirs is None:
+        # Use default excludes
+        excluded_dirs = DEFAULT_EXCLUDE_DIRS
+        
+    allow_external = os.getenv("MCP_ALLOW_EXTERNAL_ROOTS", "false").lower() == "true"
+    resolved = Path(repo_path).resolve()
+    parts = set(p.name for p in resolved.parents) | {resolved.name}
+    
+    if any(d in parts for d in excluded_dirs):
+        if not allow_external:
+            return (f"Repository path '{resolved}' appears to be inside an excluded directory "
+                    f"({', '.join(sorted(excluded_dirs))}). Set MCP_ALLOW_EXTERNAL_ROOTS=true to override.")
+        else:
+            logger.warning("Proceeding with repo_path inside excluded directory due to MCP_ALLOW_EXTERNAL_ROOTS=true")
+    return None
 
 # Lightweight extension-to-MIME map with overrides for common code types
 EXT_MIME_MAP = {
@@ -136,13 +198,7 @@ class FileProcessor:
         '.md', '.json', '.yaml', '.yml', '.xml', '.html', '.css'
     }
 
-    # Directories and file patterns always excluded when
-    # MCP_INDEX_DEFAULT_EXCLUDES=true
-    DEFAULT_EXCLUDE_DIRS = {
-        ".git", ".hg", ".svn", ".venv", "venv", "env", "node_modules",
-        "dist", "build", "__pycache__", ".mypy_cache", ".pytest_cache",
-        ".coverage", ".vscode", ".idea"
-    }
+    # File patterns always excluded when MCP_INDEX_DEFAULT_EXCLUDES=true
     DEFAULT_EXCLUDE_FILES = {
         "*.pyc", "*.pyo", "*.pyd", "*.swp", "*.swo",
         ".DS_Store", "Thumbs.db"
@@ -199,7 +255,7 @@ class FileProcessor:
         return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
     def _should_prune_dir(self, rel_dir: str) -> bool:
-        if self.use_default_excludes and Path(rel_dir).name in self.DEFAULT_EXCLUDE_DIRS:
+        if self.use_default_excludes and Path(rel_dir).name in DEFAULT_EXCLUDE_DIRS:
             return True
         if self._pathspec and self._pathspec.match_file(rel_dir + "/"):
             return True
