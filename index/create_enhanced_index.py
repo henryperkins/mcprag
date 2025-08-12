@@ -5,7 +5,10 @@ Create enhanced Azure Search index with all advanced features
 
 import asyncio
 import sys
-from enhanced_rag.azure_integration.rest_index_builder import EnhancedIndexBuilder
+import json
+from pathlib import Path
+from enhanced_rag.azure_integration.automation import IndexAutomation
+from enhanced_rag.core.unified_config import get_config
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -15,32 +18,39 @@ load_dotenv()
 async def main():
     try:
         print("Creating Enhanced RAG Index...")
-        builder = EnhancedIndexBuilder()
+        # Resolve config
+        cfg = get_config()
+        endpoint = cfg.acs_endpoint
+        api_key = cfg.acs_admin_key.get_secret_value() if cfg.acs_admin_key else ""
 
-        # Create the main index
-        index = await builder.create_enhanced_rag_index(
-            index_name="codebase-mcp-sota",
-            description="Enhanced code search index with AST analysis and vector search",
-            enable_vectors=True,
-            enable_semantic=True
-        )
+        automation = IndexAutomation(endpoint=endpoint, api_key=api_key)
 
-        print(f"✅ Created index: {index.name}")
+        # Load canonical schema and set index name
+        schema_path = Path("azure_search_index_schema.json")
+        if not schema_path.exists():
+            raise FileNotFoundError("Index schema file 'azure_search_index_schema.json' not found")
 
-        # Validate schema
-        validation = await builder.validate_index_schema(
-            "codebase-mcp-sota",
-            ["content", "function_name", "repository", "language", "content_vector"]
-        )
+        index_def = json.loads(schema_path.read_text())
+        index_def["name"] = "codebase-mcp-sota"
 
-        if validation['valid']:
+        # Ensure index exists / is updated
+        op = await automation.ensure_index_exists(index_def)
+        print(f"✅ Ensured index: {index_def['name']} (created={op.get('created')}, updated={op.get('updated')})")
+
+        # Validate required fields presence
+        current = await automation.ops.get_index(index_def["name"])
+        field_names = {f["name"] for f in current.get("fields", [])}
+        required = {"content", "function_name", "repository", "language", "content_vector"}
+        missing = list(required - field_names)
+        if not missing:
             print("✅ Schema validation passed")
-            print(f"   Total fields: {validation['total_fields']}")
-            print(f"   Has vector search: {validation['has_vector_search']}")
-            print(f"   Has semantic search: {validation['has_semantic_search']}")
-            print(f"   Scoring profiles: {', '.join(validation['scoring_profiles'])}")
+            print(f"   Total fields: {len(field_names)}")
+            print(f"   Has vector search: {bool(current.get('vectorSearch'))}")
+            print(f"   Has semantic search: {bool(current.get('semantic'))}")
+            profiles = [p.get('name') for p in current.get('scoringProfiles', [])]
+            print(f"   Scoring profiles: {', '.join(profiles)}")
         else:
-            print(f"⚠️  Missing fields: {validation['missing_fields']}")
+            print(f"⚠️  Missing fields: {missing}")
 
     except Exception as e:
         print(f"❌ Error creating index: {e}")

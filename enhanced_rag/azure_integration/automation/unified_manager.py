@@ -51,7 +51,7 @@ class UnifiedAutomation:
                 embedding_provider = None
         
         # Initialize all managers
-        self.index = IndexAutomation(self.ops)
+        self.index = IndexAutomation(endpoint=endpoint, api_key=api_key)
         self.data = DataAutomation(self.ops)
         self.indexer = IndexerAutomation(self.ops)
         self.health = HealthMonitor(self.ops)
@@ -159,22 +159,30 @@ class UnifiedAutomation:
         """
         index_name = index_name or self.default_index
         
-        # Build index definition
-        from ..rest_index_builder import EnhancedIndexBuilder
-        builder = EnhancedIndexBuilder()
-        
-        index = await builder.create_enhanced_rag_index(
-            index_name=index_name,
-            description=f"Enhanced RAG index {index_name}",
-            enable_vectors=enable_vectors,
-            enable_semantic=enable_semantic
-        )
-        
+        # Build index definition from canonical schema and ensure via REST
+        from pathlib import Path
+        import json
+        schema_path = Path("azure_search_index_schema.json")
+        if not schema_path.exists():
+            raise FileNotFoundError("Index schema file 'azure_search_index_schema.json' not found")
+        index_def = json.loads(schema_path.read_text())
+        index_def["name"] = index_name
+
+        # Instantiate index automation with underlying client creds
+        from .index_manager import IndexAutomation as _IndexAutomation
+        automation = _IndexAutomation(endpoint=self.client.endpoint, api_key=self.client.api_key)
+        op = await automation.ensure_index_exists(index_def)
+
+        # Fetch the current schema for summary
+        current = await self.ops.get_index(index_name)
+        fields = current.get("fields", [])
         return {
-            "index_name": index.name,
-            "fields": len(index.fields),
-            "vector_search_enabled": bool(index.vector_search),
-            "semantic_search_enabled": bool(index.semantic_search)
+            "index_name": index_name,
+            "fields": len(fields),
+            "vector_search_enabled": bool(current.get("vectorSearch")),
+            "semantic_search_enabled": bool(current.get("semantic")),
+            "created": bool(op.get("created")),
+            "updated": bool(op.get("updated"))
         }
     
     async def validate_index(

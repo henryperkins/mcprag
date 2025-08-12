@@ -17,16 +17,17 @@ os.environ["ACS_ENDPOINT"] = "https://test.search.windows.net"
 os.environ["MCP_DEV_MODE"] = "true"
 
 # Now import after env is set
-from mcprag.config import Config
+from enhanced_rag.core.unified_config import get_config
 
 print("Testing QUERY_KEY fallback...")
 print("=" * 50)
 
-print(f"ADMIN_KEY: {Config.ADMIN_KEY or 'NOT SET'}")
-print(f"QUERY_KEY: {Config.QUERY_KEY or 'NOT SET'}")
+config = get_config()
+print(f"ADMIN_KEY: {config.acs_admin_key.get_secret_value() if config.acs_admin_key else 'NOT SET'}")
+print(f"QUERY_KEY: {config.acs_query_key.get_secret_value() if config.acs_query_key else 'NOT SET'}")
 
 # Test validation accepts query key
-errors = Config.validate()
+errors = config.validate_config()
 if errors:
     print(f"❌ Validation failed: {errors}")
 else:

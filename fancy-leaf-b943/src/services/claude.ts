@@ -34,6 +34,22 @@ export interface ClaudeOptions {
   onComplete?: () => void;
 }
 
+// Legacy message handling deprecation flags
+const LEGACY_MESSAGE_SUPPORT = import.meta.env.VITE_LEGACY_MESSAGE_SUPPORT !== 'false';
+const LEGACY_REMOVAL_DATE = '2025-10-10';
+let HAS_SHOWN_LEGACY_DEPRECATION = false;
+
+function warnLegacyDeprecationOnce() {
+  if (!HAS_SHOWN_LEGACY_DEPRECATION) {
+    HAS_SHOWN_LEGACY_DEPRECATION = true;
+    console.warn(
+      '[DEPRECATION] Legacy message handling is enabled and will be removed after',
+      LEGACY_REMOVAL_DATE,
+      '- set VITE_LEGACY_MESSAGE_SUPPORT=false to disable now.'
+    );
+  }
+}
+
 class ClaudeService {
   private abortController: AbortController | null = null;
   private readonly baseUrl: string;
@@ -47,6 +63,11 @@ class ClaudeService {
     // Use Worker gateway endpoint
     this.baseUrl = import.meta.env.VITE_CLAUDE_GATEWAY_URL || '';
     this.initSession();
+
+    // Warn once if legacy support is enabled
+    if (LEGACY_MESSAGE_SUPPORT) {
+      warnLegacyDeprecationOnce();
+    }
     
     // Set up event listener for tools info requests
     this.on('request-tools-info', () => {
@@ -370,6 +391,14 @@ class ClaudeService {
   }
   
   private handleLegacyMessage(message: any) {
+    // Deprecation gate for legacy message handling paths
+    if (!LEGACY_MESSAGE_SUPPORT) {
+      warnLegacyDeprecationOnce();
+      // Legacy handling disabled - ignore legacy message types
+      return;
+    }
+    warnLegacyDeprecationOnce();
+
     const messagesStore = useMessages.getState();
     const toolCallsStore = useToolCalls.getState();
     

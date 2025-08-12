@@ -957,15 +957,21 @@ export default {
       try {
         const data = msg.body as any;
         switch (data?.type) {
-          case 'index_transcript':
-            // TODO: implement indexing/analytics; placeholder no-op
+          case 'index_transcript': {
+            // NOTE: indexing/analytics intentionally not implemented in gateway
+            console.log('queue:index_transcript', { sessionId: data.sessionId, length: data.length, ts: data.ts });
             break;
-          case 'file_uploaded':
-            // TODO: generate thumbnails/scan/etc.; placeholder no-op
+          }
+          case 'file_uploaded': {
+            // NOTE: file post-processing intentionally not implemented in gateway
+            console.log('queue:file_uploaded', { key: data.key, size: data.size, type: data.contentType, ts: data.ts });
             break;
-          default:
-            // Unknown job type; ignore
+          }
+          default: {
+            // Unknown job type; ignoring
+            console.log('queue:unknown', { type: data?.type });
             break;
+          }
         }
         await msg.ack?.();
       } catch (e) {

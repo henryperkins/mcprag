@@ -7,7 +7,7 @@ Initializes and coordinates enhanced_rag modules for MCP access.
 import logging
 from typing import Dict, Any, Literal, cast
 
-from .config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig, get_config
 from .compatibility.socketpair_patch import apply_patches
 
 # Import what we need from enhanced_rag - separate try/except for each component
@@ -191,7 +191,8 @@ class MCPServer:
         # Validate configuration, but don't hard-fail startup.
         # This allows the server to start and advertise limited functionality
         # (e.g. no search backend) rather than failing to connect entirely.
-        errors = Config.validate()
+        config = get_config()
+        errors = config.validate_config()
         if errors:
             logger.warning("Configuration issues detected; continuing with degraded features: %s", errors)
 
@@ -205,7 +206,7 @@ class MCPServer:
         # abort the server start-up.  To make the server more robust we fall
         # back to INFO when the supplied value is unknown.
 
-        _log_level: str = str(Config.LOG_LEVEL or "").upper()
+        _log_level: str = str(config.mcp_log_level.value or "").upper()
         _resolved_level = getattr(logging, _log_level, logging.INFO)
 
         # Defensive logging setup: avoid reconfiguring if already configured elsewhere
@@ -216,7 +217,7 @@ class MCPServer:
             if not already_configured:
                 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             logging.getLogger(__name__).warning(
-                "Unknown LOG_LEVEL '%s' – falling back to INFO", Config.LOG_LEVEL
+                "Unknown LOG_LEVEL '%s' – falling back to INFO", config.mcp_log_level
             )
             root.setLevel(logging.INFO)
         else:
@@ -252,7 +253,7 @@ class MCPServer:
         self.mcp = FastMCP(self.name)
 
         # Get RAG configuration
-        self.rag_config = Config.get_rag_config()
+        self.rag_config = config
 
         # Initialize components
         self._init_components()
@@ -311,7 +312,7 @@ class MCPServer:
             and AzureKeyCredential is not None
             and SearchClient is not None
             and isinstance(getattr(Config, "ENDPOINT", None), str)
-            and bool(Config.ENDPOINT and Config.ENDPOINT.strip())
+            and bool(config.acs_endpoint and config.acs_endpoint.strip())
         ):
             # Choose key: admin if available, else query (read-only)
             api_key = (getattr(Config, "ADMIN_KEY", "") or getattr(Config, "QUERY_KEY", "")).strip()
@@ -320,8 +321,8 @@ class MCPServer:
                     # Construct credential only after verifying the symbol is available
                     azure_key_credential = AzureKeyCredential(api_key)  # type: ignore[call-arg]
                     self.search_client = SearchClient(
-                        endpoint=str(Config.ENDPOINT),
-                        index_name=str(Config.INDEX_NAME),
+                        endpoint=str(config.acs_endpoint),
+                        index_name=str(config.acs_index_name),
                         credential=azure_key_credential,
                     )  # type: ignore[call-arg]
                 except TypeError as e:
@@ -377,7 +378,7 @@ class MCPServer:
         # Initialize cache manager
         if CACHE_SUPPORT:
             self.cache_manager = CacheManager(
-                ttl=Config.CACHE_TTL_SECONDS, max_size=Config.CACHE_MAX_ENTRIES
+                ttl=config.cache_ttl_seconds, max_size=config.cache_max_entries
             )  # type: ignore[call-arg]
         else:
             self.cache_manager = None
@@ -385,7 +386,7 @@ class MCPServer:
         # Initialize learning components
         if LEARNING_SUPPORT:
             self.feedback_collector = FeedbackCollector(
-                storage_path=str(Config.FEEDBACK_DIR)
+                storage_path=str(config.feedback_dir)
             )  # type: ignore[call-arg]
             self.usage_analyzer = UsageAnalyzer(
                 feedback_collector=self.feedback_collector
@@ -420,15 +421,15 @@ class MCPServer:
             try:
                 # Create REST client and operations
                 self.rest_client = AzureSearchClient(
-                    endpoint=Config.ENDPOINT,
-                    api_key=Config.ADMIN_KEY
+                    endpoint=config.acs_endpoint,
+                    api_key=config.acs_admin_key.get_secret_value() if config.acs_admin_key else ""
                 )  # type: ignore[call-arg]
                 self.rest_ops = SearchOperations(self.rest_client)  # type: ignore[call-arg]
 
                 # Initialize automation managers
                 self.index_automation = IndexAutomation(
-                    endpoint=Config.ENDPOINT,
-                    api_key=Config.ADMIN_KEY
+                    endpoint=config.acs_endpoint,
+                    api_key=config.acs_admin_key.get_secret_value() if config.acs_admin_key else ""
                 )  # type: ignore[call-arg]
                 self.data_automation = DataAutomation(self.rest_ops)  # type: ignore[call-arg]
                 self.indexer_automation = IndexerAutomation(self.rest_ops)  # type: ignore[call-arg]

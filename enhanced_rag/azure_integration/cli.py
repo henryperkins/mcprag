@@ -24,12 +24,11 @@ from typing import List, Dict, Any, Optional, Tuple, Set
 
 
 from azure.core.exceptions import ResourceNotFoundError
-from .rest_index_builder import EnhancedIndexBuilder
-from .reindex_operations import ReindexOperations, ReindexMethod
+from .automation import IndexAutomation
+from .automation import ReindexAutomation
 from .automation import DataAutomation
 from .rest import AzureSearchClient, SearchOperations
-from mcprag.config import Config
-from .cli_schema_automation import add_schema_commands
+from enhanced_rag.core.unified_config import get_config
 from .processing import extract_python_chunks, process_file, FileProcessor, find_repository_root
 
 logging.basicConfig(level=logging.INFO)
@@ -79,8 +78,8 @@ async def index_repository(repo_path: str, repo_name: str, patterns: Optional[Li
     """Index an entire repository using REST API."""
     # Initialize REST client and operations
     rest_client = AzureSearchClient(
-        endpoint=Config.ENDPOINT,
-        api_key=Config.ADMIN_KEY
+        endpoint=get_config().acs_endpoint,
+        api_key=get_config().acs_admin_key.get_secret_value()
     )
     rest_ops = SearchOperations(rest_client)
     data_automation = DataAutomation(rest_ops)
@@ -106,7 +105,7 @@ async def index_repository(repo_path: str, repo_name: str, patterns: Optional[Li
     
     # Upload in batches
     result = await data_automation.bulk_upload(
-        index_name=Config.INDEX_NAME,
+        index_name=get_config().acs_index_name,
         documents=document_generator(),
         batch_size=100
     )
@@ -193,8 +192,8 @@ async def index_changed_files(file_paths: List[str], repo_name: str) -> int:
     """Index specific changed files using REST API."""
     # Initialize REST client and operations
     rest_client = AzureSearchClient(
-        endpoint=Config.ENDPOINT,
-        api_key=Config.ADMIN_KEY
+        endpoint=get_config().acs_endpoint,
+        api_key=get_config().acs_admin_key.get_secret_value()
     )
     rest_ops = SearchOperations(rest_client)
     data_automation = DataAutomation(rest_ops)
@@ -220,7 +219,7 @@ async def index_changed_files(file_paths: List[str], repo_name: str) -> int:
     
     # Upload in batches
     result = await data_automation.bulk_upload(
-        index_name=Config.INDEX_NAME,
+        index_name=get_config().acs_index_name,
         documents=document_generator(),
         batch_size=100
     )
@@ -261,53 +260,52 @@ async def cmd_changed_files(args):
 
 
 async def cmd_create_enhanced_index(args):
-    """Create enhanced RAG index."""
+    """Create enhanced RAG index using IndexAutomation (REST)."""
     logger.info(f"Creating enhanced index: {args.name}")
 
-    builder = EnhancedIndexBuilder()
+    # Initialize automation with server config
+    automation = IndexAutomation(endpoint=get_config().acs_endpoint, api_key=get_config().acs_admin_key.get_secret_value())
 
     # Handle --recreate flag: delete existing index if it exists
     if args.recreate:
         try:
-            builder.index_client.delete_index(args.name)
+            await automation.ops.delete_index(args.name)
             logger.info(f"Deleted existing index '{args.name}'")
-        except ResourceNotFoundError:
-            logger.info(f"Index '{args.name}' does not exist, proceeding with creation")
         except Exception as e:
-            logger.warning(f"Error deleting index '{args.name}': {e}")
+            logger.info(f"Index '{args.name}' may not exist or deletion skipped: {e}")
 
-    # Determine feature flags
-    enable_vectors = not args.no_vectors
-    enable_semantic = not args.no_semantic
+    # Determine feature flags (currently the canonical schema encodes these)
+    _enable_vectors = not args.no_vectors
+    _enable_semantic = not args.no_semantic
+    if not _enable_vectors:
+        logger.warning("--no-vectors specified; ensure schema reflects this if required")
+    if not _enable_semantic:
+        logger.warning("--no-semantic specified; ensure schema reflects this if required")
 
     try:
-        index = await builder.create_enhanced_rag_index(
-            index_name=args.name,
-            description=f"Enhanced RAG index {args.name}",
-            enable_vectors=enable_vectors,
-            enable_semantic=enable_semantic
+        from pathlib import Path
+        import json
+        schema_path = Path("azure_search_index_schema.json")
+        if not schema_path.exists():
+            raise FileNotFoundError("Index schema file 'azure_search_index_schema.json' not found")
+        index_def = json.loads(schema_path.read_text())
+        index_def["name"] = args.name
+
+        op = await automation.ensure_index_exists(index_def)
+        logger.info(
+            f"Successfully ensured index exists: {args.name} "
+            f"(created={op.get('created')}, updated={op.get('updated')})"
         )
-        logger.info(f"Successfully ensured index exists: {index.name}")
-        # EnhancedIndexBuilder returns SimpleNamespace(name=..., operation=...)
-        op = getattr(index, "operation", None)
-        if isinstance(op, dict):
-            if op.get("created"):
-                logger.info("Index was created")
-            elif op.get("updated"):
-                logger.info("Index was updated")
-            elif op.get("current"):
-                logger.info("Index already current")
-            # If the op payload includes a schema snapshot, log field count
-            schema = op.get("schema") or op.get("index") or {}
-            fields = schema.get("fields")
-            if isinstance(fields, list):
-                logger.info(f"Fields: {len(fields)}")
-            vs = schema.get("vectorSearch")
-            if isinstance(vs, dict):
-                profiles = vs.get("profiles") or []
-                logger.info(f"Vector profiles: {len(profiles)}")
-            if schema.get("semanticSearch"):
-                logger.info("Semantic search: Enabled")
+
+        # Fetch and log summary
+        current = await automation.ops.get_index(args.name)
+        fields = current.get("fields", [])
+        logger.info(f"Fields: {len(fields)}")
+        if current.get("vectorSearch"):
+            profiles = (current.get("vectorSearch", {}) or {}).get("profiles", [])
+            logger.info(f"Vector profiles: {len(profiles)}")
+        if current.get("semantic"):
+            logger.info("Semantic search: Enabled")
     except Exception as e:
         logger.error(f"Failed to create index: {e}")
         return 1
@@ -316,16 +314,22 @@ async def cmd_create_enhanced_index(args):
 
 
 async def cmd_validate_index(args):
-    """Validate index vector dimensions."""
+    """Validate index vector dimensions using REST."""
     logger.info(f"Validating index: {args.name}")
 
-    builder = EnhancedIndexBuilder()
+    automation = IndexAutomation(endpoint=get_config().acs_endpoint, api_key=get_config().acs_admin_key.get_secret_value())
 
     try:
-        result = await builder.validate_vector_dimensions(
-            index_name=args.name,
-            expected_dimensions=args.check_dimensions
-        )
+        current = await automation.ops.get_index(args.name)
+        fields = current.get("fields", [])
+        vector_field = next((f for f in fields if f.get("name") == "content_vector"), None)
+        actual_dimensions = vector_field.get("dimensions") if vector_field else None
+        result = {
+            "valid": actual_dimensions == args.check_dimensions,
+            "expected_dimensions": args.check_dimensions,
+            "actual_dimensions": actual_dimensions,
+            "vector_field_name": "content_vector",
+        }
 
         # Output JSON details if requested
         if args.json:
@@ -336,13 +340,10 @@ async def cmd_validate_index(args):
                 logger.info(f"✓ Vector dimensions match: {result['actual_dimensions']}")
             else:
                 logger.error(
-                    f"✗ Vector dimension mismatch: "
-                    f"expected {result['expected_dimensions']}, actual {result['actual_dimensions']}"
+                    f"✗ Vector dimension mismatch: expected {result['expected_dimensions']}, "
+                    f"actual {result['actual_dimensions']}"
                 )
-            if 'error' in result:
-                logger.error(f"Error: {result['error']}")
 
-        # Return appropriate exit code
         return 0 if result['valid'] else 1
 
     except Exception as e:
@@ -365,8 +366,8 @@ async def cmd_create_indexer(args):
 
     # Initialize REST client and operations
     rest_client = AzureSearchClient(
-        endpoint=Config.ENDPOINT,
-        api_key=Config.ADMIN_KEY
+        endpoint=get_config().acs_endpoint,
+        api_key=get_config().acs_admin_key.get_secret_value()
     )
     rest_ops = SearchOperations(rest_client)
     from .automation import IndexerAutomation
@@ -399,66 +400,69 @@ async def cmd_create_indexer(args):
 
 
 async def cmd_reindex(args):
-    """Reindex content using various methods."""
+    """Reindex content using various methods via REST."""
     logger.info(f"Starting reindex with method: {args.method}")
 
-    reindex_ops = ReindexOperations()
+    # Initialize REST client and operations
+    rest_client = AzureSearchClient(
+        endpoint=get_config().acs_endpoint,
+        api_key=get_config().acs_admin_key.get_secret_value()
+    )
+    rest_ops = SearchOperations(rest_client)
+    reindex = ReindexAutomation(rest_ops)
 
     try:
         if args.method == 'drop-rebuild':
-            # Drop and rebuild index
-            success = await reindex_ops.drop_and_rebuild(args.schema)
-            if not success:
+            res = await reindex.perform_reindex('drop-rebuild', schema_path=args.schema)
+            if res.get('status') != 'success':
+                logger.error(f"Drop-rebuild failed: {res}")
                 return 1
             logger.info("Index rebuilt. Use 'local-repo' command to repopulate.")
 
         elif args.method == 'clear':
-            # Clear documents
-            count = await reindex_ops.clear_documents(args.filter)
-            logger.info(f"Cleared {count} documents")
+            res = await reindex.perform_reindex('clear', clear_filter=args.filter)
+            logger.info(f"Cleared {res.get('documents_cleared', 0)} documents")
 
         elif args.method == 'repository':
-            # Reindex repository
-            method = ReindexMethod.CLEAR_AND_RELOAD if args.clear_first else ReindexMethod.INCREMENTAL
-            success = await reindex_ops.reindex_repository(
+            clear_filter = f"repository eq '{args.repo_name}'" if args.clear_first else None
+            res = await reindex.perform_reindex(
+                'repository',
                 repo_path=args.repo_path,
                 repo_name=args.repo_name,
-                method=method,
-                clear_first=args.clear_first
+                clear_filter=clear_filter
             )
-            if not success:
+            if res.get('status') != 'success':
+                logger.error(f"Repository reindex failed: {res}")
                 return 1
 
         elif args.method == 'status':
-            # Get index status
-            info = await reindex_ops.get_index_info()
+            # Get index health summary
+            info = await reindex.get_index_health()
             print(f"\nIndex: {info.get('name', 'Unknown')}")
-            print(f"Fields: {info.get('fields', 0)}")
+            print(f"Fields: {info.get('field_count', 0)}")
             print(f"Documents: {info.get('document_count', 0)}")
-            print(f"Vector Search: {info.get('vector_search', False)}")
-            print(f"Semantic Search: {info.get('semantic_search', False)}")
+            print(f"Vector Search: {info.get('vector_search_enabled', False)}")
+            print(f"Semantic Search: {info.get('semantic_search_enabled', False)}")
 
         elif args.method == 'validate':
-            # Validate schema
-            validation = await reindex_ops.validate_index_schema()
-            print(f"\nSchema Valid: {validation['valid']}")
-            if validation.get('issues'):
+            health = await reindex.get_index_health()
+            print(f"\nSchema Valid: {health['schema_valid']}")
+            if health.get('schema_issues'):
                 print("Issues:")
-                for issue in validation['issues']:
+                for issue in health['schema_issues']:
                     print(f"  - {issue}")
-            if validation.get('warnings'):
+            if health.get('schema_warnings'):
                 print("Warnings:")
-                for warning in validation['warnings']:
+                for warning in health['schema_warnings']:
                     print(f"  - {warning}")
 
         elif args.method == 'backup':
-            # Backup schema
             output_path = args.output or f"index_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            success = await reindex_ops.backup_index_schema(output_path)
-            if success:
-                logger.info(f"Schema backed up to {output_path}")
-            else:
+            res = await reindex.backup_and_restore('backup', output_path)
+            if not res.get('success'):
+                logger.error(f"Backup failed: {res}")
                 return 1
+            logger.info(f"Schema backed up to {output_path}")
 
     except Exception as e:
         logger.error(f"Reindex operation failed: {e}")
@@ -471,22 +475,30 @@ async def cmd_indexer_status(args):
     """Check indexer status."""
     logger.info(f"Checking indexer status: {args.name}")
 
-    reindex_ops = ReindexOperations()
+    rest_client = AzureSearchClient(
+        endpoint=get_config().acs_endpoint,
+        api_key=get_config().acs_admin_key.get_secret_value()
+    )
+    rest_ops = SearchOperations(rest_client)
 
     try:
-        status = await reindex_ops.get_indexer_status(args.name)
+        status = await rest_ops.get_indexer_status(args.name)
         if status:
+            last_result = status.get('lastResult') or {}
+            execution_history = status.get('executionHistory') or []
             print(f"\nIndexer: {args.name}")
-            print(f"Status: {status['status']}")
-            print(f"Last Result: {status['last_result']}")
-            print(f"Execution History: {status['execution_history']} runs")
-            if status['errors']:
+            print(f"Status: {status.get('status', 'unknown')}")
+            print(f"Last Result: {last_result.get('status')}")
+            print(f"Execution History: {len(execution_history)} runs")
+            errors = last_result.get('errors') or []
+            warnings = last_result.get('warnings') or []
+            if errors:
                 print("Errors:")
-                for error in status['errors'][:5]:  # Show first 5 errors
+                for error in errors[:5]:
                     print(f"  - {error}")
-            if status['warnings']:
+            if warnings:
                 print("Warnings:")
-                for warning in status['warnings'][:5]:  # Show first 5 warnings
+                for warning in warnings[:5]:
                     print(f"  - {warning}")
         else:
             logger.error(f"Indexer '{args.name}' not found")
@@ -726,8 +738,7 @@ def main():
         help='Indexer name'
     )
 
-    # Add schema automation commands
-    schema_commands = add_schema_commands(subparsers)
+    # Schema automation commands removed (legacy path)
 
     args = parser.parse_args()
 
@@ -746,8 +757,7 @@ def main():
         'indexer-status': cmd_indexer_status,
     }
     
-    # Add schema commands to dispatch
-    commands.update(schema_commands)
+    # Schema commands removed; nothing to add to dispatch
 
     if args.command in commands:
         try:

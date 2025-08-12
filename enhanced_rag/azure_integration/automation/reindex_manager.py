@@ -1,22 +1,22 @@
 """Reindexing automation for Azure AI Search.
 
-This module provides the unified reindexing interface, consolidating the
-previously duplicated implementations. It uses REST operations primarily
-and falls back to legacy ReindexOperations only when needed.
-
-DEPRECATION NOTICE: This module consolidates functionality that was previously
-duplicated between ReindexOperations and ReindexAutomation.
+This module provides the unified reindexing interface using REST operations
+only. It replaces legacy SDK-based flows and removes the dependency on
+ReindexOperations.
 """
 
 import logging
 import warnings
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncIterator, Iterable
 from datetime import datetime
 from pathlib import Path
 import json
 
 from ..rest import SearchOperations
-from ..reindex_operations import ReindexOperations, ReindexMethod
+from ..processing import FileProcessor
+from .data_manager import DataAutomation
+from .index_manager import IndexAutomation
+from .indexer_manager import IndexerAutomation
 from ..embedding_provider import IEmbeddingProvider
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,15 @@ class ReindexAutomation:
             embedding_provider: Optional embedding provider for vector generation
         """
         self.ops = operations
-        self.reindex_ops = ReindexOperations()
         self.embedding_provider = embedding_provider
+        self._index_default_name = None
+        try:
+            # Try to resolve default index name from core config if available
+            from enhanced_rag.core.config import get_config  # type: ignore
+            self._index_default_name = get_config().azure.index_name
+        except Exception:
+            import os
+            self._index_default_name = os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota")
     
     async def get_index_health(self, index_name: Optional[str] = None) -> Dict[str, Any]:
         """Get comprehensive index health information.
@@ -47,23 +54,36 @@ class ReindexAutomation:
         Returns:
             Dict with index health metrics
         """
-        info = await self.reindex_ops.get_index_info()
-        validation = await self.reindex_ops.validate_index_schema()
+        index = index_name or self._index_default_name
+
+        # Basic info
+        try:
+            index_def = await self.ops.get_index(index)
+            stats = await self.ops.get_index_stats(index)
+        except Exception as e:
+            logger.error(f"Failed to get index info: {e}")
+            return {
+                "name": index,
+                "error": str(e)
+            }
+
+        # Validation
+        validation = await self._validate_index_schema(index)
         
         # Get additional stats from REST API
         try:
-            stats = await self.ops.get_index_stats(index_name or self.reindex_ops.index_name)
+            stats = await self.ops.get_index_stats(index)
         except Exception as e:
             logger.warning(f"Failed to get index stats: {e}")
             stats = {}
         
         return {
-            "name": info.get("name"),
-            "document_count": info.get("document_count", 0),
+            "name": index_def.get("name", index),
+            "document_count": stats.get("documentCount", 0),
             "storage_size_bytes": stats.get("storageSize", 0),
-            "field_count": info.get("fields", 0),
-            "vector_search_enabled": info.get("vector_search", False),
-            "semantic_search_enabled": info.get("semantic_search", False),
+            "field_count": len(index_def.get("fields", [])),
+            "vector_search_enabled": bool(index_def.get("vectorSearch")),
+            "semantic_search_enabled": bool(index_def.get("semantic")),
             "schema_valid": validation.get("valid", False),
             "schema_issues": validation.get("issues", []),
             "schema_warnings": validation.get("warnings", []),
@@ -100,52 +120,62 @@ class ReindexAutomation:
         }
         
         try:
+            index = self._index_default_name
+
             if dry_run:
-                # Validate parameters without executing
                 if method == "drop-rebuild":
                     if schema_path and not Path(schema_path).exists():
                         raise ValueError(f"Schema file not found: {schema_path}")
                     result["action"] = "Would drop and rebuild index"
+                    result["index_name"] = index
                     if schema_path:
                         result["schema_file"] = schema_path
-                
                 elif method == "clear":
-                    doc_count = self.reindex_ops.search_client.get_document_count()
-                    result["action"] = f"Would clear {doc_count} documents"
+                    stats = await self.ops.get_index_stats(index)
+                    result["action"] = f"Would clear {stats.get('documentCount', 0)} documents"
+                    result["index_name"] = index
                     if clear_filter:
                         result["filter"] = clear_filter
-                
                 elif method == "repository":
                     if not repo_path or not repo_name:
                         raise ValueError("Repository path and name required")
                     result["action"] = f"Would reindex repository {repo_name} from {repo_path}"
-                
+                    result["index_name"] = index
+                else:
+                    raise ValueError(f"Unknown reindexing method: {method}")
                 result["status"] = "validated"
-                
             else:
-                # Execute reindexing
                 if method == "drop-rebuild":
-                    success = await self.reindex_ops.drop_and_rebuild(schema_path)
-                    result["status"] = "success" if success else "failed"
-                    result["rebuild_complete"] = success
-                
+                    # Load schema from file or fetch current
+                    if schema_path and Path(schema_path).exists():
+                        schema = json.loads(Path(schema_path).read_text())
+                    else:
+                        schema = await self.ops.get_index(index)
+                    schema["name"] = index
+
+                    # Recreate via REST
+                    try:
+                        await self.ops.delete_index(index)
+                    except Exception:
+                        pass
+                    await self.ops.create_index(schema)
+                    result["status"] = "success"
+                    result["rebuild_complete"] = True
                 elif method == "clear":
-                    count = await self.reindex_ops.clear_documents(clear_filter)
+                    count = await self._clear_documents(index, clear_filter)
                     result["status"] = "success"
                     result["documents_cleared"] = count
-                
                 elif method == "repository":
                     if not repo_path or not repo_name:
                         raise ValueError("Repository path and name required")
-                    
-                    success = await self.reindex_ops.reindex_repository(
-                        repo_path=repo_path,
-                        repo_name=repo_name,
-                        method=ReindexMethod.INCREMENTAL
-                    )
-                    result["status"] = "success" if success else "failed"
+                    # Optional clear step if caller provided clear_filter through kwargs
+                    if clear_filter:
+                        await self._clear_documents(index, clear_filter)
+
+                    succeeded = await self._reindex_repository(index, repo_path, repo_name)
+                    result["status"] = "success" if succeeded else "failed"
                     result["repository"] = repo_name
-                
+                    result["documents_uploaded"] = succeeded
                 else:
                     raise ValueError(f"Unknown reindexing method: {method}")
             
@@ -206,7 +236,7 @@ class ReindexAutomation:
             if not backup_path:
                 backup_path = f"index_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             
-            success = await self.reindex_ops.backup_index_schema(backup_path)
+            success = await self._backup_index_schema(self._index_default_name, backup_path)
             return {
                 "action": "backup",
                 "path": backup_path,
@@ -224,7 +254,13 @@ class ReindexAutomation:
             # Remove backup metadata
             schema.pop('_backup_metadata', None)
             
-            success = await self.reindex_ops.drop_and_rebuild(backup_path)
+            # Recreate index with backed-up schema
+            try:
+                await self.ops.delete_index(self._index_default_name)
+            except Exception:
+                pass
+            await self.ops.create_index(schema)
+            success = True
             return {
                 "action": "restore",
                 "path": backup_path,
@@ -284,3 +320,107 @@ class ReindexAutomation:
             "recommendations": recommendations,
             "analysis_time": datetime.utcnow().isoformat()
         }
+
+    # ===== Internal helpers =====
+
+    async def _validate_index_schema(self, index_name: str) -> Dict[str, Any]:
+        """Validate the current index schema and surface issues/warnings."""
+        try:
+            index = await self.ops.get_index(index_name)
+        except Exception as e:
+            return {"valid": False, "error": str(e), "issues": [str(e)], "warnings": []}
+
+        issues: List[str] = []
+        warnings_list: List[str] = []
+
+        fields = index.get("fields", [])
+        field_names = {f.get("name") for f in fields}
+        required_fields = {"id", "file_path", "repository", "content"}
+        missing = required_fields - field_names
+        if missing:
+            issues.append(f"Missing required fields: {sorted(missing)}")
+
+        # Vector config checks
+        if index.get("vectorSearch"):
+            vector_fields = [f for f in fields if f.get("dimensions")]
+            if not vector_fields:
+                warnings_list.append("Vector search enabled but no vector fields found")
+            else:
+                try:
+                    from enhanced_rag.core.config import get_config  # type: ignore
+                    expected_dims = getattr(get_config().azure, "embedding_dimensions", 1536)
+                except Exception:
+                    expected_dims = 1536
+                for vf in vector_fields:
+                    if vf.get("name") == "content_vector" and vf.get("dimensions") != expected_dims:
+                        warnings_list.append(
+                            f"content_vector dimensions {vf.get('dimensions')} != expected {expected_dims}"
+                        )
+
+        # Field attribute checks
+        for f in fields:
+            if f.get("name") == "file_path" and not f.get("filterable", False):
+                warnings_list.append("Field 'file_path' should be filterable")
+            if f.get("name") == "repository" and not f.get("facetable", False):
+                warnings_list.append("Field 'repository' should be facetable")
+
+        return {
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "warnings": warnings_list,
+        }
+
+    async def _clear_documents(self, index_name: str, filter_query: Optional[str]) -> int:
+        """Clear documents by fetching keys and deleting in batches."""
+        total_deleted = 0
+        top = 1000
+        skip = 0
+        while True:
+            options = {
+                "select": ["id"],
+                "top": top,
+                "skip": skip,
+                "count": True,
+            }
+            if filter_query:
+                options["filter"] = filter_query
+            results = await self.ops.search(index_name, "*", **options)
+            docs = [d.get("id") for d in results.get("value", []) if d.get("id")]
+            if not docs:
+                break
+            await self.ops.delete_documents(index_name, docs)
+            total_deleted += len(docs)
+            skip += top
+        return total_deleted
+
+    async def _reindex_repository(self, index_name: str, repo_path: str, repo_name: str) -> int:
+        """Process a repository and upload documents in batches."""
+        processor = FileProcessor()
+        docs = processor.process_repository(repo_path, repo_name)
+
+        data_automation = DataAutomation(self.ops)
+
+        async def gen() -> AsyncIterator[Dict[str, Any]]:
+            for d in docs:
+                yield d
+
+        result = await data_automation.bulk_upload(index_name=index_name, documents=gen(), batch_size=100)
+        return result.get("succeeded", 0)
+
+    async def _backup_index_schema(self, index_name: str, output_path: str) -> bool:
+        try:
+            index = await self.ops.get_index(index_name)
+            # Remove known metadata keys if present
+            for key in ("@odata.context", "@odata.etag", "etag", "e_tag"):
+                index.pop(key, None)
+            index["_backup_metadata"] = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "index_name": index_name,
+            }
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(index, f, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to backup schema: {e}")
+            return False
