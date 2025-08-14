@@ -8,7 +8,7 @@ import logging
 import os
 from typing import Dict, Any, Literal, cast
 
-from enhanced_rag.core.config import get_config, validate_config
+from enhanced_rag.core.unified_config import get_config
 from .compatibility.socketpair_patch import apply_patches
 
 # Import what we need from enhanced_rag - separate try/except for each component
@@ -193,10 +193,9 @@ class MCPServer:
         # This allows the server to start and advertise limited functionality
         # (e.g. no search backend) rather than failing to connect entirely.
         config = get_config()
-        try:
-            validate_config(config)
-        except ValueError as e:
-            logger.warning("Configuration issues detected; continuing with degraded features: %s", str(e))
+        errors = config.validate_config()
+        if errors:
+            logger.warning("Configuration issues detected; continuing with degraded features: %s", errors)
 
         # ------------------------------------------------------------------
         # Setup logging
@@ -209,7 +208,7 @@ class MCPServer:
         # back to INFO when the supplied value is unknown.
 
         # Get log level from either MCP_LOG_LEVEL env var or config.log_level
-        _log_level: str = os.getenv("MCP_LOG_LEVEL", config.log_level).upper()
+        _log_level: str = os.getenv("MCP_LOG_LEVEL", config.mcp_log_level.value).upper()
         _resolved_level = getattr(logging, _log_level, logging.INFO)
 
         # Defensive logging setup: avoid reconfiguring if already configured elsewhere
@@ -267,7 +266,7 @@ class MCPServer:
         # Initialize transport wrapper for unified auth
         from .mcp.transport_wrapper import TransportWrapper
         self.transport_wrapper = TransportWrapper(self)
-        
+
         # Register MCP endpoints
         from .mcp import register_tools, register_resources, register_prompts
 
@@ -314,17 +313,17 @@ class MCPServer:
             AZURE_SDK_AVAILABLE
             and AzureKeyCredential is not None
             and SearchClient is not None
-            and bool(config.azure.endpoint and config.azure.endpoint.strip())
+            and bool(self.rag_config.acs_endpoint and self.rag_config.acs_endpoint.strip())
         ):
             # Choose key: admin if available
-            api_key = config.azure.admin_key.strip()
+            api_key = self.rag_config.acs_admin_key.get_secret_value() if self.rag_config.acs_admin_key else ""
             if api_key:
                 try:
                     # Construct credential only after verifying the symbol is available
                     azure_key_credential = AzureKeyCredential(api_key)  # type: ignore[call-arg]
                     self.search_client = SearchClient(
-                        endpoint=str(config.azure.endpoint),
-                        index_name=str(config.azure.index_name),
+                        endpoint=str(self.rag_config.acs_endpoint),
+                        index_name=str(self.rag_config.acs_index_name),
                         credential=azure_key_credential,
                     )  # type: ignore[call-arg]
                 except TypeError as e:
@@ -344,7 +343,8 @@ class MCPServer:
         self.pipeline = None
         if PIPELINE_AVAILABLE:
             try:
-                pipeline_config = self.rag_config.copy()
+                # Convert config to dict for pipeline
+                pipeline_config = self.rag_config.model_dump()  # Use Pydantic v2 method
                 # Wire up adaptive ranking and ModelUpdater if learning support is available
                 if LEARNING_SUPPORT:
                     # Initialize model_updater first since pipeline needs it
@@ -380,7 +380,7 @@ class MCPServer:
         # Initialize cache manager
         if CACHE_SUPPORT:
             self.cache_manager = CacheManager(
-                ttl=config.cache_ttl_seconds, max_size=config.cache_max_entries
+                ttl=self.rag_config.cache_ttl_seconds, max_size=self.rag_config.cache_max_entries
             )  # type: ignore[call-arg]
         else:
             self.cache_manager = None
@@ -388,7 +388,7 @@ class MCPServer:
         # Initialize learning components
         if LEARNING_SUPPORT:
             self.feedback_collector = FeedbackCollector(
-                storage_path=str(config.feedback_dir)
+                storage_path=str(self.rag_config.feedback_dir)
             )  # type: ignore[call-arg]
             self.usage_analyzer = UsageAnalyzer(
                 feedback_collector=self.feedback_collector
@@ -423,15 +423,15 @@ class MCPServer:
             try:
                 # Create REST client and operations
                 self.rest_client = AzureSearchClient(
-                    endpoint=config.acs_endpoint,
-                    api_key=config.acs_admin_key.get_secret_value() if config.acs_admin_key else ""
+                    endpoint=self.rag_config.acs_endpoint,
+                    api_key=self.rag_config.acs_admin_key.get_secret_value() if self.rag_config.acs_admin_key else ""
                 )  # type: ignore[call-arg]
                 self.rest_ops = SearchOperations(self.rest_client)  # type: ignore[call-arg]
 
                 # Initialize automation managers
                 self.index_automation = IndexAutomation(
-                    endpoint=config.acs_endpoint,
-                    api_key=config.acs_admin_key.get_secret_value() if config.acs_admin_key else ""
+                    endpoint=self.rag_config.acs_endpoint,
+                    api_key=self.rag_config.acs_admin_key.get_secret_value() if self.rag_config.acs_admin_key else ""
                 )  # type: ignore[call-arg]
                 self.data_automation = DataAutomation(self.rest_ops)  # type: ignore[call-arg]
                 self.indexer_automation = IndexerAutomation(self.rest_ops)  # type: ignore[call-arg]
@@ -525,7 +525,7 @@ class MCPServer:
 
         # For stdio mode, start async components synchronously to ensure they're ready
         import asyncio
-        
+
         if transport == "stdio":
             # In stdio mode, ensure components are started before handling requests
             try:

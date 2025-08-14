@@ -11,11 +11,12 @@ All environment variables and settings are defined here with Pydantic validation
 
 import os
 import logging
+from enum import Enum
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings
-from enum import Enum
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -32,345 +33,352 @@ class LogLevel(str, Enum):
 class UnifiedConfig(BaseSettings):
     """
     Unified configuration for the entire MCP RAG system.
-    
+
     This consolidates:
     - mcprag/config.py (MCP server settings)
     - enhanced_rag/core/config.py (RAG pipeline settings)
     - enhanced_rag/azure_integration/config.py (Azure Search settings)
     """
-    
+
     # ============================================================
     # Azure Search Configuration (Required)
     # ============================================================
     acs_endpoint: str = Field(
-        ...,
-        env="ACS_ENDPOINT",
+        default="",
+        alias="ACS_ENDPOINT",
         description="Azure Cognitive Search endpoint URL"
     )
-    acs_admin_key: SecretStr = Field(
-        ...,
-        env="ACS_ADMIN_KEY",
+    acs_admin_key: Optional[SecretStr] = Field(
+        default=None,
+        alias="ACS_ADMIN_KEY",
         description="Azure Search admin key (write access)"
     )
     acs_query_key: Optional[SecretStr] = Field(
-        None,
-        env="ACS_QUERY_KEY",
+        default=None,
+        alias="ACS_QUERY_KEY",
         description="Azure Search query key (read-only access)"
     )
     acs_index_name: str = Field(
-        "codebase-mcp-sota",
-        env="ACS_INDEX_NAME",
+        default="codebase-mcp-sota",
+        alias="ACS_INDEX_NAME",
         description="Name of the Azure Search index"
     )
     acs_api_version: str = Field(
-        "2024-07-01",
-        env="ACS_API_VERSION",
+        default="2025-08-01-preview",
+        alias="ACS_API_VERSION",
         description="Azure Search API version"
     )
     acs_semantic_config: str = Field(
-        "enhanced-semantic-config",
-        env="ACS_SEMANTIC_CONFIG",
+        default="enhanced-semantic-config",
+        alias="ACS_SEMANTIC_CONFIG",
         description="Semantic search configuration name"
     )
     acs_timeout: int = Field(
-        30,
-        env="ACS_TIMEOUT",
+        default=30,
+        alias="ACS_TIMEOUT",
         description="Request timeout in seconds"
     )
-    
+
     # Azure resource settings
     azure_resource_group: Optional[str] = Field(
-        None,
-        env="AZURE_RESOURCE_GROUP",
+        default=None,
+        alias="AZURE_RESOURCE_GROUP",
         description="Azure resource group name"
     )
     azure_search_service_name: Optional[str] = Field(
-        None,
-        env="AZURE_SEARCH_SERVICE_NAME",
+        default=None,
+        alias="AZURE_SEARCH_SERVICE_NAME",
         description="Azure Search service name (inferred from endpoint if not set)"
     )
-    
+
     # ============================================================
     # Azure OpenAI Configuration (Optional - for embeddings)
     # ============================================================
     azure_openai_endpoint: Optional[str] = Field(
-        None,
-        env="AZURE_OPENAI_ENDPOINT",
+        default=None,
+        alias="AZURE_OPENAI_ENDPOINT",
         description="Azure OpenAI endpoint URL"
     )
     azure_openai_key: Optional[SecretStr] = Field(
-        None,
-        env="AZURE_OPENAI_KEY",
+        default=None,
+        alias="AZURE_OPENAI_KEY",
         description="Azure OpenAI API key"
     )
     azure_openai_deployment: str = Field(
-        "text-embedding-3-large",
-        env="AZURE_OPENAI_DEPLOYMENT",
+        default="text-embedding-3-large",
+        alias="AZURE_OPENAI_DEPLOYMENT",
         description="Azure OpenAI deployment name for embeddings"
     )
     azure_openai_api_version: str = Field(
-        "2024-10-21",
-        env="AZURE_OPENAI_API_VERSION",
+        default="2024-10-21",
+        alias="AZURE_OPENAI_API_VERSION",
         description="Azure OpenAI API version"
     )
-    
+
     # Fallback OpenAI settings
     openai_api_key: Optional[SecretStr] = Field(
-        None,
-        env="OPENAI_API_KEY",
+        default=None,
+        alias="OPENAI_API_KEY",
         description="OpenAI API key (fallback if Azure OpenAI not configured)"
     )
-    
+
     # ============================================================
     # MCP Server Configuration
     # ============================================================
     mcp_admin_mode: bool = Field(
-        False,
-        env="MCP_ADMIN_MODE",
+        default=False,
+        alias="MCP_ADMIN_MODE",
         description="Enable admin mode for destructive operations"
     )
     mcp_log_level: LogLevel = Field(
-        LogLevel.INFO,
-        env="MCP_LOG_LEVEL",
+        default=LogLevel.INFO,
+        alias="MCP_LOG_LEVEL",
         description="Logging level for MCP server"
     )
     mcp_host: str = Field(
-        "0.0.0.0",
-        env="MCP_HOST",
+        default="0.0.0.0",
+        alias="MCP_HOST",
         description="Host to bind MCP server to"
     )
     mcp_port: int = Field(
-        8001,
-        env="MCP_PORT",
+        default=8001,
+        alias="MCP_PORT",
         description="Port for MCP server"
     )
     mcp_base_url: str = Field(
-        "http://localhost:8001",
-        env="MCP_BASE_URL",
+        default="http://localhost:8001",
+        alias="MCP_BASE_URL",
         description="Base URL for MCP server"
     )
     mcp_allowed_origins: str = Field(
-        "*",
-        env="MCP_ALLOWED_ORIGINS",
+        default="*",
+        alias="MCP_ALLOWED_ORIGINS",
         description="CORS allowed origins"
     )
     mcp_dev_mode: bool = Field(
-        False,
-        env="MCP_DEV_MODE",
+        default=False,
+        alias="MCP_DEV_MODE",
         description="Enable development mode (bypass auth)"
     )
-    
+
     # ============================================================
     # Cache Configuration
     # ============================================================
     cache_ttl_seconds: int = Field(
-        60,
-        env="MCP_CACHE_TTL_SECONDS",
+        default=60,
+        alias="MCP_CACHE_TTL_SECONDS",
         description="Cache TTL in seconds"
     )
     cache_max_entries: int = Field(
-        500,
-        env="MCP_CACHE_MAX_ENTRIES",
+        default=500,
+        alias="MCP_CACHE_MAX_ENTRIES",
         description="Maximum number of cache entries"
     )
     cache_enabled: bool = Field(
-        True,
-        env="MCP_CACHE_ENABLED",
+        default=True,
+        alias="MCP_CACHE_ENABLED",
         description="Enable caching"
     )
-    
+
     # ============================================================
     # Feedback & Monitoring
     # ============================================================
     feedback_dir: Path = Field(
-        Path(".mcp_feedback"),
-        env="MCP_FEEDBACK_DIR",
+        default=Path(".mcp_feedback"),
+        alias="MCP_FEEDBACK_DIR",
         description="Directory for feedback storage"
     )
     debug_timings: bool = Field(
-        False,
-        env="MCP_DEBUG_TIMINGS",
+        default=False,
+        alias="MCP_DEBUG_TIMINGS",
         description="Enable timing debug logs"
     )
-    
+
     # ============================================================
     # Authentication Configuration (Optional)
     # ============================================================
     stytch_project_id: Optional[str] = Field(
-        None,
-        env="STYTCH_PROJECT_ID",
+        default=None,
+        alias="STYTCH_PROJECT_ID",
         description="Stytch project ID for auth"
     )
     stytch_secret: Optional[SecretStr] = Field(
-        None,
-        env="STYTCH_SECRET",
+        default=None,
+        alias="STYTCH_SECRET",
         description="Stytch secret key"
     )
     stytch_env: str = Field(
-        "test",
-        env="STYTCH_ENV",
+        default="test",
+        alias="STYTCH_ENV",
         description="Stytch environment"
     )
     session_duration_minutes: int = Field(
-        480,
-        env="SESSION_DURATION_MINUTES",
+        default=480,
+        alias="SESSION_DURATION_MINUTES",
         description="Session duration in minutes"
     )
-    
+
     # Redis for session storage
     redis_url: Optional[str] = Field(
-        None,
-        env="REDIS_URL",
+        default=None,
+        alias="REDIS_URL",
         description="Redis URL for session storage"
     )
-    
+
     # User tier configuration
     admin_emails: List[str] = Field(
         default_factory=list,
-        env="MCP_ADMIN_EMAILS",
+        alias="MCP_ADMIN_EMAILS",
         description="Comma-separated list of admin emails"
     )
     developer_domains: List[str] = Field(
         default_factory=list,
-        env="MCP_DEVELOPER_DOMAINS",
+        alias="MCP_DEVELOPER_DOMAINS",
         description="Comma-separated list of developer domains"
     )
     require_mfa_for_admin: bool = Field(
-        True,
-        env="MCP_REQUIRE_MFA",
+        default=True,
+        alias="MCP_REQUIRE_MFA",
         description="Require MFA for admin access"
     )
-    
+
     # ============================================================
     # RAG Pipeline Configuration
     # ============================================================
     # Embedding settings
     embedding_provider: str = Field(
-        "azure_openai_http",
-        env="EMBEDDING_PROVIDER",
+        default="azure_openai_http",
+        alias="EMBEDDING_PROVIDER",
         description="Embedding provider (azure_openai_http, client, none)"
     )
     embedding_model: str = Field(
-        "text-embedding-3-small",
-        env="EMBEDDING_MODEL",
+        default="text-embedding-3-small",
+        alias="EMBEDDING_MODEL",
         description="Embedding model name"
     )
     embedding_dimensions: int = Field(
-        1536,
-        env="EMBEDDING_DIMENSIONS",
+        default=1536,
+        alias="EMBEDDING_DIMENSIONS",
         description="Embedding vector dimensions"
     )
     embedding_batch_size: int = Field(
-        16,
-        env="EMBEDDING_BATCH_SIZE",
+        default=16,
+        alias="EMBEDDING_BATCH_SIZE",
         description="Batch size for embedding generation"
     )
-    
+
     # Search settings
     search_top_k: int = Field(
-        50,
-        env="SEARCH_TOP_K",
+        default=50,
+        alias="SEARCH_TOP_K",
         description="Number of results for semantic ranker"
     )
     search_timeout_seconds: int = Field(
-        30,
-        env="SEARCH_TIMEOUT_SECONDS",
+        default=30,
+        alias="SEARCH_TIMEOUT_SECONDS",
         description="Search timeout in seconds"
     )
     enable_semantic_search: bool = Field(
-        True,
-        env="ENABLE_SEMANTIC_SEARCH",
+        default=True,
+        alias="ENABLE_SEMANTIC_SEARCH",
         description="Enable semantic search"
     )
     enable_vector_search: bool = Field(
-        True,
-        env="ENABLE_VECTOR_SEARCH",
+        default=True,
+        alias="ENABLE_VECTOR_SEARCH",
         description="Enable vector search"
     )
     enable_keyword_search: bool = Field(
-        True,
-        env="ENABLE_KEYWORD_SEARCH",
+        default=True,
+        alias="ENABLE_KEYWORD_SEARCH",
         description="Enable keyword search"
     )
-    
+
     # Context extraction
     max_context_depth: int = Field(
-        3,
-        env="MAX_CONTEXT_DEPTH",
+        default=3,
+        alias="MAX_CONTEXT_DEPTH",
         description="Maximum context extraction depth"
     )
     include_git_history: bool = Field(
-        True,
-        env="INCLUDE_GIT_HISTORY",
+        default=True,
+        alias="INCLUDE_GIT_HISTORY",
         description="Include git history in context"
     )
     git_history_days: int = Field(
-        7,
-        env="GIT_HISTORY_DAYS",
+        default=7,
+        alias="GIT_HISTORY_DAYS",
         description="Days of git history to include"
     )
-    
+
     # File processing
     max_file_size_mb: int = Field(
-        10,
-        env="MAX_FILE_SIZE_MB",
+        default=10,
+        alias="MAX_FILE_SIZE_MB",
         description="Maximum file size in MB to process"
     )
     max_index_files: int = Field(
-        10000,
-        env="MCP_MAX_INDEX_FILES",
+        default=10000,
+        alias="MAX_INDEX_FILES",
         description="Maximum number of files to index"
     )
-    
+
     # ============================================================
     # Index Configuration
     # ============================================================
     index_replica_count: int = Field(
-        1,
-        env="INDEX_REPLICA_COUNT",
+        default=1,
+        alias="INDEX_REPLICA_COUNT",
         description="Number of index replicas"
     )
     index_partition_count: int = Field(
-        1,
-        env="INDEX_PARTITION_COUNT",
+        default=1,
+        alias="INDEX_PARTITION_COUNT",
         description="Number of index partitions"
     )
-    
-    class Config:
-        """Pydantic configuration"""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = "allow"  # Allow extra environment variables
-        
-        @classmethod
-        def customise_sources(
-            cls,
-            init_settings,
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="allow",  # Allow extra environment variables
+        populate_by_name=True,  # Allow both field name and alias
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        """
+        Define the priority of settings sources.
+        Priority (highest to lowest):
+        1. Environment variables
+        2. .env file
+        3. File secrets
+        4. Default values
+        """
+        return (
             env_settings,
+            dotenv_settings,
             file_secret_settings,
-        ):
-            """
-            Define the priority of settings sources.
-            Priority (highest to lowest):
-            1. Environment variables
-            2. .env file
-            3. Default values
-            """
-            return (
-                env_settings,
-                file_secret_settings,
-                init_settings,
-            )
-    
+            init_settings,
+        )
+
     @field_validator("admin_emails", "developer_domains", mode='before')
     @classmethod
     def split_comma_separated(cls, v):
         """Convert comma-separated strings to lists"""
         if isinstance(v, str):
             return [x.strip() for x in v.split(",") if x.strip()]
-        return v or []
-    
+        if v is None:
+            return []
+        return v
+
     @property
     def resolved_azure_search_service_name(self) -> Optional[str]:
         """Get the Azure Search service name, inferring from endpoint if needed."""
@@ -378,9 +386,9 @@ class UnifiedConfig(BaseSettings):
             return self.azure_search_service_name
         if self.acs_endpoint and ".search.windows.net" in self.acs_endpoint:
             # Extract service name from https://xxx.search.windows.net
-            return self.acs_endpoint.split("//")[1].split(".")[0]
+            return self.acs_endpoint.split("//")[1].split(".")[0]  # type: ignore
         return None
-    
+
     @field_validator("azure_openai_key", mode='before')
     @classmethod
     def resolve_openai_key(cls, v):
@@ -393,23 +401,23 @@ class UnifiedConfig(BaseSettings):
             if key:
                 return SecretStr(key)
         return None
-    
+
     def validate_config(self) -> Dict[str, str]:
         """
         Validate configuration and return any errors.
-        
+
         Returns:
             Dictionary of field names to error messages
         """
         errors = {}
-        
+
         # Required fields
         if not self.acs_endpoint:
             errors["acs_endpoint"] = "ACS_ENDPOINT is required"
-        
+
         if not self.acs_admin_key and not self.acs_query_key:
             errors["api_key"] = "Either ACS_ADMIN_KEY or ACS_QUERY_KEY is required"
-        
+
         # Validate embeddings config if enabled
         if self.enable_vector_search:
             if self.embedding_provider == "azure_openai_http":
@@ -421,40 +429,44 @@ class UnifiedConfig(BaseSettings):
                     errors["azure_openai_key"] = (
                         "AZURE_OPENAI_KEY or OPENAI_API_KEY required for vector search"
                     )
-        
+
         return errors
-    
+
     def to_legacy_azure_config(self) -> Dict[str, Any]:
         """
         Convert to legacy AzureSearchConfig format for backward compatibility.
-        
+
         Returns:
             Dictionary compatible with old AzureSearchConfig
         """
+        api_key = ""
+        if self.acs_admin_key is not None:
+            api_key = self.acs_admin_key.get_secret_value()
+        
         return {
             "endpoint": self.acs_endpoint,
-            "api_key": self.acs_admin_key.get_secret_value() if self.acs_admin_key else "",
+            "api_key": api_key,
             "api_version": self.acs_api_version,
             "timeout": float(self.acs_timeout),
             "index_name": self.acs_index_name,
         }
-    
+
     def to_legacy_mcp_config(self) -> Dict[str, Any]:
         """
         Convert to legacy MCP Config format for backward compatibility.
-        
+
         Returns:
             Dictionary compatible with old Config class attributes
         """
         return {
             "ENDPOINT": self.acs_endpoint,
-            "ADMIN_KEY": self.acs_admin_key.get_secret_value() if self.acs_admin_key else "",
-            "QUERY_KEY": self.acs_query_key.get_secret_value() if self.acs_query_key else "",
+            "ADMIN_KEY": self.acs_admin_key.get_secret_value() if self.acs_admin_key else "",  # type: ignore
+            "QUERY_KEY": self.acs_query_key.get_secret_value() if self.acs_query_key else "",  # type: ignore
             "INDEX_NAME": self.acs_index_name,
-            "AZURE_OPENAI_KEY": self.azure_openai_key.get_secret_value() if self.azure_openai_key else None,
+            "AZURE_OPENAI_KEY": self.azure_openai_key.get_secret_value() if self.azure_openai_key else None,  # type: ignore
             "AZURE_OPENAI_ENDPOINT": self.azure_openai_endpoint,
             "AZURE_OPENAI_DEPLOYMENT": self.azure_openai_deployment,
-            "OPENAI_API_KEY": self.openai_api_key.get_secret_value() if self.openai_api_key else None,
+            "OPENAI_API_KEY": self.openai_api_key.get_secret_value() if self.openai_api_key else None,  # type: ignore
             "CACHE_TTL_SECONDS": self.cache_ttl_seconds,
             "CACHE_MAX_ENTRIES": self.cache_max_entries,
             "ADMIN_MODE": self.mcp_admin_mode,
@@ -466,7 +478,7 @@ class UnifiedConfig(BaseSettings):
             "BASE_URL": self.mcp_base_url,
             "ALLOWED_ORIGINS": self.mcp_allowed_origins,
             "STYTCH_PROJECT_ID": self.stytch_project_id or "",
-            "STYTCH_SECRET": self.stytch_secret.get_secret_value() if self.stytch_secret else "",
+            "STYTCH_SECRET": self.stytch_secret.get_secret_value() if self.stytch_secret else "",  # type: ignore
             "STYTCH_ENV": self.stytch_env,
             "SESSION_DURATION_MINUTES": self.session_duration_minutes,
             "REDIS_URL": self.redis_url or "redis://localhost:6379",
@@ -475,17 +487,25 @@ class UnifiedConfig(BaseSettings):
             "REQUIRE_MFA_FOR_ADMIN": self.require_mfa_for_admin,
             "DEV_MODE": self.mcp_dev_mode,
         }
-    
+
     @classmethod
     def get_instance(cls) -> "UnifiedConfig":
         """
         Get or create singleton instance.
-        
+
         Returns:
             UnifiedConfig instance
         """
         if not hasattr(cls, "_instance"):
-            cls._instance = cls()
+            # Create instance; will load from environment variables and .env file
+            try:
+                cls._instance = cls()
+            except Exception as e:
+                # If ACS_ENDPOINT is not set, provide a helpful error
+                raise ValueError(
+                    "ACS_ENDPOINT environment variable is required. "
+                    "Please set it or create a .env file with ACS_ENDPOINT=<your-endpoint>"
+                ) from e
         return cls._instance
 
 
