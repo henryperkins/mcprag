@@ -59,6 +59,12 @@ yarn-error.log*
 .env.*.local
 *.env
 
+# Security - keys and secrets
+key
+*.key
+*.pem
+*.crt
+
 # Azure specific
 .azure/
 azureproject/
@@ -106,6 +112,7 @@ tmp/
 # Documentation build
 docs/_build/
 site/
+docs/searchservice.json
 
 # Jupyter Notebook
 .ipynb_checkpoints
