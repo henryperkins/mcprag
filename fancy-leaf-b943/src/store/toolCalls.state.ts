@@ -106,8 +106,9 @@ export const useToolCalls = create<ToolCallStore>((set, get) => ({
     // Auto-remove after a delay
     setTimeout(() => {
       set((state) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { [callId]: removed, ...rest } = state.active
+        // Remove the completed call without unused bindings
+        const rest = { ...state.active }
+        delete rest[callId]
         return {
           active: rest,
           ribbonCount: Math.max(0, state.ribbonCount - 1),

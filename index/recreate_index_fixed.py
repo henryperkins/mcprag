@@ -7,9 +7,10 @@ import os
 import asyncio
 from typing import Optional
 from dotenv import load_dotenv
-from azure.search.documents.indexes import SearchIndexClient
-from azure.core.credentials import AzureKeyCredential
-from enhanced_rag.azure_integration.rest_index_builder import EnhancedIndexBuilder
+from enhanced_rag.azure_integration.automation import IndexAutomation
+from enhanced_rag.azure_integration.config import AzureSearchConfig
+import json
+from pathlib import Path
 
 load_dotenv()
 
@@ -37,32 +38,35 @@ async def recreate_index():
     # Optional: allow overriding index name via env, else default
     index_name = os.getenv("ACS_INDEX_NAME", "codebase-mcp-sota").strip() or "codebase-mcp-sota"
 
-    # Construct client using guaranteed non-empty strings
-    index_client = SearchIndexClient(
-        endpoint=endpoint,
-        credential=AzureKeyCredential(admin_key)
-    )
+    # Construct automation client using guaranteed non-empty strings
+    automation = IndexAutomation(endpoint=endpoint, api_key=admin_key)
 
     # Delete if exists
     try:
-        index_client.delete_index(index_name)
-        print(f"Deleted existing index: {index_name}")
+        import asyncio as _asyncio
+        _loop = _asyncio.new_event_loop()
+        _asyncio.set_event_loop(_loop)
+        try:
+            _loop.run_until_complete(automation.ops.delete_index(index_name))
+            print(f"Deleted existing index: {index_name}")
+        finally:
+            _loop.close()
     except Exception as e:
         # Avoid failing if index doesn't exist; provide context
         print(f"No existing index to delete or deletion skipped: {e}")
 
     # Create new index with fixed schema
-    builder = EnhancedIndexBuilder()
-    index = await builder.create_enhanced_rag_index(
-        index_name=index_name,
-        description="State-of-the-art code search index with semantic search and vector capabilities",
-        enable_vectors=True,
-        enable_semantic=True
-    )
+    # Create new index from canonical schema
+    schema_path = Path("azure_search_index_schema.json")
+    if not schema_path.exists():
+        raise FileNotFoundError("Index schema file 'azure_search_index_schema.json' not found")
+    index_def = json.loads(schema_path.read_text())
+    index_def["name"] = index_name
+    op = await automation.ensure_index_exists(index_def)
 
-    print(f"\n✅ Successfully created index: {index_name}")
+    print(f"\n✅ Successfully created index: {index_name} (created={op.get('created')}, updated={op.get('updated')})")
     # Fetch current index schema via REST to inspect fields
-    current = await builder._index_automation.ops.get_index(index_name)
+    current = await automation.ops.get_index(index_name)
     fields = current.get("fields", [])
     print(f"Fields: {len(fields)}")
 

@@ -14,8 +14,6 @@ from typing import Dict, Any, List, Optional, Literal, Union
 import aiohttp
 from dataclasses import dataclass
 
-from mcprag.config import Config
-
 # MCP SDK imports with proper type handling
 try:
     from mcp.server.fastmcp import FastMCP

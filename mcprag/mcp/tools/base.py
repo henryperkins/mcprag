@@ -21,10 +21,11 @@ def require_admin_mode(func):
     """Decorator to require admin mode."""
     @wraps(func)
     async def wrapper(*args, **kwargs):
-        from ...config import Config
+        from enhanced_rag.core.unified_config import get_config
         from ...utils.response_helpers import err
 
-        if not Config.ADMIN_MODE:
+        config = get_config()
+        if not config.mcp_admin_mode:
             return err("Admin mode not enabled")
         return await func(*args, **kwargs)
     return wrapper

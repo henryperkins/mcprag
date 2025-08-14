@@ -4,6 +4,7 @@ import os
 import subprocess
 import json
 from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
+from enhanced_rag.core.unified_config import get_config
 from ...utils.response_helpers import ok, err
 from .base import check_component
 
@@ -114,8 +115,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         if not check_component(server.index_automation, "Index automation"):
             return err("Index automation not available")
 
-        from ...config import Config
-        if not Config.ADMIN_MODE and action in ["create", "recreate", "delete"]:
+        config = get_config()
+        if not config.mcp_admin_mode and action in ["create", "recreate", "delete"]:
             return err("Admin mode required for destructive operations")
 
         try:
@@ -218,7 +219,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err("Data automation not available")
 
         from ...config import Config
-        if not Config.ADMIN_MODE and action in ["upload", "delete", "cleanup"]:
+        if not get_config().mcp_admin_mode and action in ["upload", "delete", "cleanup"]:
             return err("Admin mode required for document modifications")
 
         try:
@@ -314,7 +315,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         try:
             from ...config import Config
 
-            if action in {"run", "reset", "create", "delete"} and not Config.ADMIN_MODE:
+            if action in {"run", "reset", "create", "delete"} and not get_config().mcp_admin_mode:
                 return err("Admin mode required for indexer modifications")
 
             if action == "list":
@@ -436,7 +437,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
     ) -> Dict[str, Any]:
         """Create or update a data source connection for Azure AI Search."""
         from ...config import Config
-        if not Config.ADMIN_MODE:
+        if not get_config().mcp_admin_mode:
             return err("Admin mode required to create data sources")
 
         if not check_component(server.rest_ops, "REST operations"):
@@ -537,7 +538,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
     ) -> Dict[str, Any]:
         """Create or update an Azure Cognitive Search skillset."""
         from ...config import Config
-        if not Config.ADMIN_MODE:
+        if not get_config().mcp_admin_mode:
             return err("Admin mode required to create skillsets")
 
         if not check_component(server.rest_ops, "REST operations"):
@@ -648,7 +649,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
 
         try:
             from ...config import Config
-            index_name = Config.INDEX_NAME
+            index_name = get_config().acs_index_name
 
             # Get index stats and definition using automation components
             if server.index_automation is None:
@@ -679,7 +680,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
 
         try:
             from ...config import Config
-            index_name = Config.INDEX_NAME
+            index_name = get_config().acs_index_name
 
             if server.index_automation is None:
                 return err("Index automation component is not initialized")
@@ -707,7 +708,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         """
         try:
             from ...config import Config
-            if not Config.ADMIN_MODE:
+            if not get_config().mcp_admin_mode:
                 return err("Admin mode required for repository indexing")
 
             # Use the CLI automation to index repository
@@ -746,7 +747,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         """
         try:
             from ...config import Config
-            if not Config.ADMIN_MODE:
+            if not get_config().mcp_admin_mode:
                 return err("Admin mode required for file indexing")
 
             # Build CLI arguments
@@ -779,7 +780,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         """
         try:
             from ...config import Config
-            if not Config.ADMIN_MODE:
+            if not get_config().mcp_admin_mode:
                 return err("Admin mode required for schema backup")
 
             # Build CLI arguments
@@ -811,7 +812,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         """
         try:
             from ...config import Config
-            if not Config.ADMIN_MODE:
+            if not get_config().mcp_admin_mode:
                 return err("Admin mode required for document clearing")
 
             # Build CLI arguments
@@ -843,7 +844,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         """
         try:
             from ...config import Config
-            if not Config.ADMIN_MODE:
+            if not get_config().mcp_admin_mode:
                 return err("Admin mode required for index rebuild")
 
             if not confirm:

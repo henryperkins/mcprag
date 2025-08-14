@@ -5,11 +5,11 @@ import './index.css'
 import './styles/components.css'
 import './styles/animations.css'
 import './styles/claude-theme.css'
-import ChatPage from './studio/ChatPage'
+import App from './App'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ChatPage />
+    <App />
   </StrictMode>,
 )
 

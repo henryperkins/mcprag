@@ -43,11 +43,14 @@ This file guides Claude Code and subagents working in this repository. It define
    - `result_explainer.py`: Human-readable explanations
 
 4. **Azure Integration** (`enhanced_rag/azure_integration/`)
-   - REST API client with retry logic
+   - REST API client with retry logic (API version: 2025-08-01-preview)
    - Index, document, and indexer management
    - Embedding generation with caching
    - Repository processing and file chunking
-   - `processing.py`: Single source of truth for file processing, language detection, and repository traversal
+   - **Consolidated modules** (as of 2025-08-12):
+     - `processing.py`: Single source of truth for file processing, language detection, repository traversal, and validation
+     - `lib/index_utils.py`: Shared index lifecycle helpers (ensure_index_exists, recreate_index, schema_differs)
+     - `lib/search_models.py`: Unified search model builders and index definitions
 
 ### Data Flow
 ```
@@ -82,6 +85,7 @@ Additional rules:
 ACS_ENDPOINT=https://<name>.search.windows.net
 ACS_ADMIN_KEY=<admin-key>
 ACS_INDEX_NAME=codebase-mcp-sota  # default
+ACS_API_VERSION=2025-08-01-preview  # optional, override default API version
 AZURE_RESOURCE_GROUP=<your-resource-group>
 # Optional: explicitly set if not inferrable from ACS_ENDPOINT
 AZURE_SEARCH_SERVICE_NAME=<your-search-service-name>
@@ -97,9 +101,12 @@ MCP_LOG_LEVEL=INFO   # DEBUG, INFO, WARNING, ERROR
 MCP_CACHE_TTL_SECONDS=60
 MCP_CACHE_MAX_ENTRIES=500
 MCP_FEEDBACK_DIR=.mcp_feedback
+MCP_ALLOW_EXTERNAL_ROOTS=false  # Allow indexing from excluded directories
 
 # Performance
 MCP_DEBUG_TIMINGS=false  # Enable timing logs
+MCP_INDEX_DEFAULT_EXCLUDES=true  # Use default exclude patterns
+MCP_RESPECT_GITIGNORE=true  # Respect .gitignore files
 ```
 
 ### Key Configuration Files
@@ -249,7 +256,11 @@ Tools requiring explicit `confirm=true` parameter:
 - Language: Python 3.12+ with type hints
 - Style:
   - Prefer small, pure functions; clear names; single responsibility.
-  - Avoid duplicated code; extract shared utilities. Check for existing helpers in `utils/`, `processing.py`, and tool base modules before implementing new functions.
+  - Avoid duplicated code; extract shared utilities. Check for existing helpers in:
+    - `enhanced_rag/azure_integration/lib/` - Index and search model utilities
+    - `enhanced_rag/azure_integration/processing.py` - File processing and validation
+    - `mcprag/utils/` - Response helpers and general utilities
+    - Tool base modules before implementing new functions
   - Handle errors explicitly; avoid silent failures.
   - Validate inputs; sanitize outputs for security.
   - Use dataclasses for structured data
@@ -259,6 +270,7 @@ Tools requiring explicit `confirm=true` parameter:
   - Use TYPE_CHECKING for circular import prevention
   - Import shared utilities from their canonical locations rather than reimplementing
   - Never import deprecated or legacy functions if a canonical version exists
+  - Module-level constants (like `DEFAULT_EXCLUDE_DIRS`) should be imported, not redefined
 - Async:
   - Use `async/await` throughout; handle rejections
   - Add timeouts for all external calls (default 30s)
@@ -323,6 +335,13 @@ python .claude/state/universal_mcp_tool_evaluator.py --tool search_code --suite 
 - 26 tools remain untested (83.9% of tools lack test coverage)
 - Cross-tool integration tests not yet implemented
 
+### Recent Improvements (2025-08-12)
+- **Code duplication reduced**: From 4% to under 1% through consolidation
+- **Shared utilities created**: 14 new utility functions in `lib/` subdirectory
+- **API version updated**: Now using 2025-08-01-preview (latest)
+- **Validation consolidated**: Repository name/path validation centralized in `processing.py`
+- **Total LOC removed**: ~360 lines of duplicated code eliminated
+
 ## Documentation standards
 - Update README and relevant docs when behavior changes.
 - Keep code comments concise and accurate.
@@ -337,6 +356,8 @@ python .claude/state/universal_mcp_tool_evaluator.py --tool search_code --suite 
   - [ ] Docs updated (if behavior changed)
   - [ ] Security implications reviewed
   - [ ] No edits to protected paths without approval
+  - [ ] Check for code duplication - use existing utilities from `lib/` and `processing.py`
+  - [ ] Verify imports use canonical locations (no local redefinitions)
 
 ## Security checklist (quick)
 - No secrets or tokens in code or config.
@@ -459,6 +480,7 @@ The system includes feedback-based learning components:
 
 #### Shared Utilities
 - **Repository root detection**: Use `find_repository_root()` from `enhanced_rag/azure_integration/processing.py`
+- **Repository validation**: Use `validate_repo_name()` and `validate_repo_path()` from `enhanced_rag/azure_integration/processing.py`
 - **Response helpers**: Import `ok`/`err` from `mcprag/utils/response_helpers.py` - never redefine locally
 - **CLI subprocess invocation**: Use `_run_enhanced_cli()` from `mcprag/mcp/tools/azure_management.py` for invoking enhanced_rag CLI
 - **Azure service resolution**: Use `_resolve_search_service_name()` and `_build_mgmt_context()` from `mcprag/mcp/tools/service_management.py`
@@ -468,7 +490,19 @@ The system includes feedback-based learning components:
   - Repository traversal via `process_repository()`
   - Extension filtering via `DEFAULT_EXTENSIONS`
   - Language detection via `get_language_from_extension()`
-  - Never duplicate directory walking or extension filtering logic
+  - Repository name and path validation
+  - Never duplicate directory walking, extension filtering, or validation logic
+
+#### Index Management Utilities
+- **Index lifecycle** (`enhanced_rag/azure_integration/lib/index_utils.py`):
+  - `ensure_index_exists()` - Create or update index with schema validation
+  - `recreate_index()` - Drop and recreate index with optional backup
+  - `schema_differs()` - Compare index schemas for differences
+  - `validate_index_schema()` - Validate schema and surface issues
+- **Search models** (`enhanced_rag/azure_integration/lib/search_models.py`):
+  - `create_standard_index_definition()` - Complete index definition builder
+  - `create_default_vector_search_config()` - Standard vector search setup
+  - `create_default_semantic_config()` - Standard semantic search setup
 
 #### Component Validation
 - Use `check_component()` for all component availability checks

@@ -6,7 +6,7 @@ for advanced search capabilities.
 """
 
 from .server import MCPServer, create_server
-from .config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig as Config
 
 __version__ = "3.0.0"
 

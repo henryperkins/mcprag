@@ -34,16 +34,80 @@ export interface ClaudeOptions {
   onComplete?: () => void;
 }
 
+// Legacy message handling deprecation flags
+const LEGACY_MESSAGE_SUPPORT = import.meta.env.VITE_LEGACY_MESSAGE_SUPPORT !== 'false';
+const LEGACY_REMOVAL_DATE = '2025-10-10';
+let HAS_SHOWN_LEGACY_DEPRECATION = false;
+
+function warnLegacyDeprecationOnce() {
+  if (!HAS_SHOWN_LEGACY_DEPRECATION) {
+    HAS_SHOWN_LEGACY_DEPRECATION = true;
+    console.warn(
+      '[DEPRECATION] Legacy message handling is enabled and will be removed after',
+      LEGACY_REMOVAL_DATE,
+      '- set VITE_LEGACY_MESSAGE_SUPPORT=false to disable now.'
+    );
+  }
+}
+
 class ClaudeService {
   private abortController: AbortController | null = null;
   private readonly baseUrl: string;
   private sessionId: string | null = null;
   private wsConnection: WebSocket | null = null;
+  private eventListeners: Map<string, Set<Function>> = new Map();
+  private availableTools: string[] = [];
+  private mcpServers: any[] = [];
 
   constructor() {
     // Use Worker gateway endpoint
     this.baseUrl = import.meta.env.VITE_CLAUDE_GATEWAY_URL || '';
     this.initSession();
+
+    // Warn once if legacy support is enabled
+    if (LEGACY_MESSAGE_SUPPORT) {
+      warnLegacyDeprecationOnce();
+    }
+    
+    // Set up event listener for tools info requests
+    this.on('request-tools-info', () => {
+      // Emit current tools state if available
+      if (this.availableTools.length > 0 || this.mcpServers.length > 0) {
+        this.emit('tools-update', {
+          tools: this.availableTools,
+          mcpServers: this.mcpServers
+        });
+      }
+    });
+  }
+
+  // Event emitter methods
+  on(event: string, callback: Function): () => void {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, new Set());
+    }
+    this.eventListeners.get(event)!.add(callback);
+    
+    // Return unsubscribe function
+    return () => {
+      const listeners = this.eventListeners.get(event);
+      if (listeners) {
+        listeners.delete(callback);
+      }
+    };
+  }
+
+  emit(event: string, data?: any): void {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      listeners.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error(`Error in event listener for ${event}:`, error);
+        }
+      });
+    }
   }
 
   private async initSession() {
@@ -203,6 +267,8 @@ class ClaudeService {
     if (isSystemInit(message)) {
       // System initialization
       this.sessionId = message.session_id || this.sessionId;
+      this.availableTools = message.tools || [];
+      this.mcpServers = message.mcp_servers || [];
       
       messagesStore.addMessage({
         type: 'system',
@@ -224,6 +290,13 @@ class ClaudeService {
       if (message.mcp_servers && 'setMcpServers' in sessionStore) {
         (sessionStore as any).setMcpServers(message.mcp_servers);
       }
+      
+      // Emit tools update event for UI components
+      this.emit('tools-update', {
+        tools: this.availableTools,
+        mcpServers: this.mcpServers,
+        model: message.model
+      });
     } else if (isAssistantMessage(message)) {
       // Assistant message with content blocks
       const assistantMsg = message as SDKAssistantMessage;
@@ -318,6 +391,14 @@ class ClaudeService {
   }
   
   private handleLegacyMessage(message: any) {
+    // Deprecation gate for legacy message handling paths
+    if (!LEGACY_MESSAGE_SUPPORT) {
+      warnLegacyDeprecationOnce();
+      // Legacy handling disabled - ignore legacy message types
+      return;
+    }
+    warnLegacyDeprecationOnce();
+
     const messagesStore = useMessages.getState();
     const toolCallsStore = useToolCalls.getState();
     

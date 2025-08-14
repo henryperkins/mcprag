@@ -15,14 +15,16 @@ os.environ["MCP_DEV_MODE"] = "true"
 if "ACS_ADMIN_KEY" in os.environ:
     del os.environ["ACS_ADMIN_KEY"]
 
-from mcprag.config import Config
+from enhanced_rag.core.unified_config import get_config
 
 print("Testing Remote MCP Configuration...")
 print("=" * 50)
 
+config = get_config()
+
 # Test 1: Config validation with QUERY_KEY
 print("\n1. Testing Config validation with QUERY_KEY...")
-errors = Config.validate()
+errors = config.validate_config()
 if errors:
     print(f"   ❌ Validation errors: {errors}")
     sys.exit(1)
@@ -31,19 +33,19 @@ else:
 
 # Test 2: Check DEV_MODE
 print(f"\n2. Testing DEV_MODE...")
-print(f"   DEV_MODE = {Config.DEV_MODE}")
-if Config.DEV_MODE:
+print(f"   DEV_MODE = {config.mcp_dev_mode}")
+if config.mcp_dev_mode:
     print(f"   ✅ DEV_MODE correctly set")
 else:
     print(f"   ❌ DEV_MODE not set")
 
-# Test 3: Check RAG config uses QUERY_KEY
-print(f"\n3. Testing RAG config...")
-rag_config = Config.get_rag_config()
-if rag_config["azure_key"] == "test-query-key":
-    print(f"   ✅ RAG config correctly uses QUERY_KEY")
+# Test 3: Check config uses QUERY_KEY
+print(f"\n3. Testing config uses QUERY_KEY...")
+query_key = config.acs_query_key.get_secret_value() if config.acs_query_key else None
+if query_key == "test-query-key":
+    print(f"   ✅ Config correctly uses QUERY_KEY")
 else:
-    print(f"   ❌ RAG config not using QUERY_KEY: {rag_config['azure_key']}")
+    print(f"   ❌ Config not using QUERY_KEY: {query_key}")
 
 # Test 4: Import remote server to check datetime import
 print(f"\n4. Testing remote server import...")

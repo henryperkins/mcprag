@@ -18,23 +18,9 @@ class PatternMatchScorer:
     def __init__(self, config: Optional[Dict] = None):
         self.config = config or {}
         self.pattern_registry = get_pattern_registry()
-
-        # Pattern keyword mappings
-        self.pattern_keywords = {
-            'singleton': ['singleton', 'instance', 'getInstance', '_instance'],
-            'factory': ['factory', 'create', 'build', 'make', 'produce'],
-            'observer': ['observer', 'listener', 'subscribe', 'notify', 'event'],
-            'decorator': ['decorator', 'wrapper', 'enhance', '@'],
-            'strategy': ['strategy', 'algorithm', 'policy', 'behavior'],
-            'adapter': ['adapter', 'adaptor', 'wrapper', 'bridge'],
-            'template': ['template', 'abstract', 'hook', 'skeleton'],
-            'async': ['async', 'await', 'promise', 'future', 'concurrent'],
-            'cache': ['cache', 'memoize', 'store', 'cached'],
-            'retry': ['retry', 'resilient', 'fallback', 'circuit breaker'],
-            'repository': ['repository', 'dao', 'persistence', 'storage'],
-            'mvc': ['controller', 'model', 'view', 'mvc', 'mvvm'],
-            'dependency_injection': ['inject', 'di', 'ioc', 'container']
-        }
+        
+        # Build pattern keywords from registry
+        self.pattern_keywords = self._build_pattern_keywords()
 
         # Pattern relationships for similarity scoring
         self.pattern_relations = {
@@ -44,6 +30,15 @@ class PatternMatchScorer:
             'strategy': ['state', 'template', 'visitor'],
             'repository': ['dao', 'unit_of_work', 'data_mapper']
         }
+    
+    def _build_pattern_keywords(self) -> Dict[str, List[str]]:
+        """Build pattern keywords from registry patterns"""
+        keywords = {}
+        for pattern_type in self.pattern_registry.patterns.values():
+            for name, details in pattern_type.items():
+                if 'keywords' in details:
+                    keywords[name] = details['keywords']
+        return keywords
 
     async def calculate_pattern_score(
         self,

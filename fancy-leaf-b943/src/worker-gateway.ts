@@ -52,11 +52,26 @@ export class SessionDO {
   private connections: Set<WebSocket> = new Set();
   private history: unknown[] = [];
   private activeToolCalls: Map<string, unknown> = new Map();
+  private state: DurableObjectState;
 
   constructor(state: DurableObjectState, env: Env) {
-    // Store state and env as needed
-    void state;
+    this.state = state;
+    // env param is available but not used directly
     void env;
+    
+    // Restore state from storage on initialization
+    // Using waitUntil pattern for async initialization
+    state.waitUntil((async () => {
+      const storedHistory = await state.storage.get<unknown[]>('history');
+      if (storedHistory) {
+        this.history = storedHistory;
+      }
+      
+      const storedToolCalls = await state.storage.get<Map<string, unknown>>('toolCalls');
+      if (storedToolCalls) {
+        this.activeToolCalls = storedToolCalls;
+      }
+    })());
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -64,7 +79,7 @@ export class SessionDO {
     
     switch (url.pathname) {
       case '/ws':
-        return this.handleWebSocket();
+        return this.handleWebSocket(request);
         
       case '/append':
         return this.appendMessage(request);
@@ -75,30 +90,184 @@ export class SessionDO {
       case '/tools':
         return this.getToolCalls();
         
+      case '/clear':
+        return this.clearSession();
+        
       default:
         return new Response('Not found', { status: 404 });
     }
   }
   
-  private async handleWebSocket(): Promise<Response> {
-    // WebSocket upgrade would be handled here in production
-    // For now, return a placeholder response
-    return new Response(JSON.stringify({
-      type: 'history',
-      data: this.history
-    }), {
-      headers: { 'Content-Type': 'application/json' }
+  private async handleWebSocket(request: Request): Promise<Response> {
+    // Check if this is a WebSocket upgrade request
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (!upgradeHeader || upgradeHeader !== 'websocket') {
+      return new Response('Expected WebSocket', { status: 426 });
+    }
+
+    // Create WebSocket pair
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    // Accept the WebSocket connection
+    server.accept();
+
+    // Add to connections set
+    this.connections.add(server);
+
+    // Send initial state to new connection
+    server.send(JSON.stringify({
+      type: 'init',
+      history: this.history,
+      toolCalls: Array.from(this.activeToolCalls.entries()),
+      connectionCount: this.connections.size
+    }));
+
+    // Set up ping interval to keep connection alive
+    const pingInterval = setInterval(() => {
+      if (server.readyState === 1) { // WebSocket.OPEN = 1
+        server.send(JSON.stringify({ type: 'ping' }));
+      } else {
+        clearInterval(pingInterval);
+      }
+    }, 30000);
+
+    // Handle incoming messages from client
+    server.addEventListener('message', async (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data as string);
+        
+        switch (data.type) {
+          case 'pong':
+            // Client responded to ping
+            break;
+            
+          case 'message':
+            // Broadcast message to all connections
+            await this.broadcastMessage(data);
+            break;
+            
+          case 'tool_update':
+            // Update tool call status
+            this.activeToolCalls.set(data.id, data);
+            await this.state.storage.put('toolCalls', this.activeToolCalls);
+            await this.broadcastToolUpdate(data);
+            break;
+            
+          case 'request_history':
+            // Send full history to requesting client
+            server.send(JSON.stringify({
+              type: 'history',
+              data: this.history
+            }));
+            break;
+            
+          default:
+            console.log('Unknown message type:', data.type);
+        }
+      } catch (error) {
+        console.error('Error handling WebSocket message:', error);
+        server.send(JSON.stringify({
+          type: 'error',
+          message: 'Failed to process message'
+        }));
+      }
     });
+
+    // Handle connection close
+    server.addEventListener('close', () => {
+      clearInterval(pingInterval);
+      this.connections.delete(server);
+      
+      // Notify other connections about disconnection
+      this.broadcast(JSON.stringify({
+        type: 'connection_closed',
+        connectionCount: this.connections.size
+      }), server);
+    });
+
+    // Handle errors
+    server.addEventListener('error', (error: Event) => {
+      console.error('WebSocket error:', error);
+      clearInterval(pingInterval);
+      this.connections.delete(server);
+    });
+
+    // Return the client WebSocket
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+    } as any);
+  }
+  
+  private async broadcastMessage(message: unknown): Promise<void> {
+    const payload = JSON.stringify({
+      type: 'message',
+      data: message,
+      timestamp: Date.now()
+    });
+    
+    this.broadcast(payload);
+  }
+  
+  private async broadcastToolUpdate(toolData: unknown): Promise<void> {
+    const payload = JSON.stringify({
+      type: 'tool_update',
+      data: toolData,
+      timestamp: Date.now()
+    });
+    
+    this.broadcast(payload);
+  }
+  
+  private broadcast(message: string, exclude?: WebSocket): void {
+    for (const ws of this.connections) {
+      if (ws !== exclude && ws.readyState === 1) { // WebSocket.OPEN = 1
+        try {
+          ws.send(message);
+        } catch (error) {
+          console.error('Failed to send to WebSocket:', error);
+          this.connections.delete(ws);
+        }
+      }
+    }
+  }
+  
+  private async clearSession(): Promise<Response> {
+    // Clear all stored data
+    this.history = [];
+    this.activeToolCalls.clear();
+    
+    // Clear specific keys from storage
+    await this.state.storage.delete('history');
+    await this.state.storage.delete('toolCalls');
+    
+    // Clear all message keys - we'll track them separately if needed
+    // For now, just clear the main collections
+    // In production, you'd want to track message keys or use a different storage pattern
+    
+    // Notify all connections
+    this.broadcast(JSON.stringify({
+      type: 'session_cleared',
+      timestamp: Date.now()
+    }));
+    
+    return new Response('Session cleared', { status: 200 });
   }
   
   private async appendMessage(request: Request): Promise<Response> {
     const message = await request.json();
     const timestamp = Date.now();
     
-    // Store in DO state
-    // Store in memory for now - would use DO storage in production
-    // await this.env.storage.put(`msg:${timestamp}`, message);
-    this.history.push({ ...message, timestamp });
+    // Add to history with timestamp
+    const messageWithTimestamp = { ...message, timestamp };
+    this.history.push(messageWithTimestamp);
+    
+    // Persist to Durable Object storage
+    await this.state.storage.put('history', this.history);
+    
+    // Store individual message for efficient retrieval
+    await this.state.storage.put(`msg:${timestamp}`, messageWithTimestamp);
     
     // Broadcast to all connected clients
     const broadcast = JSON.stringify({
@@ -107,21 +276,14 @@ export class SessionDO {
       timestamp
     });
     
-    for (const ws of this.connections) {
-      try {
-        ws.send(broadcast);
-      } catch {
-        this.connections.delete(ws);
-      }
-    }
+    this.broadcast(broadcast);
     
     return new Response('OK');
   }
   
   private async getHistory(): Promise<Response> {
-    // Return from memory - would use DO storage in production
-    const messages = this.history;
-    return Response.json(messages);
+    // Return persisted history
+    return Response.json(this.history);
   }
   
   private async getToolCalls(): Promise<Response> {
@@ -154,6 +316,65 @@ function getToolPermissions(context: UserContext): string[] {
   };
   
   return rolePermissions[context.role] || rolePermissions.default;
+}
+
+/**
+ * Get allowed commands based on user role
+ */
+function getCommandPermissions(context: UserContext): string[] {
+  const baseCommands = ['/help', '/clear', '/model', '/resume'];
+  
+  const rolePermissions: Record<UserContext['role'], string[]> = {
+    admin: [
+      ...baseCommands,
+      '/init',
+      '/permissions',
+      '/ultra-think',
+      '/project:*',
+      '/mcp:*',
+      '/hooks:*',
+      '/settings:*'
+    ],
+    developer: [
+      ...baseCommands,
+      '/init',
+      '/permissions',
+      '/project:*',
+      '/mcp:*'
+    ],
+    viewer: baseCommands,
+    default: [...baseCommands, '/init']
+  };
+  
+  return rolePermissions[context.role] || rolePermissions.default;
+}
+
+/**
+ * Filter commands based on user permissions
+ */
+function filterCommands(commands: any[], context: UserContext): any[] {
+  const allowedCommands = getCommandPermissions(context);
+  
+  return commands.filter(cmd => {
+    const cmdName = cmd.name || cmd;
+    
+    // Check exact match
+    if (allowedCommands.includes(cmdName)) {
+      return true;
+    }
+    
+    // Check wildcard patterns
+    for (const pattern of allowedCommands) {
+      if (pattern.endsWith('*')) {
+        const prefix = pattern.slice(0, -1);
+        if (typeof cmdName === 'string' && cmdName.startsWith(prefix)) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  });
 }
 
 /**
@@ -363,8 +584,11 @@ export default {
             tool => allowedTools.includes(tool)
           );
           
+          // Filter commands based on user permissions
+          const filteredCommands = filterCommands(commandCache.commands, context);
+          
           return new Response(JSON.stringify({
-            commands: commandCache.commands,
+            commands: filteredCommands,
             tools: filteredTools,
             timestamp: commandCache.timestamp,
             userRole: context.role
@@ -733,15 +957,21 @@ export default {
       try {
         const data = msg.body as any;
         switch (data?.type) {
-          case 'index_transcript':
-            // TODO: implement indexing/analytics; placeholder no-op
+          case 'index_transcript': {
+            // NOTE: indexing/analytics intentionally not implemented in gateway
+            console.log('queue:index_transcript', { sessionId: data.sessionId, length: data.length, ts: data.ts });
             break;
-          case 'file_uploaded':
-            // TODO: generate thumbnails/scan/etc.; placeholder no-op
+          }
+          case 'file_uploaded': {
+            // NOTE: file post-processing intentionally not implemented in gateway
+            console.log('queue:file_uploaded', { key: data.key, size: data.size, type: data.contentType, ts: data.ts });
             break;
-          default:
-            // Unknown job type; ignore
+          }
+          default: {
+            // Unknown job type; ignoring
+            console.log('queue:unknown', { type: data?.type });
             break;
+          }
         }
         await msg.ack?.();
       } catch (e) {

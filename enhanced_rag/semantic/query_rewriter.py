@@ -19,6 +19,12 @@ except ImportError:
 
 from ..core.models import SearchIntent, CodeContext
 from ..core.config import get_config
+from .lexicon import (
+    QUERY_TEMPLATES,
+    VERB_VARIATIONS,
+    NOUN_VARIATIONS,
+    QUESTION_TRANSFORMS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,87 +57,19 @@ class MultiVariantQueryRewriter:
     def _initialize_rewriter(self):
         """Initialize rewriting resources"""
         
-        # Common query templates
-        self.query_templates = {
-            'how_to': [
-                "how to {action} {object}",
-                "how do I {action} {object}",
-                "how can I {action} {object}",
-                "{action} {object} tutorial",
-                "{action} {object} guide",
-            ],
-            'what_is': [
-                "what is {concept}",
-                "what does {concept} mean",
-                "{concept} explanation",
-                "{concept} definition",
-                "understanding {concept}",
-            ],
-            'implementation': [
-                "implement {feature}",
-                "{feature} implementation",
-                "create {feature}",
-                "build {feature}",
-                "{feature} example code",
-            ],
-            'debugging': [
-                "fix {error}",
-                "{error} solution",
-                "resolve {error}",
-                "{error} troubleshooting",
-                "debug {error}",
-            ],
-            'comparison': [
-                "{option1} vs {option2}",
-                "difference between {option1} and {option2}",
-                "compare {option1} {option2}",
-                "{option1} or {option2}",
-                "when to use {option1} vs {option2}",
-            ]
-        }
+        # Import from centralized lexicon
+        self.query_templates = QUERY_TEMPLATES
+        self.verb_variations = VERB_VARIATIONS
+        self.noun_variations = NOUN_VARIATIONS
+        self.question_transforms = QUESTION_TRANSFORMS
         
-        # Technical term variations
+        # Technical term variations (kept local as they use methods)
         self.case_variations = {
             'camelCase': self._to_camel_case,
             'PascalCase': self._to_pascal_case,
             'snake_case': self._to_snake_case,
             'kebab-case': self._to_kebab_case,
             'UPPER_CASE': self._to_upper_case,
-        }
-        
-        # Common programming verbs and their variations
-        self.verb_variations = {
-            'create': ['create', 'make', 'build', 'construct', 'generate', 'add'],
-            'update': ['update', 'modify', 'change', 'edit', 'alter', 'revise'],
-            'delete': ['delete', 'remove', 'destroy', 'drop', 'clear', 'erase'],
-            'get': ['get', 'fetch', 'retrieve', 'find', 'read', 'load'],
-            'set': ['set', 'assign', 'store', 'save', 'write', 'put'],
-            'implement': ['implement', 'create', 'build', 'develop', 'code'],
-            'fix': ['fix', 'repair', 'resolve', 'solve', 'debug', 'patch'],
-            'optimize': ['optimize', 'improve', 'enhance', 'speed up', 'refactor'],
-            'test': ['test', 'check', 'verify', 'validate', 'assert'],
-            'understand': ['understand', 'explain', 'learn', 'comprehend', 'grasp'],
-        }
-        
-        # Common programming nouns and their variations
-        self.noun_variations = {
-            'function': ['function', 'method', 'procedure', 'routine', 'operation'],
-            'variable': ['variable', 'var', 'parameter', 'argument', 'value'],
-            'class': ['class', 'type', 'object', 'entity', 'model'],
-            'error': ['error', 'exception', 'bug', 'issue', 'problem'],
-            'database': ['database', 'db', 'datastore', 'storage', 'repository'],
-            'api': ['api', 'endpoint', 'interface', 'service', 'route'],
-            'authentication': ['authentication', 'auth', 'login', 'signin', 'authorization'],
-            'component': ['component', 'module', 'unit', 'element', 'widget'],
-        }
-        
-        # Question word transformations
-        self.question_transforms = {
-            'how': ['how', 'what is the way', 'what steps'],
-            'what': ['what', 'which', 'what kind of'],
-            'why': ['why', 'what is the reason', 'what causes'],
-            'when': ['when', 'at what time', 'in which case'],
-            'where': ['where', 'in which location', 'at what place'],
         }
     
     async def rewrite_query(
