@@ -51,9 +51,6 @@
 	  "inspector_port": 9330,
 	  "local_protocol": "http"
 	},
-	"routes": [
-		{ "pattern": "claude-worker.lakefrontdigital.io", "custom_domain": true }
-	],
 	"env": {
 		"production": {
 			"vars": {

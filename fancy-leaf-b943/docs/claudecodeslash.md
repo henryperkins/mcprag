@@ -79,14 +79,11 @@ echo "Review this code for security vulnerabilities:" > ~/.claude/commands/secur
 
 #### Namespacing
 
-Organize commands in subdirectories. The subdirectories determine the command's
-full name. The description will show whether the command comes from the project
-directory (`.claude/commands`) or the user-level directory (`~/.claude/commands`).
+Organize commands in subdirectories. The subdirectories are used for organization and appear in the command description, but they do not affect the command name itself. The description will show whether the command comes from the project directory (`.claude/commands`) or the user-level directory (`~/.claude/commands`), along with the subdirectory name.
 
-Conflicts between user and project level commands are not supported. Otherwise,
-multiple commands with the same base file name can coexist.
+Conflicts between user and project level commands are not supported. Otherwise, multiple commands with the same base file name can coexist.
 
-For example, a file at `.claude/commands/frontend/component.md` creates the command `/frontend:component` with description showing "(project)".
+For example, a file at `.claude/commands/frontend/component.md` creates the command `/component` with description showing "(project:frontend)".
 Meanwhile, a file at `~/.claude/commands/component.md` creates the command `/component` with description showing "(user)".
 
 #### Arguments
@@ -156,7 +153,7 @@ Command files support frontmatter, useful for specifying metadata about the comm
 | `allowed-tools` | List of tools the command can use                                                                                                                                                     | Inherits from the conversation      |
 | `argument-hint` | The arguments expected for the slash command. Example: `argument-hint: add [tagId] \| remove [tagId] \| list`. This hint is shown to the user when auto-completing the slash command. | None                                |
 | `description`   | Brief description of the command                                                                                                                                                      | Uses the first line from the prompt |
-| `model`         | `opus`, `sonnet`, `haiku`, or a specific model string                                                                                                                                 | Inherits from the conversation      |
+| `model`         | Specific model string (see [Models overview](/en/docs/about-claude/models/overview))                                                                                                  | Inherits from the conversation      |
 
 For example:
 
@@ -165,7 +162,7 @@ For example:
 allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*)
 argument-hint: [message]
 description: Create a git commit
-model: haiku
+model: claude-3-5-haiku-20241022
 ---
 
 An example command
