@@ -132,9 +132,17 @@ class AzureOpenAIEmbeddingProvider(IEmbeddingProvider):
         # Support for configurable dimensions (text-embedding-3-large supports 256-3072)
         self.dimensions: Optional[int] = None
         if "text-embedding-3" in self.model_name:
-            # Default to 3072 for text-embedding-3-large
-            from enhanced_rag.core.config import get_config
-            self.dimensions = get_config().embedding.dimensions
+            # Use unified config for dimension (supports EMBEDDING_DIMENSIONS env)
+            try:
+                from enhanced_rag.core.unified_config import get_config as _get_unified
+                self.dimensions = _get_unified().embedding_dimensions
+            except Exception:
+                try:
+                    # Fallback to legacy config if unified not available
+                    from enhanced_rag.core.config import get_config as _get_legacy
+                    self.dimensions = _get_legacy().embedding.dimensions
+                except Exception:
+                    self.dimensions = None
 
         self.enabled: bool = True
 

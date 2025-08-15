@@ -10,7 +10,7 @@ from typing import Any
 import platform
 import sys
 
-from ..config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig as Config
 
 
 def register_resources(mcp: Any, server: "MCPServer") -> None:

@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react'
 import { useMessages } from '../store/messages.state'
 import type { SDKMessage, ContentBlock } from '../store/messages.state'
 import { ToolCallLine } from './ToolCallLine'
+import AnsiText from './AnsiText'
 import { 
   Terminal, User, Bot, CheckCircle, XCircle, AlertTriangle, 
   Info, Download, Clock, DollarSign
@@ -154,7 +155,11 @@ function UserMessage({ message }: { message: Extract<SDKMessage, { type: 'user' 
 function AssistantMessage({ message }: { message: Extract<SDKMessage, { type: 'assistant' }> }) {
   const renderContent = () => {
     if (typeof message.content === 'string') {
-      return <div className="message-text">{message.content}</div>
+      return (
+        <div className="message-text">
+          <AnsiText text={message.content} useWorker workerThreshold={1500} />
+        </div>
+      )
     }
 
     return (
@@ -163,7 +168,7 @@ function AssistantMessage({ message }: { message: Extract<SDKMessage, { type: 'a
           if (block.type === 'text') {
             return (
               <div key={idx} className="message-text">
-                {block.text}
+                <AnsiText text={block.text} useWorker workerThreshold={1500} />
               </div>
             )
           }

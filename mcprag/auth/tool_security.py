@@ -53,6 +53,8 @@ TOOL_SECURITY_MAP: Dict[str, SecurityTier] = {
     "backup_index_schema": SecurityTier.ADMIN,
     "clear_repository_documents": SecurityTier.ADMIN,
     "get_service_info": SecurityTier.ADMIN,
+    "backfill_embeddings": SecurityTier.ADMIN,
+    "validate_embeddings": SecurityTier.PUBLIC,
     
     # Additional tools default to ADMIN for safety
     "validate_index_schema": SecurityTier.ADMIN,

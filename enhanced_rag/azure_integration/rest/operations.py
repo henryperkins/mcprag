@@ -212,9 +212,17 @@ class SearchOperations:
         # Build request body
         body = {"search": query}
 
-        # Merge options, skipping None values
+        # Merge options, skipping None values and normalizing types for API compatibility
         for key, value in options.items():
-            if value is not None:
+            if value is None:
+                continue
+            if key == "select":
+                # Accept list or comma-separated string
+                if isinstance(value, (list, tuple)):
+                    body[key] = ",".join(value)
+                else:
+                    body[key] = value
+            else:
                 body[key] = value
 
         # Send request to Azure Search

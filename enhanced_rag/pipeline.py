@@ -105,7 +105,13 @@ class RAGPipeline:
         self._initialize_components()
 
         # Initialize code analyzers for downstream usage (context + metadata)
-        self._ast_analyzer = ASTAnalyzer(self.config.model_dump() if hasattr(self.config, "model_dump") else {})
+        if hasattr(self.config, "model_dump"):
+            ast_config = self.config.model_dump()
+        elif isinstance(self.config, dict):
+            ast_config = self.config
+        else:
+            ast_config = {}
+        self._ast_analyzer = ASTAnalyzer(ast_config)
         self._code_chunker = CodeChunker()
 
         # Initialize consolidated Azure integration components
@@ -114,10 +120,15 @@ class RAGPipeline:
         # Initialize Azure search operations if credentials are available
         self._azure_operations = None
         try:
-            if hasattr(self.config, 'azure') and self.config.azure:
+            if isinstance(self.config, dict):
+                azure_cfg = self.config.get('azure', {})
+            else:
+                azure_cfg = self.config.azure if hasattr(self.config, 'azure') else {}
+            
+            if azure_cfg and azure_cfg.get('endpoint') and azure_cfg.get('admin_key'):
                 azure_client = AzureSearchClient(
-                    endpoint=self.config.azure.endpoint,
-                    api_key=self.config.azure.admin_key
+                    endpoint=azure_cfg.get('endpoint'),
+                    api_key=azure_cfg.get('admin_key')
                 )
                 self._azure_operations = SearchOperations(azure_client)
                 logger.info("✅ Azure Search operations initialized")
@@ -125,10 +136,18 @@ class RAGPipeline:
             logger.warning(f"Azure Search operations not available: {e}")
 
         # Initialize vector search if enabled
-        if self.config.retrieval.enable_vector_search:
+        retrieval_cfg = self.config.get('retrieval', {}) if isinstance(self.config, dict) else self.config.retrieval
+        enable_vector = retrieval_cfg.get('enable_vector_search', False) if isinstance(retrieval_cfg, dict) else retrieval_cfg.enable_vector_search
+        if enable_vector:
             try:
                 from .retrieval.hybrid_searcher import HybridSearcher
-                self.hybrid_searcher = HybridSearcher(self.config.model_dump())
+                if hasattr(self.config, "model_dump"):
+                    hybrid_config = self.config.model_dump()
+                elif isinstance(self.config, dict):
+                    hybrid_config = self.config
+                else:
+                    hybrid_config = {}
+                self.hybrid_searcher = HybridSearcher(hybrid_config)
                 logger.info("✅ Vector search enabled in pipeline")
             except Exception as e:
                 logger.warning(f"Vector search initialization failed: {e}")
@@ -147,9 +166,14 @@ class RAGPipeline:
         """Initialize all RAG pipeline components"""
         try:
             # Core components
-            context_config = self.config.context.model_dump()
-            retrieval_config = self.config.retrieval.model_dump()
-            ranking_config = self.config.ranking.model_dump()
+            if isinstance(self.config, dict):
+                context_config = self.config.get("context", {})
+                retrieval_config = self.config.get("retrieval", {})
+                ranking_config = self.config.get("ranking", {})
+            else:
+                context_config = self.config.context if isinstance(self.config.context, dict) else self.config.context.model_dump()
+                retrieval_config = self.config.retrieval if isinstance(self.config.retrieval, dict) else self.config.retrieval.model_dump()
+                ranking_config = self.config.ranking if isinstance(self.config.ranking, dict) else self.config.ranking.model_dump()
 
             self.context_analyzer = HierarchicalContextAnalyzer(context_config)
             self.query_enhancer = ContextualQueryEnhancer(retrieval_config)

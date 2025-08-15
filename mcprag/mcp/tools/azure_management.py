@@ -21,11 +21,14 @@ def _run_enhanced_cli(argv: List[str]) -> Tuple[int, str, str]:
     Returns:
         Tuple of (returncode, stdout, stderr)
     """
-    venv_python = sys.executable
+    # Prefer project venv Python if available (ensures SDKs like openai are present)
+    project_root = "/home/azureuser/mcprag"
+    venv_candidate = os.path.join(project_root, "venv", "bin", "python")
+    venv_python = venv_candidate if os.path.exists(venv_candidate) else sys.executable
     cmd = [venv_python, "-m", "enhanced_rag.azure_integration.cli"] + argv
     
     # Set working directory to project root
-    cwd = "/home/azureuser/mcprag"
+    cwd = project_root
     
     result = subprocess.run(
         cmd,
@@ -36,6 +39,20 @@ def _run_enhanced_cli(argv: List[str]) -> Tuple[int, str, str]:
     )
     
     return result.returncode, result.stdout.strip(), result.stderr
+
+
+def _adapt_index_schema_for_api(index_def: Dict[str, Any], api_version: str) -> Dict[str, Any]:
+    """Adapt index schema to match Azure API version expectations.
+
+    - For stable API versions (e.g., 2023-11-01), map 'semanticSearch' -> 'semantic'.
+    """
+    adapted = dict(index_def)
+    api_ver = (api_version or "").lower()
+    if "semanticSearch" in adapted and ("2023-" in api_ver or "2024-" in api_ver or "2022-" in api_ver):
+        sem = adapted.pop("semanticSearch", None)
+        if sem is not None:
+            adapted["semantic"] = sem
+    return adapted
 
 
 def _truncate_indexer_status(status: Dict[str, Any], max_size: int = 20000) -> Dict[str, Any]:
@@ -123,6 +140,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             if action == "create" or action == "ensure":
                 if not index_definition:
                     return err("index_definition required for create/ensure")
+                # Adapt schema based on configured API version to avoid 400s
+                index_definition = _adapt_index_schema_for_api(index_definition, get_config().acs_api_version)
                 # Component already checked above
                 assert server.index_automation is not None  # for type checker
                 result = await server.index_automation.ensure_index_exists(
@@ -133,6 +152,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             elif action == "recreate":
                 if not index_definition:
                     return err("index_definition required for recreate")
+                # Adapt schema for API version
+                index_definition = _adapt_index_schema_for_api(index_definition, get_config().acs_api_version)
                 # Component already checked above
                 assert server.index_automation is not None  # for type checker
                 result = await server.index_automation.recreate_index(
@@ -218,7 +239,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         if not check_component(server.data_automation, "Data automation"):
             return err("Data automation not available")
 
-        from ...config import Config
+        from enhanced_rag.core.unified_config import UnifiedConfig as Config
         if not get_config().mcp_admin_mode and action in ["upload", "delete", "cleanup"]:
             return err("Admin mode required for document modifications")
 
@@ -313,7 +334,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err("Indexer automation not available")
 
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
 
             if action in {"run", "reset", "create", "delete"} and not get_config().mcp_admin_mode:
                 return err("Admin mode required for indexer modifications")
@@ -436,7 +457,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         update_if_exists: bool = True,
     ) -> Dict[str, Any]:
         """Create or update a data source connection for Azure AI Search."""
-        from ...config import Config
+        from enhanced_rag.core.unified_config import UnifiedConfig as Config
         if not get_config().mcp_admin_mode:
             return err("Admin mode required to create data sources")
 
@@ -537,7 +558,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
         update_if_exists: bool = True,
     ) -> Dict[str, Any]:
         """Create or update an Azure Cognitive Search skillset."""
-        from ...config import Config
+        from enhanced_rag.core.unified_config import UnifiedConfig as Config
         if not get_config().mcp_admin_mode:
             return err("Admin mode required to create skillsets")
 
@@ -648,7 +669,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err("Index automation not available")
 
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             index_name = get_config().acs_index_name
 
             # Get index stats and definition using automation components
@@ -679,7 +700,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err("Index automation not available")
 
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             index_name = get_config().acs_index_name
 
             if server.index_automation is None:
@@ -697,7 +718,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
     async def index_repository(
         repo_path: str = ".",
         repo_name: str = "mcprag",
-        patterns: Optional[List[str]] = None
+        patterns: Optional[List[str]] = None,
+        embed_vectors: bool = False
     ) -> Dict[str, Any]:
         """Index a repository into Azure Search using the CLI automation.
 
@@ -707,7 +729,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             patterns: File patterns to include (e.g., ["*.py", "*.js"])
         """
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             if not get_config().mcp_admin_mode:
                 return err("Admin mode required for repository indexing")
 
@@ -716,6 +738,8 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             argv = ["local-repo", "--repo-path", repo_path, "--repo-name", repo_name]
             if patterns:
                 argv.extend(["--patterns"] + patterns)
+            if embed_vectors:
+                argv.append("--embed-vectors")
             
             # Run CLI command
             returncode, stdout, stderr = _run_enhanced_cli(argv)
@@ -728,6 +752,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
                 "repo_path": repo_path,
                 "repo_name": repo_name,
                 "patterns": patterns,
+                "embed_vectors": embed_vectors,
                 "output": stdout
             })
 
@@ -746,7 +771,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             repo_name: Name of the repository in the search index
         """
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             if not get_config().mcp_admin_mode:
                 return err("Admin mode required for file indexing")
 
@@ -770,6 +795,49 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err(str(e))
 
     @mcp.tool()
+    async def backfill_embeddings(
+        index_name: Optional[str] = None,
+        batch_size: int = 200,
+        include_context: bool = True,
+        max_docs: Optional[int] = None,
+        dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Generate and backfill content_vector for existing documents via CLI.
+
+        Args:
+            index_name: Target index (defaults to configured index)
+            batch_size: Page size for fetch/embed
+            include_context: Include file_path and repository in embedding context
+            max_docs: Limit number of documents processed
+            dry_run: If True, do not write updates
+        """
+        try:
+            if not get_config().mcp_admin_mode:
+                return err("Admin mode required for embedding backfill")
+
+            argv = ["backfill-embeddings"]
+            if index_name:
+                argv += ["--index", index_name]
+            argv += ["--batch-size", str(int(batch_size))]
+            if include_context:
+                argv.append("--include-context")
+            if max_docs is not None:
+                argv += ["--max-docs", str(int(max_docs))]
+            if dry_run:
+                argv.append("--dry-run")
+
+            returncode, stdout, stderr = _run_enhanced_cli(argv)
+            if returncode != 0:
+                return err(f"Backfill failed: {stderr}")
+            return ok({
+                "backfill_started": True,
+                "index": index_name or get_config().acs_index_name,
+                "output": stdout,
+            })
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
     async def backup_index_schema(
         output_file: str = "schema_backup.json"
     ) -> Dict[str, Any]:
@@ -779,7 +847,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             output_file: Path where to save the schema backup
         """
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             if not get_config().mcp_admin_mode:
                 return err("Admin mode required for schema backup")
 
@@ -811,7 +879,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             repository_filter: Filter to match repository documents (e.g., "repository eq 'old-repo'")
         """
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             if not get_config().mcp_admin_mode:
                 return err("Admin mode required for document clearing")
 
@@ -834,6 +902,35 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             return err(str(e))
 
     @mcp.tool()
+    async def validate_embeddings(
+        index_name: Optional[str] = None,
+        sample_size: int = 100,
+        expected_dimensions: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Validate embedding coverage and dimension correctness.
+
+        Args:
+            index_name: Index to validate (defaults to configured index)
+            sample_size: Number of documents to sample
+            expected_dimensions: Expected vector dimensions (defaults to config)
+        """
+        if not check_component(server.rest_ops, "REST operations"):
+            return err("REST operations not available")
+
+        try:
+            from enhanced_rag.azure_integration.automation import EmbeddingAutomation
+            cfg = get_config()
+            idx = index_name or cfg.acs_index_name
+            dims = expected_dimensions or int(cfg.embedding_dimensions)
+
+            # server.rest_ops is a SearchOperations; safe to pass
+            emb = EmbeddingAutomation(server.rest_ops)  # type: ignore[arg-type]
+            result = await emb.validate_embeddings(idx, sample_size=sample_size, expected_dimensions=dims)
+            return ok(result)
+        except Exception as e:
+            return err(str(e))
+
+    @mcp.tool()
     async def rebuild_index(
         confirm: bool = False
     ) -> Dict[str, Any]:
@@ -843,7 +940,7 @@ def register_azure_tools(mcp, server: "MCPServer") -> None:
             confirm: Must be set to True to confirm this destructive operation
         """
         try:
-            from ...config import Config
+            from enhanced_rag.core.unified_config import UnifiedConfig as Config
             if not get_config().mcp_admin_mode:
                 return err("Admin mode required for index rebuild")
 

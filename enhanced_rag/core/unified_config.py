@@ -15,10 +15,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+# Known embedding dimensions for common models
+_EMBED_DIMENSIONS = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+}
 
 
 class LogLevel(str, Enum):
@@ -105,7 +111,7 @@ class UnifiedConfig(BaseSettings):
         description="Azure OpenAI API key"
     )
     azure_openai_deployment: str = Field(
-        default="text-embedding-3-large",
+        default="text-embedding-3-small",  # align default with 1536 dims
         alias="AZURE_OPENAI_DEPLOYMENT",
         description="Azure OpenAI deployment name for embeddings"
     )
@@ -402,6 +408,51 @@ class UnifiedConfig(BaseSettings):
                 return SecretStr(key)
         return None
 
+    @field_validator("acs_endpoint", mode="before")
+    @classmethod
+    def _normalize_endpoint(cls, v):
+        # Normalize endpoint: strip spaces, remove trailing slashes
+        if isinstance(v, str):
+            v = v.strip()
+            while v.endswith("/"):
+                v = v[:-1]
+        return v
+
+    @model_validator(mode="after")
+    def _harmonize_embedding_settings(self):
+        """
+        Ensure embedding_dimensions matches the selected embedding model/deployment
+        when using known models. If user explicitly configured a different size,
+        keep it; only auto-adjust when defaults are inconsistent.
+        """
+        # Prefer explicit embedding_model, else fall back to azure_openai_deployment
+        chosen_model = (self.embedding_model or self.azure_openai_deployment or "").strip()
+        if not chosen_model:
+            return self
+
+        expected = None
+        # Map by known keys
+        for key, dims in _EMBED_DIMENSIONS.items():
+            if key in chosen_model:
+                expected = dims
+                break
+
+        if expected is not None:
+            # If deployment suggests large but dimensions still default-small, auto-fix;
+            # or if deployment is small and dimensions mismatched, fix too.
+            if self.embedding_dimensions != expected:
+                # Heuristic: adjust if user didn't override via env (leave custom sizes alone)
+                env_var = os.getenv("EMBEDDING_DIMENSIONS")
+                if not env_var:
+                    self.embedding_dimensions = expected
+                    logger.info("Adjusted embedding_dimensions to %s for model '%s'", expected, chosen_model)
+                else:
+                    logger.warning(
+                        "Configured EMBEDDING_DIMENSIONS=%s differs from expected %s for model '%s'; keeping user value",
+                        self.embedding_dimensions, expected, chosen_model
+                    )
+        return self
+
     def validate_config(self) -> Dict[str, str]:
         """
         Validate configuration and return any errors.
@@ -442,7 +493,7 @@ class UnifiedConfig(BaseSettings):
         api_key = ""
         if self.acs_admin_key is not None:
             api_key = self.acs_admin_key.get_secret_value()
-        
+
         return {
             "endpoint": self.acs_endpoint,
             "api_key": api_key,
@@ -470,7 +521,7 @@ class UnifiedConfig(BaseSettings):
             "CACHE_TTL_SECONDS": self.cache_ttl_seconds,
             "CACHE_MAX_ENTRIES": self.cache_max_entries,
             "ADMIN_MODE": self.mcp_admin_mode,
-            "FEEDBACK_DIR": self.feedback_dir,
+            "FEEDBACK_DIR": str(self.feedback_dir),
             "DEBUG_TIMINGS": self.debug_timings,
             "LOG_LEVEL": self.mcp_log_level.value,
             "HOST": self.mcp_host,
@@ -487,6 +538,141 @@ class UnifiedConfig(BaseSettings):
             "REQUIRE_MFA_FOR_ADMIN": self.require_mfa_for_admin,
             "DEV_MODE": self.mcp_dev_mode,
         }
+
+    @property
+    def azure(self) -> Dict[str, Any]:
+        """Return Azure configuration in legacy format."""
+        return {
+            "endpoint": self.acs_endpoint,
+            "admin_key": self.acs_admin_key.get_secret_value() if self.acs_admin_key else "",
+            "index_name": self.acs_index_name,
+            "semantic_config_name": self.acs_semantic_config,
+            "embedding_dimensions": self.embedding_dimensions,
+            "api_version": self.acs_api_version,
+            "replica_count": self.index_replica_count,
+            "partition_count": self.index_partition_count,
+            "top_k": self.search_top_k,
+            "search_timeout_seconds": self.search_timeout_seconds,
+        }
+
+    @property
+    def embedding(self) -> Dict[str, Any]:
+        """Return embedding configuration in legacy format."""
+        return {
+            "provider": self.embedding_provider,
+            "model": self.embedding_model,
+            "dimensions": self.embedding_dimensions,
+            "batch_size": self.embedding_batch_size,
+            "max_concurrent_requests": 5,
+            "circuit_breaker_threshold": 5,
+            "circuit_breaker_reset_seconds": 30,
+            "azure_endpoint": self.azure_openai_endpoint or "",
+            "api_key": self.azure_openai_key.get_secret_value() if self.azure_openai_key else self.openai_api_key.get_secret_value() if self.openai_api_key else "",
+            "api_version": self.azure_openai_api_version,
+        }
+
+    @property
+    def context(self) -> Dict[str, Any]:
+        """Return context configuration in legacy format."""
+        return {
+            "max_context_depth": self.max_context_depth,
+            "include_git_history": self.include_git_history,
+            "git_history_days": self.git_history_days,
+            "file_weight": 1.0,
+            "module_weight": 0.7,
+            "project_weight": 0.5,
+            "cross_project_weight": 0.3,
+            "cache_enabled": self.cache_enabled,
+            "cache_ttl_seconds": self.cache_ttl_seconds,
+        }
+
+    @property
+    def retrieval(self) -> Dict[str, Any]:
+        """Return retrieval configuration in legacy format."""
+        return {
+            "enable_semantic_search": self.enable_semantic_search,
+            "enable_vector_search": self.enable_vector_search,
+            "enable_keyword_search": self.enable_keyword_search,
+            "enable_hybrid_search": self.enable_vector_search and self.enable_keyword_search,
+            "semantic_weight": 0.7,
+            "vector_weight": 0.8,
+            "keyword_weight": 0.5,
+            "max_results_per_stage": 100,
+            "min_relevance_score": 0.5,
+            "include_dependencies": True,
+            "dependency_depth": 2,
+        }
+
+    @property
+    def ranking(self) -> Dict[str, Any]:
+        """Return ranking configuration in legacy format."""
+        return {
+            "enable_context_boost": True,
+            "context_boost_factor": 2.0,
+            "enable_recency_boost": True,
+            "recency_boost_days": 30,
+            "recency_boost_factor": 1.5,
+            "enable_quality_boost": True,
+            "quality_metrics": ["test_coverage", "documentation_score", "complexity_score"],
+            "max_results": 20,
+            "diversity_threshold": 0.3,
+            "explanation_enabled": True,
+        }
+
+    @property
+    def learning(self) -> Dict[str, Any]:
+        """Return learning configuration in legacy format."""
+        return {
+            "enabled": True,
+            "min_interactions_for_learning": 10,
+            "success_weight": 1.0,
+            "failure_weight": 0.3,
+            "update_frequency_hours": 24,
+            "min_confidence_for_update": 0.7,
+            "feedback_storage_days": 90,
+            "anonymize_data": True,
+        }
+
+    @property
+    def performance(self) -> Dict[str, Any]:
+        """Return performance configuration in legacy format."""
+        return {
+            "context_timeout_ms": 200,
+            "search_timeout_ms": 500,
+            "ranking_timeout_ms": 100,
+            "enable_result_cache": self.cache_enabled,
+            "cache_size_mb": 100,
+            "enable_metrics": True,
+            "metrics_sample_rate": 0.1,
+            "log_slow_queries": True,
+            "slow_query_threshold_ms": 1000,
+        }
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """
+        Override model_dump to include nested sections while preserving pydantic v2 signature.
+        """
+        base_dump = super().model_dump(**kwargs)
+
+        # Add nested configuration sections for RAGPipeline compatibility
+        base_dump["azure"] = self.azure
+        base_dump["embedding"] = self.embedding
+        base_dump["context"] = self.context
+        base_dump["retrieval"] = self.retrieval
+        base_dump["ranking"] = self.ranking
+        base_dump["learning"] = self.learning
+        base_dump["performance"] = self.performance
+
+        return base_dump
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Dict-like get method for compatibility.
+        """
+        try:
+            return getattr(self, key, default)
+        except AttributeError:
+            return default
 
     @classmethod
     def get_instance(cls) -> "UnifiedConfig":

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ToolsPanel } from './ToolsPanel';
 import { claudeService } from '../services/claude';
 
@@ -74,7 +74,7 @@ describe('ToolsPanel', () => {
     expect(claudeService.emit).toHaveBeenCalledWith('request-tools-info', {});
   });
 
-  it('handles tools update event with categorization', () => {
+  it('handles tools update event with categorization', async () => {
     const mockUnsubscribe = vi.fn();
     let toolsUpdateCallback: any;
 
@@ -99,14 +99,18 @@ describe('ToolsPanel', () => {
       ]
     };
 
-    // Trigger the callback
-    toolsUpdateCallback(mockToolsData);
+    // Trigger the callback and flush updates
+    await act(async () => {
+      toolsUpdateCallback(mockToolsData);
+    });
 
     // Force a re-render to see the updates
     rerender(<ToolsPanel />);
 
     // Expand to see tools
-    fireEvent.click(screen.getByText('Expand'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Expand'));
+    });
 
     // Check that tools are categorized properly
     expect(screen.getByText('file Tools')).toBeInTheDocument();
@@ -114,7 +118,7 @@ describe('ToolsPanel', () => {
     expect(screen.getByText('system Tools')).toBeInTheDocument();
   });
 
-  it('displays MCP servers when available', () => {
+  it('displays MCP servers when available', async () => {
     const mockUnsubscribe = vi.fn();
     let toolsUpdateCallback: any;
 
@@ -139,15 +143,18 @@ describe('ToolsPanel', () => {
       ]
     };
 
-    toolsUpdateCallback(mockToolsData);
+    // Trigger and flush state updates
+    await act(async () => {
+      toolsUpdateCallback(mockToolsData);
+    });
 
-    // Check MCP servers section
-    expect(screen.getByText('MCP Servers')).toBeInTheDocument();
-    expect(screen.getByText('test-server')).toBeInTheDocument();
-    expect(screen.getByText('2 tools')).toBeInTheDocument();
+    // Check MCP servers section (wait for DOM to update)
+    expect(await screen.findByText('MCP Servers')).toBeInTheDocument();
+    expect(await screen.findByText('test-server')).toBeInTheDocument();
+    expect(await screen.findByText('2 tools')).toBeInTheDocument();
   });
 
-  it('filters tools when clicking category tabs', () => {
+  it('filters tools when clicking category tabs', async () => {
     const mockUnsubscribe = vi.fn();
     let toolsUpdateCallback: any;
 
@@ -160,17 +167,23 @@ describe('ToolsPanel', () => {
 
     render(<ToolsPanel />);
 
-    // Add tools
-    toolsUpdateCallback({
-      tools: ['Read', 'Write', 'Edit', 'Grep', 'Bash'],
-      mcpServers: []
+    // Add tools and flush update
+    await act(async () => {
+      toolsUpdateCallback({
+        tools: ['Read', 'Write', 'Edit', 'Grep', 'Bash'],
+        mcpServers: []
+      });
     });
 
     // Expand panel
-    fireEvent.click(screen.getByText('Expand'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Expand'));
+    });
 
     // Click file category filter
-    fireEvent.click(screen.getByRole('button', { name: /📁 file/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /📁 file/i }));
+    });
 
     // Should show only file tools
     expect(screen.getByText('file Tools')).toBeInTheDocument();
@@ -188,5 +201,40 @@ describe('ToolsPanel', () => {
     unmount();
 
     expect(mockUnsubscribe).toHaveBeenCalled();
+  });
+
+  it('shows web tools under web filter', async () => {
+    const mockUnsubscribe = vi.fn();
+    let toolsUpdateCallback: any;
+
+    vi.mocked(claudeService.on).mockImplementation((event, callback) => {
+      if (event === 'tools-update') {
+        toolsUpdateCallback = callback;
+      }
+      return mockUnsubscribe;
+    });
+
+    render(<ToolsPanel />);
+
+    // Provide tools including WebSearch/WebFetch which should appear under the 🌐 web filter
+    await act(async () => {
+      toolsUpdateCallback({
+        tools: ['WebSearch', 'WebFetch', 'Grep', 'Read'],
+        mcpServers: []
+      });
+    });
+
+    // Expand panel and switch to web category
+    await act(async () => {
+      fireEvent.click(screen.getByText('Expand'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /🌐 web/i }));
+    });
+
+    // Assert web category and tool chips are visible
+    expect(screen.getByText('web Tools')).toBeInTheDocument();
+    expect(screen.getByText('WebSearch')).toBeInTheDocument();
+    expect(screen.getByText('WebFetch')).toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from fastapi import HTTPException, Header
 
-from ..config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig as Config
 from .tool_security import SecurityTier
 
 logger = logging.getLogger(__name__)
@@ -38,9 +38,9 @@ class StytchAuthenticator:
     
     def __init__(self):
         """Initialize Stytch client."""
-        self.project_id = getattr(Config, 'STYTCH_PROJECT_ID', None)
-        self.secret = getattr(Config, 'STYTCH_SECRET', None)
-        self.environment = getattr(Config, 'STYTCH_ENV', 'test')
+        self.project_id = getattr(Config, 'stytch_project_id', None)
+        self.secret = getattr(Config, 'stytch_secret', None)
+        self.environment = getattr(Config, 'stytch_env', 'test')
         
         # Check if Stytch is configured and available
         if not STYTCH_AVAILABLE:

@@ -56,8 +56,9 @@ export function ToolsPanel() {
     if (name.startsWith('mcp__')) return 'mcp';
     if (['Read', 'Write', 'LS', 'Glob', 'MultiEdit'].includes(name)) return 'file';
     if (['Edit', 'NotebookEdit'].includes(name)) return 'edit';
-    if (['Grep', 'WebSearch', 'WebFetch'].includes(name)) return 'search';
+    // Prioritize web classification for clarity
     if (['WebFetch', 'WebSearch'].includes(name)) return 'web';
+    if (['Grep'].includes(name)) return 'search';
     if (['Bash', 'Git', 'TodoWrite', 'ExitPlanMode'].includes(name)) return 'system';
     return 'system';
   };

@@ -33,6 +33,15 @@
         "@modelcontextprotocol/server-brave-search"
       ],
       "env": {}
+    },
+    "mcprag": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "mcprag"
+      ],
+      "env": {}
     }
   }
 }

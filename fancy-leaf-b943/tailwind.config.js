@@ -8,19 +8,6 @@ export default {
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
   ],
-  safelist: [
-    // Custom token utilities used in studio components
-    'border-subtle',
-    'border-faint',
-    'text-muted',
-    'bg-bg-primary',
-    'bg-bg-primary/80',
-    'bg-bg-primary/85',
-    'bg-bg-elevated',
-    'bg-bg-elevated/60',
-    'bg-bg-tertiary',
-    'bg-bg-tertiary/90',
-  ],
   darkMode: 'class',
   theme: {
     extend: {

@@ -121,8 +121,9 @@ Extract practical usage patterns from the test cases."""
 - **health_check()** - Check all system components health
 
 ### Repository Indexing
-- **index_repository(repo_path=".", repo_name="mcprag", patterns=["*.py", "*.js"])** - Index entire repository
+- **index_repository(repo_path=".", repo_name="mcprag", patterns=["*.py", "*.js"], embed_vectors=false)** - Index entire repository; set embed_vectors=true to generate embeddings on upload
 - **index_changed_files(files=["file1.py", "file2.js"], repo_name="mcprag")** - Index specific files
+- **backfill_embeddings(index_name=None, batch_size=200, include_context=true, max_docs=None, dry_run=false)** - Generate and backfill content_vector for existing documents
 
 ### Schema Management
 - **backup_index_schema(output_file="backup.json")** - Backup current schema
@@ -132,6 +133,7 @@ Extract practical usage patterns from the test cases."""
 - **clear_repository_documents(repository_filter="repository eq 'old-repo'")** - Clear specific repo docs
 - **manage_documents(action="count", index_name="my-index")** - Document operations
 - **rebuild_index(confirm=True)** - ⚠️ Drop and rebuild (DESTRUCTIVE!)
+- **validate_embeddings(index_name=None, sample_size=100, expected_dimensions=config)** - Check vector coverage and dimension mismatches
 
 ### Advanced Operations
 - **manage_indexer(action="status", indexer_name="my-indexer")** - Indexer management

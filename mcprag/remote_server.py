@@ -20,7 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 from .server import MCPServer
 from .auth.stytch_auth import StytchAuthenticator, M2MAuthenticator
 from .auth.tool_security import get_tool_tier, SecurityTier, user_meets_tier_requirement
-from .config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig as Config
 from .mcp.transport_wrapper import TransportWrapper
 
 logger = logging.getLogger(__name__)

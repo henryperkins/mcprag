@@ -6,7 +6,7 @@ import logging
 import asyncio
 from typing import Any, Dict, List, Optional
 
-from ..config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig as Config
 
 # Optional REST client/ops from enhanced_rag
 try:

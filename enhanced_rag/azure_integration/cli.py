@@ -27,6 +27,7 @@ from azure.core.exceptions import ResourceNotFoundError
 from .automation import IndexAutomation
 from .automation import ReindexAutomation
 from .automation import DataAutomation
+from .automation import EmbeddingAutomation
 from .rest import AzureSearchClient, SearchOperations
 from enhanced_rag.core.unified_config import get_config
 from .processing import (
@@ -47,8 +48,17 @@ logger = logging.getLogger(__name__)
 
 
 
-async def index_repository(repo_path: str, repo_name: str, patterns: Optional[List[Tuple[str, str]]] = None) -> int:
-    """Index an entire repository using REST API."""
+async def index_repository(
+    repo_path: str,
+    repo_name: str,
+    patterns: Optional[List[Tuple[str, str]]] = None,
+    embed_vectors: bool = False,
+    context_fields: Optional[List[str]] = None,
+) -> int:
+    """Index an entire repository using REST API.
+
+    Optionally enrich documents with embeddings before upload.
+    """
     # Initialize REST client and operations
     rest_client = AzureSearchClient(
         endpoint=get_config().acs_endpoint,
@@ -68,9 +78,30 @@ async def index_repository(repo_path: str, repo_name: str, patterns: Optional[Li
     # Use FileProcessor for consistent repository processing
     file_processor = FileProcessor(extensions=extensions)
     all_documents = file_processor.process_repository(repo_path, repo_name)
-    
+
     logger.info(f"Collected {len(all_documents)} documents from repository")
-    
+
+    # Optionally enrich with embeddings (content_vector)
+    if embed_vectors and all_documents:
+        try:
+            from enhanced_rag.core.unified_config import get_config as _get_unified
+            batch_size = max(1, int(_get_unified().embedding_batch_size))
+        except Exception:
+            batch_size = 16
+
+        emb_automation = EmbeddingAutomation(rest_ops)
+        all_documents, stats = await emb_automation.enrich_documents_with_embeddings(
+            all_documents,
+            text_field="content",
+            embedding_field="content_vector",
+            context_fields=context_fields,
+            batch_size=batch_size,
+        )
+        logger.info(
+            "Embedding enrichment: processed=%s enriched=%s failed=%s in %ss",
+            stats.get("processed"), stats.get("enriched"), stats.get("failed"), stats.get("elapsed_seconds")
+        )
+
     # Upload documents using async generator
     async def document_generator():
         for doc in all_documents:
@@ -146,11 +177,16 @@ async def cmd_local_repo(args):
         logger.info(f"Dry-run complete. Wrote {len(unique_files)} paths to {out_file}")
         return 0
 
+    # Determine whether to generate embeddings
+    embed_vectors = bool(getattr(args, "embed_vectors", False) and not getattr(args, "no_embed_vectors", False))
+
     # Index the repository
     doc_count = await index_repository(
         repo_path=args.repo_path,
         repo_name=args.repo_name,
-        patterns=patterns
+        patterns=patterns,
+        embed_vectors=embed_vectors,
+        context_fields=["file_path", "repository"] if embed_vectors else None,
     )
 
     logger.info(f"Repository indexing completed: {doc_count} documents indexed")
@@ -223,12 +259,36 @@ async def cmd_changed_files(args):
     logger.info(f"Changed files indexing completed: {doc_count} documents indexed")
 
 
+def _adapt_index_schema_for_api(index_def: Dict[str, Any], api_version: str) -> Dict[str, Any]:
+    """Adapt index schema JSON to match the target API version.
+
+    - For stable API versions (e.g. 2023-11-01), map 'semanticSearch' -> 'semantic'.
+    - Preserve vectorSearch as-is.
+    """
+    adapted = dict(index_def)
+    api_ver = (api_version or "").lower()
+
+    # Map semanticSearch to semantic for stable API surfaces
+    if "semanticSearch" in adapted and ("2023-" in api_ver or "2024-" in api_ver or "2022-" in api_ver):
+        sem = adapted.pop("semanticSearch", None)
+        if sem is not None:
+            adapted["semantic"] = sem
+    return adapted
+
+
 async def cmd_create_enhanced_index(args):
     """Create enhanced RAG index using IndexAutomation (REST)."""
     logger.info(f"Creating enhanced index: {args.name}")
 
-    # Initialize automation with server config
-    automation = IndexAutomation(endpoint=get_config().acs_endpoint, api_key=get_config().acs_admin_key.get_secret_value())
+    cfg = get_config()
+    api_version = args.api_version or cfg.acs_api_version
+
+    # Initialize automation with explicit API version (if provided)
+    automation = IndexAutomation(
+        endpoint=cfg.acs_endpoint,
+        api_key=cfg.acs_admin_key.get_secret_value(),
+        api_version=api_version,
+    )
 
     # Handle --recreate flag: delete existing index if it exists
     if args.recreate:
@@ -236,6 +296,7 @@ async def cmd_create_enhanced_index(args):
             await automation.ops.delete_index(args.name)
             logger.info(f"Deleted existing index '{args.name}'")
         except Exception as e:
+            # Treat 404 (not found) as a no-op; avoid failing the flow
             logger.info(f"Index '{args.name}' may not exist or deletion skipped: {e}")
 
     # Determine feature flags (currently the canonical schema encodes these)
@@ -255,11 +316,12 @@ async def cmd_create_enhanced_index(args):
         index_def = json.loads(schema_path.read_text())
         index_def["name"] = args.name
 
-        op = await automation.ensure_index_exists(index_def)
-        logger.info(
-            f"Successfully ensured index exists: {args.name} "
-            f"(created={op.get('created')}, updated={op.get('updated')})"
-        )
+        # Adapt schema to match the configured API version
+        index_def = _adapt_index_schema_for_api(index_def, api_version)
+
+        # Avoid GET before PUT to prevent circuit-breaker trips on expected 404s.
+        created = await automation.ops.create_index(index_def)
+        logger.info(f"Created/updated index: {created.get('name', args.name)}")
 
         # Fetch and log summary
         current = await automation.ops.get_index(args.name)
@@ -270,9 +332,29 @@ async def cmd_create_enhanced_index(args):
             logger.info(f"Vector profiles: {len(profiles)}")
         if current.get("semantic"):
             logger.info("Semantic search: Enabled")
+        if current.get("semanticSearch"):
+            logger.info("Semantic search (preview shape): Enabled")
     except Exception as e:
-        logger.error(f"Failed to create index: {e}")
-        return 1
+        # Fallback: if we targeted a preview API and failed, retry with stable mapping
+        logger.error(f"Failed to create index (api={api_version}): {e}")
+        try:
+            if not ("2023-" in api_version):
+                stable_ver = "2023-11-01"
+                logger.info(f"Retrying creation with stable API {stable_ver} and schema adaptation…")
+                automation_stable = IndexAutomation(
+                    endpoint=cfg.acs_endpoint,
+                    api_key=cfg.acs_admin_key.get_secret_value(),
+                    api_version=stable_ver,
+                )
+                # Re-adapt schema for stable API
+                index_def_stable = _adapt_index_schema_for_api(index_def, stable_ver)
+                created = await automation_stable.ops.create_index(index_def_stable)
+                logger.info(f"Created/updated index (stable): {created.get('name', args.name)}")
+            else:
+                raise
+        except Exception as e2:
+            logger.error(f"Failed to create index after fallback: {e2}")
+            return 1
 
     return 0
 
@@ -475,6 +557,108 @@ async def cmd_indexer_status(args):
     return 0
 
 
+async def cmd_backfill_embeddings(args):
+    """Backfill content_vector for existing documents in an index.
+
+    Streams documents in pages, generates embeddings, and merges updates.
+    """
+    cfg = get_config()
+    index_name = args.index or cfg.acs_index_name
+    page_size = max(1, int(args.batch_size))
+    max_docs = args.max_docs if getattr(args, 'max_docs', None) and args.max_docs > 0 else None
+    dry_run = bool(getattr(args, 'dry_run', False))
+
+    # Initialize REST client and helpers
+    rest_client = AzureSearchClient(
+        endpoint=cfg.acs_endpoint,
+        api_key=cfg.acs_admin_key.get_secret_value()
+    )
+    rest_ops = SearchOperations(rest_client)
+    data_automation = DataAutomation(rest_ops)
+    emb_automation = EmbeddingAutomation(rest_ops)
+
+    # Determine expected embedding dimensions
+    try:
+        expected_dims = int(cfg.embedding_dimensions)
+    except Exception:
+        expected_dims = 1536
+
+    processed = 0
+    enriched_total = 0
+    failed_total = 0
+    skip = 0
+
+    try:
+        while True:
+            if max_docs is not None and processed >= max_docs:
+                break
+
+            top = min(page_size, (max_docs - processed)) if max_docs else page_size
+
+            # Select minimal fields; include content for embedding
+            results = await rest_ops.search(
+                index_name,
+                query='*',
+                top=top,
+                skip=skip,
+                select=['id', 'content', 'content_vector', 'file_path', 'repository']
+            )
+            docs = results.get('value', [])
+            if not docs:
+                break
+
+            # Filter documents missing vectors or with mismatched dimensions
+            candidates = []
+            for d in docs:
+                vec = d.get('content_vector')
+                if not isinstance(vec, list) or len(vec) != expected_dims:
+                    candidates.append(d)
+
+            if candidates and not dry_run:
+                ctx_fields = ["file_path", "repository"] if getattr(args, 'include_context', False) else None
+                enriched_docs, stats = await emb_automation.enrich_documents_with_embeddings(
+                    candidates,
+                    text_field='content',
+                    embedding_field='content_vector',
+                    context_fields=ctx_fields,
+                    batch_size=min(128, page_size)
+                )
+
+                # Prepare merge docs (id + content_vector only)
+                merge_docs = [
+                    {"id": t["id"], "content_vector": t.get("content_vector")}
+                    for t in enriched_docs if t.get("content_vector")
+                ]
+
+                if merge_docs:
+                    async def _gen():
+                        for d in merge_docs:
+                            yield d
+                    await data_automation.bulk_upload(
+                        index_name=index_name,
+                        documents=_gen(),
+                        batch_size=1000,
+                        merge=True
+                    )
+
+                enriched_total += stats.get('enriched', 0)
+                failed_total += stats.get('failed', 0)
+
+            processed += len(docs)
+            skip += len(docs)
+
+            if len(docs) < top:
+                break
+    finally:
+        await rest_client.close()
+
+    logger.info(
+        "Backfill complete: processed=%s enriched=%s failed=%s dry_run=%s",
+        processed, enriched_total, failed_total, dry_run
+    )
+    return 0
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -574,6 +758,11 @@ def main():
         action='store_true',
         help='Drop index if it already exists before creating'
     )
+    index_parser.add_argument(
+        '--api-version',
+        type=str,
+        help='Override Azure Search API version for this command'
+    )
 
     # validate-index command
     validate_parser = subparsers.add_parser(
@@ -596,6 +785,38 @@ def main():
         '--json',
         action='store_true',
         help='Output results as JSON'
+    )
+
+    # backfill-embeddings command
+    backfill_parser = subparsers.add_parser(
+        'backfill-embeddings',
+        help='Generate and backfill content_vector for existing documents'
+    )
+    backfill_parser.add_argument(
+        '--index',
+        type=str,
+        help='Target index name (default: from config)'
+    )
+    backfill_parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=200,
+        help='Batch size per page for fetching and embedding (default: 200)'
+    )
+    backfill_parser.add_argument(
+        '--max-docs',
+        type=int,
+        help='Maximum documents to process (default: all)'
+    )
+    backfill_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Do not write updates; only report counts'
+    )
+    backfill_parser.add_argument(
+        '--include-context',
+        action='store_true',
+        help='Include file_path and repository as embedding context'
     )
 
     # create-indexer command
@@ -716,6 +937,7 @@ def main():
         'changed-files': cmd_changed_files,
         'create-enhanced-index': cmd_create_enhanced_index,
         'validate-index': cmd_validate_index,
+        'backfill-embeddings': cmd_backfill_embeddings,
         'create-indexer': cmd_create_indexer,
         'reindex': cmd_reindex,
         'indexer-status': cmd_indexer_status,

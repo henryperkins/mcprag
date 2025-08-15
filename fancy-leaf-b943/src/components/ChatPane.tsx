@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { useSessionStore } from '../store/session';
 import { useAutoScrollNearBottom } from '../hooks/useAutoScrollNearBottom';
-import { renderAnsiToSpans } from '../utils/ansi';
+import AnsiText from './AnsiText';
 
 export const ChatPane: React.FC = () => {
   const { transcript } = useSessionStore(state => state.terminal);
@@ -47,7 +47,7 @@ export const ChatPane: React.FC = () => {
                 {msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Claude' : 'Tool'}
               </div>
               <div className="chat-message-text">
-                {renderAnsiToSpans(msg.text)}
+                <AnsiText text={msg.text} useWorker workerThreshold={1500} />
               </div>
               <div className="chat-message-footer">
                 {msg.timestamp && (

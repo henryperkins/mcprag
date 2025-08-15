@@ -17,7 +17,7 @@ from functools import wraps
 from datetime import datetime
 from fastapi import HTTPException, Header, Request
 
-from ..config import Config
+from enhanced_rag.core.unified_config import UnifiedConfig as Config
 from .stytch_auth import StytchAuthenticator, M2MAuthenticator
 from .tool_security import SecurityTier, get_tool_tier, user_meets_tier_requirement
 from .thread_safe_config import ThreadSafeConfig
@@ -48,7 +48,7 @@ class UnifiedAuthHandler:
         self.m2m = M2MAuthenticator()
         
         # JWT configuration for service tokens
-        self.jwt_secret = Config.STYTCH_SECRET or getattr(Config, 'JWT_SECRET', 'dev-secret')
+        self.jwt_secret = getattr(Config, 'stytch_secret', None) or getattr(Config, 'JWT_SECRET', 'dev-secret')
         self.jwt_algorithms = ["HS256"]
         
         # API key configuration
