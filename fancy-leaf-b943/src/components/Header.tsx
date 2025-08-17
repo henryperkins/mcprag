@@ -222,9 +222,9 @@ export function Header() {
               <select
                 id="permission-mode"
                 value={controls.permissionMode}
-                onChange={(e) => 
-                  setControls({ 
-                    permissionMode: e.target.value as typeof controls.permissionMode 
+                onChange={(e) =>
+                  setControls({
+                    permissionMode: e.target.value as typeof controls.permissionMode
                   })
                 }
                 className="bg-[#0f1520] border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
@@ -249,6 +249,26 @@ export function Header() {
               <span className="text-sm text-white/80">Verbose</span>
               <span id="verbose-description" className="sr-only">Enable verbose output logging</span>
             </label>
+
+            {/* Output Format */}
+            <div className="flex items-center gap-2">
+              <label htmlFor="output-format" className="text-xs text-white/60">Format:</label>
+              <select
+                id="output-format"
+                value={controls.outputFormat}
+                onChange={(e) =>
+                  setControls({
+                    outputFormat: e.target.value as typeof controls.outputFormat,
+                  })
+                }
+                className="bg-[#0f1520] border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                aria-label="Output format"
+              >
+                <option value="text">Text</option>
+                <option value="json">JSON</option>
+                <option value="stream-json">Stream JSON</option>
+              </select>
+            </div>
           </div>
 
           {/* Telemetry */}

@@ -21,7 +21,7 @@ export type ClaudeMessage = SDKMessage;
 export interface ClaudeOptions {
   sessionId?: string;
   maxTurns?: number;
-  permissionMode?: 'auto' | 'acceptAll' | 'acceptEdits' | 'confirmAll';
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
   verbose?: boolean;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -29,6 +29,10 @@ export interface ClaudeOptions {
   disallowedTools?: string[];
   cwd?: string;
   continueSession?: boolean;
+  mcpConfig?: string;
+  permissionPromptTool?: string;
+  model?: string;
+  outputFormat?: 'text' | 'json' | 'stream-json';
   onMessage?: (message: ClaudeMessage) => void;
   onError?: (error: Error) => void;
   onComplete?: () => void;
@@ -168,9 +172,15 @@ class ClaudeService {
             maxTurns: options.maxTurns ?? 3,
             permissionMode: options.permissionMode ?? 'acceptEdits',
             systemPrompt: options.systemPrompt,
+            appendSystemPrompt: options.appendSystemPrompt,
             allowedTools: options.allowedTools ?? ['Read', 'Write', 'Edit', 'WebSearch'],
+            disallowedTools: options.disallowedTools,
             cwd: options.cwd || '/home/azureuser/mcprag',
             continueSession: options.continueSession ?? true,
+            mcpConfig: options.mcpConfig,
+            permissionPromptTool: options.permissionPromptTool,
+            outputFormat: options.outputFormat,
+            verbose: options.verbose,
             forceCLI: isSlashCommand,
           },
         }),

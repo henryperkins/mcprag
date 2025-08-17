@@ -475,24 +475,34 @@ async function enforcePermissions(
   env: Env
 ): Promise<any> {
   const body = await request.json() as any;
-  
+
+  // Normalize request shape: accept both {prompt, options} and {text, opts}
+  if (typeof body.prompt === 'string' && !body.text) {
+    body.text = body.prompt;
+  }
+  if (body.options && !body.opts) {
+    body.opts = body.options;
+  }
+  // Ensure opts object exists for downstream code
+  if (!body.opts) {
+    body.opts = {};
+  }
+
   // Get user context
   const context = await getUserContext(request, env);
-  
+
   // Get allowed tools for this user
   const allowedTools = getToolPermissions(context);
-  
+
   // Filter tools based on permissions
-  if (body.opts?.allowedTools) {
+  if (Array.isArray(body.opts.allowedTools)) {
     body.opts.allowedTools = body.opts.allowedTools.filter(
       (tool: string) => allowedTools.includes(tool)
     );
-  } else if (body.opts) {
-    body.opts.allowedTools = allowedTools;
   } else {
-    body.opts = { allowedTools };
+    body.opts.allowedTools = allowedTools;
   }
-  
+
   // Add disallowed patterns for safety
   const disallowedPatterns = [
     'Bash(rm -rf *)',
@@ -505,8 +515,8 @@ async function enforcePermissions(
     'Edit(**/secrets/*)',
     'Write(**/secrets/*)'
   ];
-  
-  if (!body.opts.disallowedTools) {
+
+  if (!Array.isArray(body.opts.disallowedTools) || body.opts.disallowedTools.length === 0) {
     body.opts.disallowedTools = disallowedPatterns;
   } else {
     body.opts.disallowedTools = [
@@ -514,12 +524,14 @@ async function enforcePermissions(
       ...disallowedPatterns
     ];
   }
-  
-  // Sanitize input text
-  if (body.text && typeof body.text === 'string') {
+
+  // Sanitize input text or prompt
+  if (typeof body.text === 'string') {
     body.text = sanitizeInput(body.text);
+  } else if (typeof body.prompt === 'string') {
+    body.text = sanitizeInput(body.prompt);
   }
-  
+
   return body;
 }
 
@@ -641,9 +653,16 @@ export default {
     ctx: ExecutionContext,
     corsHeaders: Record<string, string>
   ): Promise<Response> {
-    // Enforce permissions and sanitize input
+    // Enforce permissions and sanitize input (also normalizes to { text, opts })
     const body = await enforcePermissions(request.clone(), env);
-    const sessionId = body.sessionId || crypto.randomUUID();
+    // Final guard: ensure text/opts are present even if upstream sent {prompt, options}
+    if (!body.text && typeof body.prompt === 'string') {
+      body.text = body.prompt;
+    }
+    if (!body.opts && body.options) {
+      body.opts = body.options;
+    }
+    const sessionId = body.sessionId || body?.opts?.sessionId || crypto.randomUUID();
     
     // Get or create session DO
     const sessionDO = env.SESSION.get(env.SESSION.idFromName(sessionId));

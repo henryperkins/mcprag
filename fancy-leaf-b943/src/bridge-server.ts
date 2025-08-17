@@ -19,12 +19,19 @@ interface ExecRequest {
   opts?: {
     cwd?: string;
     allowedTools?: string[];
+    disallowedTools?: string[];
     maxTurns?: number;
     sessionId?: string;
     continueSession?: boolean;
     forceCLI?: boolean;
     permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
     systemPrompt?: string;
+    appendSystemPrompt?: string;
+    mcpConfig?: string;
+    permissionPromptTool?: string;
+    model?: string;
+    outputFormat?: 'text' | 'json' | 'stream-json';
+    verbose?: boolean;
   };
 }
 
@@ -89,15 +96,23 @@ function shouldUseCLI(text: string, forceCLI?: boolean): boolean {
   
   // Force CLI if requested
   if (forceCLI) return true;
-  
-  // Slash commands that need CLI
-  const cliCommands = [
-    '/help', '/status', '/compact', '/clear', 
+
+  // Always route slash commands we explicitly support to the CLI.
+  // Include wildcard-capable prefixes by checking startsWith().
+  const cliPrefixes = [
+    '/help', '/status', '/compact', '/clear',
     '/agents', '/model', '/continue', '/resume',
-    '/settings', '/history', '/export'
+    '/settings', '/history', '/export',
+    '/init', '/permissions', '/ultra-think',
+    '/project', '/mcp', '/hooks'
   ];
-  
-  return cliCommands.some(cmd => trimmed.startsWith(cmd));
+
+  // Any supported slash command or prefixed variant
+  if (cliPrefixes.some(prefix => trimmed.startsWith(prefix))) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -129,8 +144,41 @@ app.post('/exec', async (req, res) => {
   } catch (error) {
     console.error('Execution error:', error);
     res.write(`event: error\n`);
-    res.write(`data: ${JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    res.write(`data: ${JSON.stringify({
+      error: error instanceof Error ? error.message : 'Unknown error'
+    })}\n\n`);
+    res.end();
+  }
+});
+
+// Alias to match Worker gateway expectations
+app.post('/api/claude/stream', async (req, res) => {
+  const { text, opts } = req.body as ExecRequest;
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+  res.flushHeaders?.();
+  
+  // Default safe tools (no Bash for untrusted input)
+  const allowedTools = opts?.allowedTools ?? ['Read', 'WebSearch', 'Edit', 'Write'];
+  const cwd = opts?.cwd ?? process.cwd();
+  
+  try {
+    if (shouldUseCLI(text, opts?.forceCLI)) {
+      // Use CLI in print mode with structured output
+      await handleCLI(text, { ...opts, allowedTools, cwd }, res);
+    } else {
+      // Use SDK for normal prompts
+      await handleSDK(text, { ...opts, allowedTools, cwd }, res);
+    }
+  } catch (error) {
+    console.error('Execution error:', error);
+    res.write(`event: error\n`);
+    res.write(`data: ${JSON.stringify({
+      error: error instanceof Error ? error.message : 'Unknown error'
     })}\n\n`);
     res.end();
   }
@@ -183,18 +231,20 @@ async function handleStreamingCLI(
     console.log(`Creating new streaming session: ${sessionId}`);
     
     const proc = spawn('claude', [
-      '--output-format', 'stream-json',
+      '--output-format', opts.outputFormat ?? 'stream-json',
       '--input-format', 'stream-json',
       '--allowedTools', opts.allowedTools.join(','),
+      ...(opts.disallowedTools && opts.disallowedTools.length ? ['--disallowedTools', opts.disallowedTools.join(',')] : []),
+      ...(opts.mcpConfig ? ['--mcp-config', opts.mcpConfig] : []),
       '--cwd', opts.cwd,
-      '--verbose',
+      ...(opts.verbose ? ['--verbose'] : []),
       ...(opts.permissionMode ? ['--permission-mode', opts.permissionMode] : [])
     ], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: opts.cwd,
       env: {
         ...process.env,
-        CLAUDE_OUTPUT_FORMAT: 'stream-json',
+        CLAUDE_OUTPUT_FORMAT: opts.outputFormat ?? 'stream-json',
         CLAUDE_INPUT_FORMAT: 'stream-json',
       }
     });
@@ -314,11 +364,31 @@ async function handleOneshotCLI(
 ) {
   const args: string[] = [
     '-p', text, // Print mode
-    '--output-format', 'stream-json', // Structured output
+    '--output-format', opts.outputFormat ?? 'stream-json', // Structured output
     '--allowedTools', opts.allowedTools.join(','),
     '--cwd', opts.cwd,
     '--no-interactive' // Disable interactive prompts
   ];
+
+  // Add disallowed tools
+  if (opts?.disallowedTools && opts.disallowedTools.length) {
+    args.push('--disallowedTools', opts.disallowedTools.join(','));
+  }
+
+  // Add MCP config
+  if (opts?.mcpConfig) {
+    args.push('--mcp-config', opts.mcpConfig);
+  }
+
+  // Append system prompt (CLI supports with --print)
+  if (opts?.appendSystemPrompt) {
+    args.push('--append-system-prompt', opts.appendSystemPrompt);
+  }
+
+  // Permission prompt tool (MCP)
+  if (opts?.permissionPromptTool) {
+    args.push('--permission-prompt-tool', opts.permissionPromptTool);
+  }
   
   // Add session management
   if (opts?.sessionId && !opts?.continueSession) {
@@ -328,6 +398,11 @@ async function handleOneshotCLI(
   // Add permission mode
   if (opts?.permissionMode) {
     args.push('--permission-mode', opts.permissionMode);
+  }
+
+  // Add verbose
+  if (opts?.verbose) {
+    args.push('--verbose');
   }
   
   // Add max turns
@@ -424,17 +499,24 @@ async function handleSDK(
         cwd: opts.cwd,
         maxTurns: opts.maxTurns ?? 3,
         allowedTools: opts.allowedTools,
+        disallowedTools: opts.disallowedTools,
         permissionMode: opts.permissionMode ?? 'acceptEdits',
-        verbose: process.env.NODE_ENV === 'development',
+        verbose: (typeof opts?.verbose === 'boolean') ? opts.verbose : process.env.NODE_ENV === 'development',
         systemPrompt: undefined as string | undefined,
+        appendSystemPrompt: undefined as string | undefined,
+        mcpConfig: opts.mcpConfig,
+        permissionPromptTool: opts.permissionPromptTool,
         continueSession: undefined as boolean | undefined,
         sessionId: undefined as string | undefined,
       }
     };
     
-    // Add system prompt if provided
+    // Add system/append prompts if provided
     if (opts.systemPrompt) {
       queryOptions.options.systemPrompt = opts.systemPrompt;
+    }
+    if (opts.appendSystemPrompt) {
+      queryOptions.options.appendSystemPrompt = opts.appendSystemPrompt;
     }
     
     // Session management
